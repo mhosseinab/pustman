@@ -13,7 +13,7 @@ done it on the build host.
 
 | Step | Type | What | How to apply | Status |
 |---|---|---|---|---|
-| S0 | manual | install GPUI system packages on every dev/build host: libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libvulkan-dev (this is gate G-DEPS) | the host package manager (e.g. `apt install libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libvulkan-dev`); run by the human | pending |
+| S0 | manual | install GPUI system packages on every dev/build host: libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libvulkan-dev (this is gate G-DEPS) | the host package manager (e.g. `apt install libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libvulkan-dev`); run by the human | applied(evidence: `scripts/pustman-v1-init.sh --require-gpui` → `GPUI_DEPS=ok`, exit=0 on the build host after the human installed the packages) |
 | S0 | codified | `.claude/settings.json` hooks (PreToolUse protect-steps-and-tests, SessionStart progress reminder) | active in the checkout; exercised by `scripts/pustman-v1-verify.sh` and `scripts/promote-check.sh` | applied(auto: full verify `VERIFY OK (no workspace yet)` at S0 merge) |
 
 Status values: `pending` → `applied(<evidence>)` (codified: the full-verify run at merge) or
