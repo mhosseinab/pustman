@@ -1,0 +1,203 @@
+{
+  "team": "Orbit Labs",
+  "workspace": "Commerce API",
+  "workspaceVisibility": "Internal, selected fictional members",
+  "model": "Demo capability fixture. Reviewer is an assignment, not a role. No real invitations or enforcement.",
+  "members": [
+    {
+      "id": "alex",
+      "name": "Alex",
+      "email": "alex@example.org",
+      "workspaceRole": "Editor",
+      "collectionRole": "Editor",
+      "environmentRole": "Editor",
+      "reviewAssignment": null,
+      "effectiveCapabilities": {
+        "viewCollection": true,
+        "executeWithOwnCredential": true,
+        "editSharedCollection": true,
+        "editSharedEnvironment": true,
+        "editPersonalEnvironmentValue": true,
+        "commentInCloud": true,
+        "commentInLocalGitView": false,
+        "reviewCloudFork": true,
+        "mergeIntoParent": true,
+        "manageWorkspaceMembers": false,
+        "grantSharedVaultAccess": false,
+        "resolveOwnThreads": true,
+        "reopenOwnThreads": true,
+        "resolveOtherThreads": true,
+        "reopenOtherThreads": true
+      },
+      "capabilitySource": "Explicit synthetic demo fixture, not a universal role mapping; production must use actual effective authorization.",
+      "membershipState": "active"
+    },
+    {
+      "id": "mina",
+      "name": "Mina",
+      "email": "mina@example.org",
+      "workspaceRole": "Editor",
+      "collectionRole": "Editor",
+      "environmentRole": "Editor",
+      "reviewAssignment": "Assigned reviewer on proposal-42",
+      "effectiveCapabilities": {
+        "viewCollection": true,
+        "executeWithOwnCredential": true,
+        "editSharedCollection": true,
+        "editSharedEnvironment": true,
+        "editPersonalEnvironmentValue": true,
+        "commentInCloud": true,
+        "commentInLocalGitView": false,
+        "reviewCloudFork": true,
+        "mergeIntoParent": true,
+        "manageWorkspaceMembers": false,
+        "grantSharedVaultAccess": false,
+        "resolveOwnThreads": true,
+        "reopenOwnThreads": true,
+        "resolveOtherThreads": true,
+        "reopenOtherThreads": true
+      },
+      "capabilitySource": "Explicit synthetic demo fixture, not a universal role mapping; production must use actual effective authorization.",
+      "membershipState": "active"
+    },
+    {
+      "id": "sam",
+      "name": "Sam",
+      "email": "sam@example.org",
+      "workspaceRole": "Viewer",
+      "collectionRole": "Viewer",
+      "environmentRole": "Viewer",
+      "reviewAssignment": null,
+      "effectiveCapabilities": {
+        "viewCollection": true,
+        "executeWithOwnCredential": true,
+        "editSharedCollection": false,
+        "editSharedEnvironment": false,
+        "editPersonalEnvironmentValue": true,
+        "commentInCloud": true,
+        "commentInLocalGitView": false,
+        "reviewCloudFork": true,
+        "mergeIntoParent": false,
+        "manageWorkspaceMembers": false,
+        "grantSharedVaultAccess": false,
+        "resolveOwnThreads": true,
+        "reopenOwnThreads": true,
+        "resolveOtherThreads": false,
+        "reopenOtherThreads": false
+      },
+      "capabilitySource": "Explicit synthetic demo fixture, not a universal role mapping; production must use actual effective authorization.",
+      "membershipState": "active"
+    },
+    {
+      "id": "jo",
+      "name": "Jo",
+      "email": "jo@example.org",
+      "workspaceRole": "Admin",
+      "collectionRole": "Editor",
+      "environmentRole": "Editor",
+      "reviewAssignment": null,
+      "effectiveCapabilities": {
+        "viewCollection": true,
+        "executeWithOwnCredential": true,
+        "editSharedCollection": true,
+        "editSharedEnvironment": true,
+        "editPersonalEnvironmentValue": true,
+        "commentInCloud": true,
+        "commentInLocalGitView": false,
+        "reviewCloudFork": true,
+        "mergeIntoParent": true,
+        "manageWorkspaceMembers": true,
+        "grantSharedVaultAccess": false,
+        "resolveOwnThreads": true,
+        "reopenOwnThreads": true,
+        "resolveOtherThreads": true,
+        "reopenOtherThreads": true
+      },
+      "capabilitySource": "Explicit synthetic demo fixture, not a universal role mapping; production must use actual effective authorization.",
+      "membershipState": "active"
+    },
+    {
+      "id": "lee",
+      "name": "Lee",
+      "email": "lee@example.org",
+      "workspaceRole": null,
+      "collectionRole": null,
+      "environmentRole": null,
+      "reviewAssignment": null,
+      "effectiveCapabilities": {
+        "viewCollection": false,
+        "executeWithOwnCredential": false,
+        "editSharedCollection": false,
+        "editSharedEnvironment": false,
+        "editPersonalEnvironmentValue": false,
+        "commentInCloud": false,
+        "commentInLocalGitView": false,
+        "reviewCloudFork": false,
+        "mergeIntoParent": false,
+        "manageWorkspaceMembers": false,
+        "grantSharedVaultAccess": false,
+        "resolveOwnThreads": false,
+        "reopenOwnThreads": false,
+        "resolveOtherThreads": false,
+        "reopenOtherThreads": false
+      },
+      "capabilitySource": "Explicit synthetic demo fixture, not a universal role mapping; production must use actual effective authorization.",
+      "membershipState": "not-a-member"
+    }
+  ],
+  "invitation": {
+    "id": "invite-sam",
+    "recipient": "sam@example.org",
+    "role": "Viewer",
+    "state": "accepted",
+    "allowedDemoStates": [
+      "pending",
+      "accepted",
+      "expired",
+      "revoked",
+      "failed"
+    ]
+  },
+  "revocationScenario": {
+    "actor": "alex",
+    "dirtyDraft": true,
+    "newCapability": {
+      "editSharedCollection": false
+    },
+    "expected": "Preserve local draft; block shared write; show current reason."
+  },
+  "baselineMembership": "Accepted-member snapshot. Use invitationVariants.pending for onboarding before acceptance.",
+  "invitationVariants": {
+    "pending": {
+      "invitationState": "pending",
+      "actor": "sam",
+      "membershipState": "not-joined",
+      "workspaceRole": null,
+      "collectionRole": null,
+      "environmentRole": null,
+      "effectiveCapabilitiesOverride": {
+        "viewCollection": false,
+        "executeWithOwnCredential": false,
+        "editSharedCollection": false,
+        "editSharedEnvironment": false,
+        "editPersonalEnvironmentValue": false,
+        "commentInCloud": false,
+        "commentInLocalGitView": false,
+        "reviewCloudFork": false,
+        "mergeIntoParent": false,
+        "manageWorkspaceMembers": false,
+        "grantSharedVaultAccess": false,
+        "resolveOwnThreads": false,
+        "reopenOwnThreads": false,
+        "resolveOtherThreads": false,
+        "reopenOtherThreads": false
+      }
+    },
+    "accepted": {
+      "invitationState": "accepted",
+      "actor": "sam",
+      "membershipState": "active",
+      "useBaselineMemberCapabilities": true
+    }
+  }
+}

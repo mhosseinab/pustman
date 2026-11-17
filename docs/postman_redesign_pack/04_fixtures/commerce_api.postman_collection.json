@@ -1,0 +1,513 @@
+{
+  "info": {
+    "name": "Commerce API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Synthetic UI design fixture. No live credentials or working API. Import to inspect request structures and saved response examples. This is an HTTP-only collection for the initial cloud-review design."
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://api.orbit.example/v1",
+      "type": "string"
+    },
+    {
+      "key": "order_id",
+      "value": "ord_1042",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Orders",
+      "item": [
+        {
+          "name": "List orders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders?status=processing&limit=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "processing"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Fictional design fixture. This .example endpoint is deliberately non-live. Inspect saved examples or drive the prototype from scenarios.json."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+                  "const payload = pm.response.json();",
+                  "pm.test(\"data is an array\", () => pm.expect(payload.data).to.be.an(\"array\"));",
+                  "pm.test(\"page limit matches request\", () => pm.expect(payload.page.limit).to.eql(Number(pm.request.url.query.get(\"limit\"))));",
+                  "pm.test(\"Every order has an id\", () => {",
+                  "  pm.expect(payload.data).to.be.an(\"array\");",
+                  "  payload.data.forEach(order => pm.expect(order.id).to.be.a(\"string\"));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 with four passing checks",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/orders?status=processing&limit=20",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "orders"
+                  ],
+                  "query": [
+                    {
+                      "key": "status",
+                      "value": "processing"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    }
+                  ]
+                },
+                "description": "Fictional design fixture. This .example endpoint is deliberately non-live. Inspect saved examples or drive the prototype from scenarios.json."
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Request-Id",
+                  "value": "req_demo_77"
+                }
+              ],
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"ord_1042\",\n      \"status\": \"processing\",\n      \"amount_minor\": 12400,\n      \"currency\": \"EUR\",\n      \"customer\": {\n        \"id\": \"cus_081\",\n        \"name\": \"Demo customer A\"\n      }\n    },\n    {\n      \"id\": \"ord_1043\",\n      \"status\": \"processing\",\n      \"amount_minor\": 8900,\n      \"currency\": \"EUR\",\n      \"customer\": {\n        \"id\": \"cus_082\",\n        \"name\": \"Demo customer B\"\n      }\n    }\n  ],\n  \"page\": {\n    \"limit\": 20,\n    \"next_cursor\": \"cursor_demo_02\"\n  },\n  \"request_id\": \"req_demo_77\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "200 with a failed schema check",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/orders?status=processing&limit=20",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "orders"
+                  ],
+                  "query": [
+                    {
+                      "key": "status",
+                      "value": "processing"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    }
+                  ]
+                },
+                "description": "Fictional design fixture. This .example endpoint is deliberately non-live. Inspect saved examples or drive the prototype from scenarios.json."
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Request-Id",
+                  "value": "req_demo_77"
+                }
+              ],
+              "body": "{\n  \"data\": {},\n  \"page\": {\n    \"limit\": 20,\n    \"next_cursor\": null\n  }\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "Expired credential",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/orders?status=processing&limit=20",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "orders"
+                  ],
+                  "query": [
+                    {
+                      "key": "status",
+                      "value": "processing"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    }
+                  ]
+                },
+                "description": "Fictional design fixture. This .example endpoint is deliberately non-live. Inspect saved examples or drive the prototype from scenarios.json."
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Request-Id",
+                  "value": "req_demo_77"
+                }
+              ],
+              "body": "{\n  \"error\": {\n    \"code\": \"TOKEN_EXPIRED\",\n    \"message\": \"The demo access token has expired.\"\n  }\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "Expected 401 in a negative test",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/orders?status=processing&limit=20",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "orders"
+                  ],
+                  "query": [
+                    {
+                      "key": "status",
+                      "value": "processing"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    }
+                  ]
+                },
+                "description": "Fictional design fixture. This .example endpoint is deliberately non-live. Inspect saved examples or drive the prototype from scenarios.json."
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Request-Id",
+                  "value": "req_demo_77"
+                }
+              ],
+              "body": "{\n  \"error\": {\n    \"code\": \"TOKEN_EXPIRED\",\n    \"message\": \"The demo access token has expired.\"\n  }\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "Insufficient API permission",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/orders?status=processing&limit=20",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "orders"
+                  ],
+                  "query": [
+                    {
+                      "key": "status",
+                      "value": "processing"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    }
+                  ]
+                },
+                "description": "Fictional design fixture. This .example endpoint is deliberately non-live. Inspect saved examples or drive the prototype from scenarios.json."
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Request-Id",
+                  "value": "req_demo_77"
+                }
+              ],
+              "body": "{\n  \"error\": {\n    \"code\": \"FORBIDDEN\",\n    \"message\": \"This demo credential cannot access orders.\"\n  }\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "Rate limited; explicit retry advice",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/orders?status=processing&limit=20",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "orders"
+                  ],
+                  "query": [
+                    {
+                      "key": "status",
+                      "value": "processing"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    }
+                  ]
+                },
+                "description": "Fictional design fixture. This .example endpoint is deliberately non-live. Inspect saved examples or drive the prototype from scenarios.json."
+              },
+              "status": "Too Many Requests",
+              "code": 429,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "Retry-After",
+                  "value": "30"
+                }
+              ],
+              "body": "{\n  \"error\": {\n    \"code\": \"RATE_LIMITED\",\n    \"message\": \"Try again after 30 seconds.\"\n  }\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "Server error with preserved response body",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/orders?status=processing&limit=20",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "orders"
+                  ],
+                  "query": [
+                    {
+                      "key": "status",
+                      "value": "processing"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    }
+                  ]
+                },
+                "description": "Fictional design fixture. This .example endpoint is deliberately non-live. Inspect saved examples or drive the prototype from scenarios.json."
+              },
+              "status": "Internal Server Error",
+              "code": 500,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Request-Id",
+                  "value": "req_demo_77"
+                }
+              ],
+              "body": "{\n  \"error\": {\n    \"code\": \"INTERNAL_ERROR\",\n    \"message\": \"The demo server could not complete the request.\"\n  }\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "Get order",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/orders/{{order_id}}",
+            "description": "Fictional .example endpoint. Prototype only."
+          },
+          "response": []
+        },
+        {
+          "name": "Create order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/orders",
+            "description": "Fictional .example endpoint. Prototype only.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"sku\": \"demo_sku_1\",\n      \"quantity\": 1\n    }\n  ],\n  \"currency\": \"EUR\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update order",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/orders/{{order_id}}",
+            "description": "Fictional .example endpoint. Prototype only.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"shipped\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete order",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/orders/{{order_id}}",
+            "description": "Fictional .example endpoint. Prototype only."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/health"
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "id": "proposal-42",
+  "title": "Increase the order page size",
+  "model": "Postman fork of HTTP collection",
+  "team": "Orbit Labs",
+  "workspace": "Commerce API",
+  "parent": {
+    "name": "Commerce API",
+    "revision": "rev18"
+  },
+  "fork": {
+    "name": "Alex / order filters",
+    "revision": "rev19"
+  },
+  "author": "alex",
+  "assignedReviewer": "mina",
+  "reviewerRole": "Editor",
+  "status": "open",
+  "approvalRequiredByFixture": true,
+  "policyNote": "This gate is a proposed project policy, not an assertion that Postman requires approval for all merges.",
+  "changes": [
+    {
+      "path": "Orders/List orders/query/limit",
+      "before": "20",
+      "after": "50"
+    }
+  ],
+  "runEvidence": {
+    "runId": "run-demo-19",
+    "requestRevision": "rev19",
+    "environment": "Development",
+    "totalAssertions": 4,
+    "passed": 4,
+    "failed": 0,
+    "simulated": true
+  },
+  "comments": [
+    {
+      "id": "thread-01",
+      "author": "mina",
+      "anchor": "Orders/List orders/query/limit",
+      "revision": "rev19",
+      "body": "50 works for the list view. Please keep the pagination check in the test.",
+      "state": "open"
+    },
+    {
+      "id": "reply-01",
+      "threadId": "thread-01",
+      "author": "alex",
+      "anchor": "Orders/List orders/query/limit",
+      "revision": "rev19",
+      "body": "Confirmed: 50 applies to this saved request only.",
+      "state": "open"
+    }
+  ],
+  "conflictVariant": "team_review_conflict in scenarios.json",
+  "mergeRules": [
+    "User has effective edit/merge authority on parent",
+    "All conflicts resolved",
+    "Any configured policy satisfied",
+    "Compared target version remains current"
+  ],
+  "outcomeStates": [
+    "open",
+    "approved",
+    "conflict",
+    "merge-failed",
+    "merged",
+    "closed"
+  ]
+}

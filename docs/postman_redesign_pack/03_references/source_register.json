@@ -1,0 +1,362 @@
+[
+  {
+    "id": "P01",
+    "topic": "Version baseline",
+    "url": "https://learning.postman.com/latest-v-12",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P02",
+    "topic": "Request basics",
+    "url": "https://learning.postman.com/docs/use/send-requests/create-requests/request-basics",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P03",
+    "topic": "Collection configuration",
+    "url": "https://learning.postman.com/docs/use/use-collections/create-collections",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P04",
+    "topic": "Authorization",
+    "url": "https://learning.postman.com/docs/use/send-requests/authorization/specifying-authorization-details",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P05",
+    "topic": "Variables",
+    "url": "https://learning.postman.com/docs/use/send-requests/variables/variables/",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P06",
+    "topic": "Local and shared vaults",
+    "url": "https://learning.postman.com/docs/use/postman-vault/postman-vault-key",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P07",
+    "topic": "Response structure",
+    "url": "https://learning.postman.com/docs/use/send-requests/response-data/responses/",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P08",
+    "topic": "Scripts and order",
+    "url": "https://learning.postman.com/docs/tests-and-scripts/write-scripts/intro-to-scripts/",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P09",
+    "topic": "Collection Runner",
+    "url": "https://learning.postman.com/docs/tests-and-scripts/running-collections/intro-to-collection-runs/",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P10",
+    "topic": "Navigation, history and save state",
+    "url": "https://learning.postman.com/docs/getting-started/basics/navigating-postman/",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P11",
+    "topic": "Import",
+    "url": "https://learning.postman.com/docs/getting-started/importing-and-exporting/importing-data",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P12",
+    "topic": "Workspaces",
+    "url": "https://learning.postman.com/docs/collaborating-in-postman/using-workspaces/overview",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P13",
+    "topic": "Native Git",
+    "url": "https://learning.postman.com/docs/use/native-git/overview",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P14",
+    "topic": "Request agents",
+    "url": "https://learning.postman.com/docs/getting-started/basics/about-postman-agent/",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P15",
+    "topic": "Debugging and console",
+    "url": "https://learning.postman.com/docs/use/send-requests/response-data/troubleshooting-api-requests",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P16",
+    "topic": "Agent Mode",
+    "url": "https://learning.postman.com/docs/getting-started/basics/about-agent-mode",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P17",
+    "topic": "Roles and permissions",
+    "url": "https://learning.postman.com/docs/administration/roles-and-permissions",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P18",
+    "topic": "Team environments",
+    "url": "https://learning.postman.com/docs/use/send-requests/variables/team-environments",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P19",
+    "topic": "Share work and resource access",
+    "url": "https://learning.postman.com/docs/collaborating-in-postman/sharing",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P20",
+    "topic": "Comments, mentions and local/cloud availability",
+    "url": "https://learning.postman.com/docs/collaborating-in-postman/comments/",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P21",
+    "topic": "Pull-request review and merge permissions",
+    "url": "https://learning.postman.com/docs/collaborating-in-postman/using-version-control/reviewing-pull-requests",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P22",
+    "topic": "Request and approve access",
+    "url": "https://learning.postman.com/docs/collaborating-in-postman/requesting-access-to-elements/",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P23",
+    "topic": "Workspace invitations and management",
+    "url": "https://learning.postman.com/docs/collaborating-in-postman/using-workspaces/internal-workspaces/manage-workspaces/",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P24",
+    "topic": "Forks versus native Git",
+    "url": "https://learning.postman.com/docs/collaborating-in-postman/using-version-control/forking-elements/",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "P25",
+    "topic": "Shared secret and variable access",
+    "url": "https://learning.postman.com/docs/use/postman-vault/use-vault-secrets",
+    "publisher": "Postman",
+    "accessed": "2026-11-17",
+    "basis": "Latest (v12) documentation; see image-specific version labels"
+  },
+  {
+    "id": "F1",
+    "topic": "Design agent",
+    "url": "https://help.figma.com/hc/en-us/articles/37998629035799-Work-with-the-Figma-agent-in-design-files",
+    "publisher": "Figma",
+    "accessed": "2026-11-17",
+    "basis": "Current public documentation; actual account access not checked"
+  },
+  {
+    "id": "F2",
+    "topic": "Write to canvas",
+    "url": "https://developers.figma.com/docs/figma-mcp-server/write-to-canvas/",
+    "publisher": "Figma",
+    "accessed": "2026-11-17",
+    "basis": "Current public documentation; actual account access not checked"
+  },
+  {
+    "id": "F3",
+    "topic": "MCP introduction",
+    "url": "https://developers.figma.com/docs/figma-mcp-server/",
+    "publisher": "Figma",
+    "accessed": "2026-11-17",
+    "basis": "Current public documentation; actual account access not checked"
+  },
+  {
+    "id": "F4",
+    "topic": "Figma Make",
+    "url": "https://help.figma.com/hc/en-us/articles/31304412302231-Explore-Figma-Make",
+    "publisher": "Figma",
+    "accessed": "2026-11-17",
+    "basis": "Current public documentation; actual account access not checked"
+  },
+  {
+    "id": "F5",
+    "topic": "Figma Specs",
+    "url": "https://help.figma.com/hc/en-us/articles/44049066011671-Guide-to-Specs-in-Figma",
+    "publisher": "Figma",
+    "accessed": "2026-11-17",
+    "basis": "Current public documentation; actual account access not checked"
+  },
+  {
+    "id": "F6",
+    "topic": "Code Connect and MCP",
+    "url": "https://help.figma.com/hc/en-us/articles/42495296821911-Code-Connect-and-MCP",
+    "publisher": "Figma",
+    "accessed": "2026-11-17",
+    "basis": "Current public documentation; actual account access not checked"
+  },
+  {
+    "id": "F7",
+    "topic": "First Draft migration",
+    "url": "https://help.figma.com/hc/en-us/articles/23955143044247-Use-First-Draft-with-Figma-AI",
+    "publisher": "Figma",
+    "accessed": "2026-11-17",
+    "basis": "Current public documentation; actual account access not checked"
+  },
+  {
+    "id": "F8",
+    "topic": "Make FAQs and round-trip limits",
+    "url": "https://help.figma.com/hc/en-us/articles/31722591905559-Figma-Make-FAQs",
+    "publisher": "Figma",
+    "accessed": "2026-11-17",
+    "basis": "Current public documentation; actual account access not checked"
+  },
+  {
+    "id": "F9",
+    "topic": "Remote MCP setup",
+    "url": "https://developers.figma.com/docs/figma-mcp-server/remote-server-installation/",
+    "publisher": "Figma",
+    "accessed": "2026-11-17",
+    "basis": "Current public documentation; actual account access not checked"
+  },
+  {
+    "id": "F10",
+    "topic": "Figma MCP skills",
+    "url": "https://help.figma.com/hc/en-us/articles/39166810751895-Figma-skills-for-MCP",
+    "publisher": "Figma",
+    "accessed": "2026-11-17",
+    "basis": "Current public documentation; actual account access not checked"
+  },
+  {
+    "id": "F11",
+    "topic": "Attaching context",
+    "url": "https://help.figma.com/hc/en-us/articles/31304529835671-Attach-files-to-a-prompt-in-the-Figma-agent-and-Figma-Make",
+    "publisher": "Figma",
+    "accessed": "2026-11-17",
+    "basis": "Current public documentation; actual account access not checked"
+  },
+  {
+    "id": "F12",
+    "topic": "Make guidelines",
+    "url": "https://help.figma.com/hc/en-us/articles/33665861260823-Add-guidelines-to-Figma-Make",
+    "publisher": "Figma",
+    "accessed": "2026-11-17",
+    "basis": "Current public documentation; actual account access not checked"
+  },
+  {
+    "id": "F13",
+    "topic": "Design-library guidelines",
+    "url": "https://help.figma.com/hc/en-us/articles/43509372175511-Add-guidelines-files-to-a-design-library",
+    "publisher": "Figma",
+    "accessed": "2026-11-17",
+    "basis": "Current public documentation; actual account access not checked"
+  },
+  {
+    "id": "F14",
+    "topic": "File structure",
+    "url": "https://developers.figma.com/docs/figma-mcp-server/structure-figma-file/",
+    "publisher": "Figma",
+    "accessed": "2026-11-17",
+    "basis": "Current public documentation; actual account access not checked"
+  },
+  {
+    "id": "F15",
+    "topic": "Prompting",
+    "url": "https://developers.figma.com/docs/figma-mcp-server/write-effective-prompts/",
+    "publisher": "Figma",
+    "accessed": "2026-11-17",
+    "basis": "Current public documentation; actual account access not checked"
+  },
+  {
+    "id": "F16",
+    "topic": "Frame-size guidance",
+    "url": "https://developers.figma.com/docs/figma-mcp-server/avoid-large-frames/",
+    "publisher": "Figma",
+    "accessed": "2026-11-17",
+    "basis": "Current public documentation; actual account access not checked"
+  },
+  {
+    "id": "A01",
+    "topic": "WCAG 2.2",
+    "url": "https://www.w3.org/TR/WCAG22/",
+    "publisher": "W3C",
+    "accessed": "2026-11-17",
+    "basis": "Web accessibility criteria"
+  },
+  {
+    "id": "A02",
+    "topic": "WCAG for non-web software",
+    "url": "https://www.w3.org/TR/wcag2ict-22/",
+    "publisher": "W3C",
+    "accessed": "2026-11-17",
+    "basis": "Native-software accessibility guidance"
+  },
+  {
+    "id": "I01",
+    "topic": "Workbench and split-editor inspiration",
+    "url": "https://code.visualstudio.com/docs/editing/getting-started/userinterface",
+    "publisher": "Microsoft",
+    "accessed": "2026-11-17",
+    "basis": "Study workbench hierarchy; do not assume identical API workflows"
+  },
+  {
+    "id": "I02",
+    "topic": "Git collaboration inspiration",
+    "url": "https://www.usebruno.com/use-cases/team-collaboration",
+    "publisher": "Bruno",
+    "accessed": "2026-11-17",
+    "basis": "Study explicit Git workflow; vendor product source, not comparative evidence"
+  }
+]

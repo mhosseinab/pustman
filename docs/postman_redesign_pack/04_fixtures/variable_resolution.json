@@ -1,0 +1,46 @@
+{
+  "scopeOrderBroadToNarrow": [
+    "global",
+    "collection",
+    "environment",
+    "data",
+    "local"
+  ],
+  "note": "Local/shared value is a separate axis from variable scope; the narrowest defined scope wins. Fixtures must not treat local/shared values as extra scopes.",
+  "activeEnvironment": "Development",
+  "definitions": [
+    {
+      "name": "base_url",
+      "scope": "collection",
+      "sharedValue": "https://api.orbit.example/v1",
+      "localValue": null,
+      "selected": false,
+      "reason": "Shadowed by active environment"
+    },
+    {
+      "name": "base_url",
+      "scope": "environment",
+      "sharedValue": "https://api.dev.orbit.example/v1",
+      "localValue": null,
+      "selected": true
+    },
+    {
+      "name": "access_token",
+      "scope": "environment",
+      "sharedValue": "",
+      "localValue": "DEMO_ONLY_NOT_A_CREDENTIAL",
+      "selected": true,
+      "displayMask": true,
+      "excludedFromShare": true
+    }
+  ],
+  "vaultExamples": {
+    "localDirectReference": "{{vault:orbit-dev-token}}",
+    "sharedSecureVariableReference": "{{api-key}}",
+    "sharedRequirements": [
+      "Secure variable references a Shared Vault secret",
+      "Variable is shared separately",
+      "Recipient is within the secret access scope"
+    ]
+  }
+}

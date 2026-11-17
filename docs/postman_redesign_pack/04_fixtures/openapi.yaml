@@ -1,0 +1,119 @@
+openapi: 3.1.0
+info:
+  title: Orbit Commerce API - design fixture
+  version: 0.1.0
+  description: Synthetic, deliberately non-live contract for UI design and prototype
+    data. No API implementation is supplied.
+servers:
+- url: https://api.dev.orbit.example/v1
+  description: Development fixture (non-live)
+security:
+- BearerAuth: []
+paths:
+  /orders:
+    get:
+      operationId: listOrders
+      summary: List orders
+      parameters:
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - processing
+          - shipped
+          - cancelled
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      responses:
+        '200':
+          description: Order list
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - data
+                - page
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Order'
+                  page:
+                    type: object
+                    required:
+                    - limit
+                    properties:
+                      limit:
+                        type: integer
+                      next_cursor:
+                        type:
+                        - string
+                        - 'null'
+        '401':
+          description: Credential expired or missing
+        '429':
+          description: Rate limited
+  /orders/{order_id}:
+    get:
+      operationId: getOrder
+      summary: Get order
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          description: Order not found
+  /health:
+    get:
+      operationId: health
+      summary: Health check
+      security: []
+      responses:
+        '200':
+          description: Healthy
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    Order:
+      type: object
+      required:
+      - id
+      - status
+      - amount_minor
+      - currency
+      properties:
+        id:
+          type: string
+          example: ord_1042
+        status:
+          type: string
+          enum:
+          - processing
+          - shipped
+          - cancelled
+        amount_minor:
+          type: integer
+          description: Integer amount in minor currency units
+          example: 12400
+        currency:
+          type: string
+          example: EUR

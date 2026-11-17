@@ -1,0 +1,672 @@
+{
+  "schemaVersion": 1,
+  "mode": "Deterministic UI fixture; no network implementation",
+  "defaultScenarioId": "http_200",
+  "request": {
+    "id": "req-list-orders",
+    "name": "List orders",
+    "method": "GET",
+    "url": "{{base_url}}/orders?status=processing&limit=20",
+    "resolvedUrl": "https://api.dev.orbit.example/v1/orders?status=processing&limit=20",
+    "collection": "Commerce API",
+    "folder": "Orders",
+    "revision": "rev18",
+    "environment": "Development",
+    "auth": {
+      "type": "Bearer",
+      "source": "Collection",
+      "reference": "{{access_token}}",
+      "displayValue": "••••••••",
+      "realCredential": false
+    },
+    "headers": [
+      {
+        "key": "Accept",
+        "value": "application/json",
+        "enabled": true
+      }
+    ],
+    "params": [
+      {
+        "key": "status",
+        "value": "processing",
+        "enabled": true
+      },
+      {
+        "key": "limit",
+        "value": "20",
+        "enabled": true
+      }
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "http_200",
+      "label": "200 with four passing checks",
+      "transport": "completed",
+      "http": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Request-Id": "req_demo_77"
+        },
+        "body": {
+          "data": [
+            {
+              "id": "ord_1042",
+              "status": "processing",
+              "amount_minor": 12400,
+              "currency": "EUR",
+              "customer": {
+                "id": "cus_081",
+                "name": "Demo customer A"
+              }
+            },
+            {
+              "id": "ord_1043",
+              "status": "processing",
+              "amount_minor": 8900,
+              "currency": "EUR",
+              "customer": {
+                "id": "cus_082",
+                "name": "Demo customer B"
+              }
+            }
+          ],
+          "page": {
+            "limit": 20,
+            "next_cursor": "cursor_demo_02"
+          },
+          "request_id": "req_demo_77"
+        }
+      },
+      "elapsedMs": 184,
+      "testResults": [
+        {
+          "name": "Status is 200",
+          "result": "passed"
+        },
+        {
+          "name": "data is an array",
+          "result": "passed"
+        },
+        {
+          "name": "page limit matches request",
+          "result": "passed"
+        },
+        {
+          "name": "Every order has an id",
+          "result": "passed"
+        }
+      ],
+      "testExecution": "completed",
+      "snapshot": {
+        "requestRevision": "rev18",
+        "environment": "Development",
+        "requestId": "req-list-orders",
+        "scriptProfileId": "list_orders_four_checks"
+      },
+      "simulated": true,
+      "testProfileId": "list_orders_four_checks"
+    },
+    {
+      "id": "http_200_failed_assertion",
+      "label": "200 with a failed schema check",
+      "transport": "completed",
+      "http": {
+        "status": 200,
+        "reason": "OK",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Request-Id": "req_demo_77"
+        },
+        "body": {
+          "data": {},
+          "page": {
+            "limit": 20,
+            "next_cursor": null
+          }
+        }
+      },
+      "elapsedMs": 184,
+      "testResults": [
+        {
+          "name": "Status is 200",
+          "result": "passed"
+        },
+        {
+          "name": "data is an array",
+          "result": "failed",
+          "expected": "array",
+          "actual": "object"
+        },
+        {
+          "name": "page limit matches request",
+          "result": "passed"
+        },
+        {
+          "name": "Every order has an id",
+          "result": "failed",
+          "reason": "Expected data to be an array"
+        }
+      ],
+      "testExecution": "completed",
+      "snapshot": {
+        "requestRevision": "rev18",
+        "environment": "Development",
+        "requestId": "req-list-orders",
+        "scriptProfileId": "list_orders_four_checks"
+      },
+      "simulated": true,
+      "testProfileId": "list_orders_four_checks"
+    },
+    {
+      "id": "http_401",
+      "label": "Expired credential",
+      "transport": "completed",
+      "http": {
+        "status": 401,
+        "reason": "Unauthorized",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Request-Id": "req_demo_77"
+        },
+        "body": {
+          "error": {
+            "code": "TOKEN_EXPIRED",
+            "message": "The demo access token has expired."
+          }
+        }
+      },
+      "elapsedMs": 121,
+      "testResults": [
+        {
+          "name": "Status is 200",
+          "result": "failed",
+          "expected": 200,
+          "actual": 401
+        },
+        {
+          "name": "data is an array",
+          "result": "failed",
+          "actual": "undefined"
+        },
+        {
+          "name": "page limit matches request",
+          "result": "failed",
+          "reason": "page is absent in error payload"
+        },
+        {
+          "name": "Every order has an id",
+          "result": "failed",
+          "reason": "data is absent in error payload"
+        }
+      ],
+      "testExecution": "completed",
+      "snapshot": {
+        "requestRevision": "rev18",
+        "environment": "Development",
+        "requestId": "req-list-orders",
+        "scriptProfileId": "list_orders_four_checks"
+      },
+      "simulated": true,
+      "testProfileId": "list_orders_four_checks"
+    },
+    {
+      "id": "http_401_expected",
+      "label": "Expected 401 in a negative test",
+      "transport": "completed",
+      "http": {
+        "status": 401,
+        "reason": "Unauthorized",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Request-Id": "req_demo_77"
+        },
+        "body": {
+          "error": {
+            "code": "TOKEN_EXPIRED",
+            "message": "The demo access token has expired."
+          }
+        }
+      },
+      "elapsedMs": 121,
+      "testResults": [
+        {
+          "name": "Rejects expired credentials with 401",
+          "result": "passed"
+        }
+      ],
+      "testExecution": "completed",
+      "snapshot": {
+        "requestRevision": "demo-expect_401",
+        "environment": "Development",
+        "requestId": "req-list-orders-negative-auth",
+        "scriptProfileId": "expect_401"
+      },
+      "simulated": true,
+      "testProfileId": "expect_401"
+    },
+    {
+      "id": "http_403",
+      "label": "Insufficient API permission",
+      "transport": "completed",
+      "http": {
+        "status": 403,
+        "reason": "Forbidden",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Request-Id": "req_demo_77"
+        },
+        "body": {
+          "error": {
+            "code": "FORBIDDEN",
+            "message": "This demo credential cannot access orders."
+          }
+        }
+      },
+      "elapsedMs": 104,
+      "testResults": [
+        {
+          "name": "Status is 200",
+          "result": "failed",
+          "expected": 200,
+          "actual": 403
+        },
+        {
+          "name": "data is an array",
+          "result": "failed",
+          "actual": "undefined"
+        },
+        {
+          "name": "page limit matches request",
+          "result": "failed",
+          "reason": "page is absent in error payload"
+        },
+        {
+          "name": "Every order has an id",
+          "result": "failed",
+          "reason": "data is absent in error payload"
+        }
+      ],
+      "testExecution": "completed",
+      "snapshot": {
+        "requestRevision": "rev18",
+        "environment": "Development",
+        "requestId": "req-list-orders",
+        "scriptProfileId": "list_orders_four_checks"
+      },
+      "simulated": true,
+      "testProfileId": "list_orders_four_checks"
+    },
+    {
+      "id": "http_429",
+      "label": "Rate limited; explicit retry advice",
+      "transport": "completed",
+      "http": {
+        "status": 429,
+        "reason": "Too Many Requests",
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "30"
+        },
+        "body": {
+          "error": {
+            "code": "RATE_LIMITED",
+            "message": "Try again after 30 seconds."
+          }
+        }
+      },
+      "elapsedMs": 91,
+      "testResults": [
+        {
+          "name": "Status is 200",
+          "result": "failed",
+          "expected": 200,
+          "actual": 429
+        },
+        {
+          "name": "data is an array",
+          "result": "failed",
+          "actual": "undefined"
+        },
+        {
+          "name": "page limit matches request",
+          "result": "failed",
+          "reason": "page is absent in error payload"
+        },
+        {
+          "name": "Every order has an id",
+          "result": "failed",
+          "reason": "data is absent in error payload"
+        }
+      ],
+      "testExecution": "completed",
+      "snapshot": {
+        "requestRevision": "rev18",
+        "environment": "Development",
+        "requestId": "req-list-orders",
+        "scriptProfileId": "list_orders_four_checks"
+      },
+      "simulated": true,
+      "testProfileId": "list_orders_four_checks"
+    },
+    {
+      "id": "http_500",
+      "label": "Server error with preserved response body",
+      "transport": "completed",
+      "http": {
+        "status": 500,
+        "reason": "Internal Server Error",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Request-Id": "req_demo_77"
+        },
+        "body": {
+          "error": {
+            "code": "INTERNAL_ERROR",
+            "message": "The demo server could not complete the request."
+          }
+        }
+      },
+      "elapsedMs": 210,
+      "testResults": [
+        {
+          "name": "Status is 200",
+          "result": "failed",
+          "expected": 200,
+          "actual": 500
+        },
+        {
+          "name": "data is an array",
+          "result": "failed",
+          "actual": "undefined"
+        },
+        {
+          "name": "page limit matches request",
+          "result": "failed",
+          "reason": "page is absent in error payload"
+        },
+        {
+          "name": "Every order has an id",
+          "result": "failed",
+          "reason": "data is absent in error payload"
+        }
+      ],
+      "testExecution": "completed",
+      "snapshot": {
+        "requestRevision": "rev18",
+        "environment": "Development",
+        "requestId": "req-list-orders",
+        "scriptProfileId": "list_orders_four_checks"
+      },
+      "simulated": true,
+      "testProfileId": "list_orders_four_checks"
+    },
+    {
+      "id": "http_204",
+      "label": "Completed response with no body",
+      "transport": "completed",
+      "http": {
+        "status": 204,
+        "reason": "No Content",
+        "headers": {
+          "X-Request-Id": "req_demo_80"
+        },
+        "body": null
+      },
+      "elapsedMs": 85,
+      "testResults": [
+        {
+          "name": "Status is 204",
+          "result": "passed"
+        }
+      ],
+      "testExecution": "completed",
+      "snapshot": {
+        "requestRevision": "demo-expect_204",
+        "environment": "Development",
+        "requestId": "req-delete-order",
+        "scriptProfileId": "expect_204"
+      },
+      "simulated": true,
+      "testProfileId": "expect_204"
+    },
+    {
+      "id": "timeout",
+      "label": "Timed out before HTTP response",
+      "transport": "failed",
+      "http": null,
+      "elapsedMs": 10000,
+      "diagnostic": {
+        "type": "timeout",
+        "message": "No response received within 10 seconds."
+      },
+      "testResults": [],
+      "testExecution": "not-run",
+      "simulated": true
+    },
+    {
+      "id": "tls_failure",
+      "label": "TLS validation failed",
+      "transport": "failed",
+      "http": null,
+      "elapsedMs": 140,
+      "diagnostic": {
+        "type": "tls",
+        "message": "The certificate could not be verified."
+      },
+      "testResults": [],
+      "testExecution": "not-run",
+      "simulated": true
+    },
+    {
+      "id": "missing_variable",
+      "label": "Unresolved base_url",
+      "transport": "not-started",
+      "http": null,
+      "diagnostic": {
+        "type": "variable",
+        "name": "base_url",
+        "message": "Choose an environment or define base_url."
+      },
+      "testResults": [],
+      "testExecution": "not-run",
+      "simulated": true
+    },
+    {
+      "id": "cancelled",
+      "label": "User cancels Send",
+      "transport": "cancelled",
+      "http": null,
+      "elapsedMs": 250,
+      "testResults": [],
+      "testExecution": "not-run",
+      "simulated": true
+    },
+    {
+      "id": "sending",
+      "label": "Request is in progress",
+      "transport": "pending",
+      "http": null,
+      "elapsedMs": 0,
+      "allowedActions": [
+        "cancel"
+      ],
+      "testResults": [],
+      "testExecution": "pending",
+      "simulated": true
+    },
+    {
+      "id": "script_error",
+      "label": "Pre-request script stops execution",
+      "transport": "not-started",
+      "http": null,
+      "diagnostic": {
+        "type": "script",
+        "phase": "pre-request",
+        "scope": "request",
+        "line": 3,
+        "message": "Demo setup variable is missing."
+      },
+      "testResults": [],
+      "testExecution": "not-run",
+      "simulated": true
+    },
+    {
+      "id": "edited_after_send",
+      "label": "Editor changed after the displayed response",
+      "transport": "completed",
+      "http": {
+        "status": 200,
+        "reason": "OK",
+        "body": {
+          "data": [
+            {
+              "id": "ord_1042",
+              "status": "processing",
+              "amount_minor": 12400,
+              "currency": "EUR",
+              "customer": {
+                "id": "cus_081",
+                "name": "Demo customer A"
+              }
+            },
+            {
+              "id": "ord_1043",
+              "status": "processing",
+              "amount_minor": 8900,
+              "currency": "EUR",
+              "customer": {
+                "id": "cus_082",
+                "name": "Demo customer B"
+              }
+            }
+          ],
+          "page": {
+            "limit": 20,
+            "next_cursor": "cursor_demo_02"
+          },
+          "request_id": "req_demo_77"
+        }
+      },
+      "snapshot": {
+        "requestRevision": "rev18",
+        "params": {
+          "limit": "20"
+        },
+        "environment": "Development",
+        "scriptProfileId": "list_orders_four_checks",
+        "requestId": "req-list-orders"
+      },
+      "currentEditor": {
+        "dirty": true,
+        "params": {
+          "limit": "50"
+        },
+        "environment": "Development"
+      },
+      "visibleWarning": "Response belongs to the previous request snapshot. Send again to test current edits.",
+      "testResults": [
+        {
+          "name": "Status is 200",
+          "result": "passed"
+        },
+        {
+          "name": "data is an array",
+          "result": "passed"
+        },
+        {
+          "name": "page limit matches request",
+          "result": "passed"
+        },
+        {
+          "name": "Every order has an id",
+          "result": "passed"
+        }
+      ],
+      "simulated": true,
+      "testProfileId": "list_orders_four_checks"
+    },
+    {
+      "id": "team_review_conflict",
+      "label": "Cloud fork conflict",
+      "model": "Postman cloud fork; HTTP only",
+      "parentRevision": "rev18",
+      "proposalRevision": "rev19",
+      "targetAdvancedTo": "rev20",
+      "field": "Orders/List orders/query/limit",
+      "base": "20",
+      "source": "50",
+      "target": "100",
+      "chosenResolution": null,
+      "status": "conflict",
+      "allowedActions": [
+        "choose-source",
+        "choose-target",
+        "edit-result",
+        "cancel"
+      ],
+      "mergeEnabled": false,
+      "simulated": true
+    },
+    {
+      "id": "team_access_lost",
+      "label": "Permission changes while draft is dirty",
+      "actor": "alex",
+      "draftText": "limit=50",
+      "savedSharedRevision": "rev18",
+      "editSharedCollection": false,
+      "localDraftRetained": true,
+      "status": "read-only",
+      "simulated": true
+    },
+    {
+      "id": "mention_no_access",
+      "label": "Mention does not grant access",
+      "mentionedActor": "lee",
+      "canReadArtifact": false,
+      "message": "Lee needs access to read this comment.",
+      "simulated": true
+    },
+    {
+      "id": "environment_viewer",
+      "label": "Viewer edits a personal value",
+      "actor": "sam",
+      "environmentRole": "Viewer",
+      "canEditLocalValue": true,
+      "canEditSharedValue": false,
+      "sharedBaseUrl": "https://api.dev.orbit.example/v1",
+      "localAccessToken": "DEMO_ONLY_NOT_A_CREDENTIAL",
+      "simulated": true
+    },
+    {
+      "id": "offline_cloud",
+      "label": "Collaboration service unavailable; local work preserved",
+      "cloudStatus": "offline",
+      "targetApiAvailability": "unknown",
+      "pendingSharedWrite": true,
+      "localDraftRetained": true,
+      "simulated": true
+    }
+  ],
+  "testProfileContract": "Canned deterministic outcomes are bound to explicit script profiles. Only profile list_orders_four_checks corresponds to the imported List orders test script. Alternate profiles are separate demo script snapshots.",
+  "testProfiles": {
+    "list_orders_four_checks": {
+      "scriptFile": "post_response_tests.js",
+      "requestId": "req-list-orders",
+      "note": "Four checks run independently; malformed data can fail several checks."
+    },
+    "expect_401": {
+      "scriptFile": "negative_auth_test.js",
+      "requestId": "req-list-orders-negative-auth",
+      "note": "Separate negative-test scenario, not the unchanged List orders script."
+    },
+    "expect_204": {
+      "scriptFile": "no_content_test.js",
+      "requestId": "req-delete-order",
+      "note": "Separate delete/no-content scenario."
+    }
+  }
+}

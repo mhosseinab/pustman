@@ -1,0 +1,9 @@
+decision_id,status,topic,decision,reason,evidence,owner,next_review
+D01,proposed,Primary target,Desktop developers and API teams,Explicit collaboration request plus technical API workflow,User request,Project owner,Gate G0
+D02,proposed,Initial scope,HTTP workbench plus complete team loop,Connect individual execution to team reuse,product_brief.md,Project owner,Gate G1
+D03,proposed,Design source,Native Figma Design components and variables,Editable consistent source for iteration,F2,Designer,Gate G2
+D04,proposed,Behavior prototype,Code Layer or Figma Make with deterministic fixtures,Test interactions beyond static screens,F1 and F4,Prototype owner,Gate G3
+D05,open,Minimum window size,Validate 1280x800 baseline,Keep code and collaboration readable,design_system.md,Designer,Gate G3
+D06,open,Environment move authorization,Verify exact build and plan,Official source pages are not fully consistent,P18 and P23,Engineer,Before implementation
+D07,proposed,Review policy,Explicit approval gate in demo,Separate proposed policy from actual merge authority,collaboration_spec.md,Project owner,Gate G1
+D08,open,Full feature parity,Maintain staged capability ledger,Core design is not all Postman features,screen_specs.md,Project owner,Gate G0

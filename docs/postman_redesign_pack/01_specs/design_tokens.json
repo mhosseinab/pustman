@@ -1,0 +1,106 @@
+{
+  "format": "Project token seed; map explicitly to Figma variables, not a native import format",
+  "status": "Proposed redesign tokens, not official Postman tokens",
+  "modes": {
+    "Dark": {
+      "canvas": "#0F141B",
+      "surface": "#171E28",
+      "raised": "#1D2733",
+      "text/primary": "#E7EDF4",
+      "text/secondary": "#A8B4C4",
+      "border/subtle": "#344252",
+      "border/control": "#65748A",
+      "accent/action": "#FF925C",
+      "accent/on-action": "#17202A",
+      "success": "#7BD6AD",
+      "warning": "#EDC66A",
+      "error": "#FF8895",
+      "info": "#8AB4FF",
+      "focus": "#8AB4FF",
+      "selection": "#293C53"
+    },
+    "Light": {
+      "canvas": "#F3F5F7",
+      "surface": "#FFFFFF",
+      "raised": "#F7F9FB",
+      "text/primary": "#16202B",
+      "text/secondary": "#4E6070",
+      "border/subtle": "#CDD5DE",
+      "border/control": "#697A8C",
+      "accent/action": "#A73707",
+      "accent/on-action": "#FFFFFF",
+      "success": "#176442",
+      "warning": "#77520A",
+      "error": "#AB253D",
+      "info": "#245EA8",
+      "focus": "#245EA8",
+      "selection": "#E1ECFA"
+    }
+  },
+  "spacing": {
+    "1": 4,
+    "2": 8,
+    "3": 12,
+    "4": 16,
+    "5": 20,
+    "6": 24,
+    "8": 32,
+    "10": 40
+  },
+  "radius": {
+    "control": 4,
+    "panel": 6,
+    "dialog": 10
+  },
+  "density": {
+    "compact-row": 32,
+    "comfortable-row": 40,
+    "minimum-target": 24,
+    "preferred-toolbar-target": 32
+  },
+  "typography": {
+    "ui": "Inter",
+    "code": "JetBrains Mono",
+    "fallback-ui": "DejaVu Sans",
+    "fallback-code": "DejaVu Sans Mono",
+    "styles": {
+      "label": {
+        "size": 12,
+        "lineHeight": 16
+      },
+      "code": {
+        "size": 13,
+        "lineHeight": 20
+      },
+      "body": {
+        "size": 14,
+        "lineHeight": 20
+      },
+      "section": {
+        "size": 16,
+        "lineHeight": 24
+      },
+      "title": {
+        "size": 24,
+        "lineHeight": 32
+      }
+    }
+  },
+  "layout": {
+    "baseline": [
+      1440,
+      900
+    ],
+    "compact": [
+      1280,
+      800
+    ],
+    "appBar": 48,
+    "navRail": 48,
+    "collectionSidebar": 248,
+    "requestTabs": 40,
+    "statusBar": 28,
+    "collaborationPanel": 320
+  },
+  "accessibility": "Contrast is checked for intended pairs in 05_validation/token_contrast.csv; subtle borders are decorative, control borders carry control boundaries. Actual implementation needs keyboard and screen-reader testing."
+}
