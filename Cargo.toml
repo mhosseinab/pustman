@@ -1,0 +1,103 @@
+# Pustman workspace. Every version and feature set is declared once here; crates inherit it
+# with `dep.workspace = true`. See .agents/skills/pustman-feature-crate/SKILL.md.
+
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+
+#
+# Workspace member crates
+#
+
+api_model = { path = "crates/api_model" }
+variables = { path = "crates/variables" }
+workspace_store = { path = "crates/workspace_store" }
+storage = { path = "crates/storage" }
+secrets = { path = "crates/secrets" }
+http_engine = { path = "crates/http_engine" }
+settings = { path = "crates/settings" }
+theme = { path = "crates/theme" }
+ui = { path = "crates/ui" }
+text_input = { path = "crates/text_input" }
+pustman_actions = { path = "crates/pustman_actions" }
+workspace = { path = "crates/workspace" }
+command_palette = { path = "crates/command_palette" }
+request_editor = { path = "crates/request_editor" }
+response_viewer = { path = "crates/response_viewer" }
+console = { path = "crates/console" }
+environment_picker = { path = "crates/environment_picker" }
+history_panel = { path = "crates/history_panel" }
+collections_panel = { path = "crates/collections_panel" }
+git = { path = "crates/git" }
+
+#
+# GPUI, pinned to one Zed revision. All three must share the rev: mixed revs compile
+# two gpuis and fail with confusing type mismatches.
+#
+
+gpui = { git = "https://github.com/zed-industries/zed", rev = "58849026ec30fb225dc5d07cccf37e8408b85555" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "58849026ec30fb225dc5d07cccf37e8408b85555", features = ["font-kit", "wayland", "x11"] }
+gpui_tokio = { git = "https://github.com/zed-industries/zed", rev = "58849026ec30fb225dc5d07cccf37e8408b85555" }
+
+#
+# Third-party
+#
+
+anyhow = "1.0.104"
+async-trait = "0.1.92"
+base64 = "0.23.1"
+cookie_store = "0.22.1"
+futures = "0.3.34"
+hex = "0.4.3"
+indexmap = { version = "2.14.2", features = ["serde"] }
+keyring = "4.2.0"
+log = "0.4.35"
+mime = "0.3.18"
+mime_guess = "2.0.5"
+notify = "8.2.2"
+percent-encoding = "2.3.2"
+rand = "0.10.4"
+regex = "1.13.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "cookies", "stream", "gzip", "brotli", "deflate", "multipart", "json"] }
+rusqlite = { version = "0.43.0", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+shlex = "2.0.1"
+similar = "3.2.1"
+smol = "2.0.2"
+tempfile = "3.27.0"
+thiserror = "2.0.21"
+time = { version = "0.3.55", features = ["formatting", "serde"] }
+ulid = { version = "3.0.0", features = ["serde"] }
+url = { version = "2.5.8", features = ["serde"] }
+uuid = { version = "1.29.3", features = ["v4"] }
+
+#
+# Dev and test only
+#
+
+bytes = "1.12.1"
+http-body-util = "0.1.5"
+hyper = { version = "1.12.0", features = ["server", "http1"] }
+hyper-util = "0.1.21"
+pretty_assertions = "1.4.1"
+rcgen = "0.14.10"
+rustls = "0.23.46"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net"] }
+tokio-rustls = "0.26.6"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
