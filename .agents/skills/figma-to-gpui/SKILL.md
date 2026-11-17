@@ -9,6 +9,10 @@ The Figma MCP server has no Rust/GPUI output. `get_design_context` returns **Rea
 screenshot, and asset URLs. GPUI's styling API is Tailwind-shaped, so the reference translates almost 1:1 — but it
 is a *visual prototype*, not code to paste. Our `ui` components, theme tokens and interaction rules win over it.
 
+When the Figma frame comes from the Postman redesign, also read the screen's spec and state rows in
+`docs/postman_redesign_pack/` (see `rust-gpui-ui-ux`, "Design source"). The frame shows one state; the spec lists
+them all.
+
 Load these first: Figma's `figma-design-to-code` skill (mandatory before `get_design_context`; installed plugin skill,
 or MCP resource `skill://figma/figma-design-to-code/SKILL.md`), then `rust-gpui-ui-ux`.
 
