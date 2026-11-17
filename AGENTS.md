@@ -19,6 +19,8 @@ to structure something, find the equivalent in Zed and follow its shape — but 
 | Actions, keybindings, focus            | `.claude/skills/gpui-actions-keymaps/`                   |
 | Settings + persistence                 | `.claude/skills/pustman-settings-persistence/`           |
 | HTTP engine, variables, async          | `.claude/skills/pustman-http-engine/`                    |
+| Implementing UI from a Figma design    | `.claude/skills/figma-to-gpui/`                          |
+| Syncing Figma variables into the theme | `.claude/skills/figma-tokens-to-theme/`                  |
 | Path-scoped rules (auto-loaded)        | `.claude/rules/`                                         |
 | Review / design subagents              | `.claude/agents/`                                        |
 
