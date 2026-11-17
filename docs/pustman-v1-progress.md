@@ -72,7 +72,7 @@ Last tag: _none_ · unpromoted passed steps: 0 · unapplied deltas: 0 (cap 3 / 1
 | S4 | `variables` resolver | pending | 0 | | |  |
 | S5 | `workspace_store`: on-disk format, deterministic atomic writes | pending | 0 | | |  |
 | S6 | `storage`: SQLite local store with migrations | in_progress | 3 | `1d81151` | | worker done (PASS 11); review pending (HIGH-STAKES, 2 reviewers) |
-| S7 | `secrets`: OS keychain behind a trait | in_progress | 1 | `70ae6c0` | | worker done (10 files, verify green); review pending |
+| S7 | `secrets`: OS keychain behind a trait | passed | 1 | `626aa12` | [S7](steps/S7.md) | 2 reviewers converged on 1 MEDIUM → fixed; re-review PASS; live keyring → S25 gate |
 | S8 | `workspace_store` watcher: external changes and problems | pending | 0 | | |  |
 | S9 | Postman v2.1/v2.0 import, v2.1 export, environment/globals import | pending | 0 | | |  |
 | S10 | cURL import and export | pending | 0 | | |  |
