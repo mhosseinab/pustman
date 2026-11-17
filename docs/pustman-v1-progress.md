@@ -39,6 +39,7 @@ fixers and reviewers never do.
   - TLS: S12, S28
   - import: S9, S45
 - **Severity:** MEDIUM and HIGH findings stop the step. LOW findings become `gh issue create --label "pustman-v1,low"`.
+- **UI steps** (crates `ui`, `theme`, `workspace`, `text_input`, any `*_panel`/`*_editor`/`*_viewer`/`*_picker`, `command_palette`, `assets/themes`, `assets/icons`): every worker, reviewer and fixer prompt MUST include the three lines in Active CARRY-FORWARD (load the `rust-gpui-ui-ux` skill + its "Design source" section; read the redesign pack from `/home/geek/workspace/rea-agent/pustman/docs/postman_redesign_pack/` read-only, never copy it or `03_references/screenshots/`/`07_guides/` into the repo; cite screen IDs S01–S24 and requirement IDs R01–R28 in `Decision:` lines — S16–S23 cloud collaboration is out of v1 per `docs/PRD.md`). Send UI steps to `ux-auditor` alongside the usual reviewers. If a step's Verify contradicts the pack, STOP and ask the human.
 
 ## Deferred verification gate
 
@@ -126,7 +127,9 @@ _None._
 
 ## Active CARRY-FORWARD
 
-_None._ Each entry is a fact a later step must know, with its source record linked.
+Each entry is a fact a later step must know, with its source record linked.
+
+- **UI design source is `docs/postman_redesign_pack/` (2026-11-17, operator).** UI steps now use it as the design source, per the `rust-gpui-ui-ux` skill's "Design source" section. The pack is NOT in git — read it from `/home/geek/workspace/rea-agent/pustman/docs/postman_redesign_pack/`, treat as read-only, never copy it (or `03_references/screenshots/`, `07_guides/`) into the repo. Cite screen IDs S01–S24 and requirement IDs R01–R28 in `Decision:` lines; screens S16–S23 (cloud collaboration) are out of v1 scope per `docs/PRD.md`. Precedence: PRD decides scope, the pack decides in-scope design, project rules always apply. If a step's Verify contradicts the pack, stop and ask the human. Source: merge `chore: merge main (redesign-pack UI guidance, trimmed evidence log)` (brings `d965f21`).
 
 ## Learnings (≤ 15)
 
