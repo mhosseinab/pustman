@@ -1,7 +1,6 @@
 ---
 name: figma-to-gpui
-description: Implement Pustman UI components and screens from Figma designs via the Figma MCP server — read design context, screenshot, variables and assets, then translate the React/Tailwind reference output into GPUI Rust that reuses our ui crate components and theme tokens.
-when_to_use: Use when the user gives a figma.com design URL or node and wants a GPUI component, view or screen built or updated to match it, or asks to check an implemented component against its Figma design.
+description: Implement Pustman UI components and screens from Figma designs via the Figma MCP server — read design context, screenshot, variables and assets, then translate the React/Tailwind reference output into GPUI Rust that reuses our ui crate components and theme tokens. Use when the user gives a figma.com design URL or node and wants a GPUI component, view or screen built or updated to match it, or asks to check an implemented component against its Figma design.
 ---
 
 # Figma → GPUI

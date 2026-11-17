@@ -1,7 +1,6 @@
 ---
 name: pustman-http-engine
-description: Build Pustman's request execution core — HTTP client abstraction over reqwest on gpui_tokio, cancellation, timing breakdown, redirects, TLS, proxies, cookies, body streaming, {{variable}} resolution with scopes, auth helpers, Postman collection v2.1 import/export, and fake HTTP for tests.
-when_to_use: Use when working on sending requests, the http_engine/variables/api_model crates, environments and variable scopes, auth, cookies, import/export, response parsing, or any async networking code.
+description: Build Pustman's request execution core — HTTP client abstraction over reqwest on gpui_tokio, cancellation, timing breakdown, redirects, TLS, proxies, cookies, body streaming, {{variable}} resolution with scopes, auth helpers, Postman collection v2.1 import/export, and fake HTTP for tests. Use when working on sending requests, the http_engine/variables/api_model crates, environments and variable scopes, auth, cookies, import/export, response parsing, or any async networking code.
 ---
 
 # HTTP engine

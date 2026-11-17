@@ -13,16 +13,24 @@ to structure something, find the equivalent in Zed and follow its shape — but 
 
 | Need                                   | Go to                                                    |
 | -------------------------------------- | -------------------------------------------------------- |
-| Building any UI (views, components, styling, layout, Postman screens) | `.claude/skills/rust-gpui-ui-ux/`      |
-| Writing GPUI tests                     | `.claude/skills/gpui-testing/`                           |
-| Adding a crate / feature end to end    | `.claude/skills/pustman-feature-crate/`                  |
-| Actions, keybindings, focus            | `.claude/skills/gpui-actions-keymaps/`                   |
-| Settings + persistence                 | `.claude/skills/pustman-settings-persistence/`           |
-| HTTP engine, variables, async          | `.claude/skills/pustman-http-engine/`                    |
-| Implementing UI from a Figma design    | `.claude/skills/figma-to-gpui/`                          |
-| Syncing Figma variables into the theme | `.claude/skills/figma-tokens-to-theme/`                  |
-| Path-scoped rules (auto-loaded)        | `.claude/rules/`                                         |
-| Review / design subagents              | `.claude/agents/`                                        |
+| Building any UI (views, components, styling, layout, Postman screens) | `.agents/skills/rust-gpui-ui-ux/`      |
+| Writing GPUI tests                     | `.agents/skills/gpui-testing/`                           |
+| Adding a crate / feature end to end    | `.agents/skills/pustman-feature-crate/`                  |
+| Actions, keybindings, focus            | `.agents/skills/gpui-actions-keymaps/`                   |
+| Settings + persistence                 | `.agents/skills/pustman-settings-persistence/`           |
+| HTTP engine, variables, async          | `.agents/skills/pustman-http-engine/`                    |
+| Implementing UI from a Figma design    | `.agents/skills/figma-to-gpui/`                          |
+| Syncing Figma variables into the theme | `.agents/skills/figma-tokens-to-theme/`                  |
+| Path-scoped rules                      | `.agents/rules/`                                         |
+| Review / design agent roles            | `.agents/agents/`                                        |
+
+`.agents/` is the harness-neutral source of truth. Skills follow the open `SKILL.md` format (`name` +
+`description` frontmatter). **Before editing a file, read every rule in `.agents/rules/` whose `paths:`
+globs match it** — harnesses that don't auto-load path-scoped rules must do this by hand. Agent roles in
+`.agents/agents/` are prompts: run one as a subagent if your harness has them, or adopt it yourself.
+Harness adapters point into `.agents/` and hold no content of their own: `.claude/skills/*` and
+`.claude/rules/*` are relative symlinks; `.claude/agents/*.md` are thin wrappers with Claude-only
+frontmatter (tools, model, preloaded skills). Edit `.agents/`, never the adapters.
 
 ## Toolchain & dependencies
 
@@ -148,6 +156,6 @@ explicitly adopts GPL-3.0.
 
 ## Rule hygiene
 
-Add a rule here or in `.claude/rules/` only if it is non-obvious, has bitten us more than once, and is
+Add a rule here or in `.agents/rules/` only if it is non-obvious, has bitten us more than once, and is
 actionable. Rules describe traps to avoid, not maps of the code. State each fact in exactly one place and
 link to it from elsewhere.

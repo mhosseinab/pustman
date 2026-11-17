@@ -1,7 +1,6 @@
 ---
 name: pustman-settings-persistence
-description: Add typed, live-reloading user settings (JSON + defaults + schema) and persist app/UI state (SQLite + key-value store) in Pustman following Zed's settings and db patterns, reimplemented without GPL code.
-when_to_use: Use when adding a setting, reading settings in a view, reacting to settings changes, persisting open tabs/dock sizes/history/collections, writing a DB migration, or storing secrets.
+description: Add typed, live-reloading user settings (JSON + defaults + schema) and persist app/UI state (SQLite + key-value store) in Pustman following Zed's settings and db patterns, reimplemented without GPL code. Use when adding a setting, reading settings in a view, reacting to settings changes, persisting open tabs/dock sizes/history/collections, writing a DB migration, or storing secrets.
 ---
 
 # Settings & persistence

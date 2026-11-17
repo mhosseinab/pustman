@@ -1,7 +1,6 @@
 ---
 name: pustman-feature-crate
-description: Scaffold or extend a Pustman workspace crate the Zed way — Cargo.toml layout, lib path, workspace lints, init(cx) registration, domain/UI split, test-support feature, clippy config, and the end-to-end feature checklist (actions, keybindings, settings, theme tokens, persistence, a11y, platforms, docs).
-when_to_use: Use when creating a new crate, adding a feature that spans crates, wiring a crate into main.rs, or setting up workspace Cargo/clippy/rustfmt/toolchain configuration.
+description: Scaffold or extend a Pustman workspace crate the Zed way — Cargo.toml layout, lib path, workspace lints, init(cx) registration, domain/UI split, test-support feature, clippy config, and the end-to-end feature checklist (actions, keybindings, settings, theme tokens, persistence, a11y, platforms, docs). Use when creating a new crate, adding a feature that spans crates, wiring a crate into main.rs, or setting up workspace Cargo/clippy/rustfmt/toolchain configuration.
 ---
 
 # Feature crates

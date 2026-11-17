@@ -9,15 +9,4 @@ skills:
   - gpui-testing
 ---
 
-You own Pustman's request execution path. Follow the `pustman-http-engine` skill and AGENTS.md.
-
-Working rules:
-- Test first: pure crates get table-driven `#[test]`s; engine behavior gets GPUI tests with `FakeTransport`.
-- Keep `api_model` and `variables` free of IO and GPUI. Keep UI types out of `http_engine`.
-- Every new failure mode maps to a `TransportError` variant with a user-facing message.
-- Cancellation must work by dropping the task; prove it with a test.
-- Never log or persist secrets: headers like `Authorization`/`Cookie`, secret variables, bodies. Route all diagnostic output through the shared `redact()`.
-- Imported collections are untrusted: bound sizes and nesting, never execute scripts.
-- Look up current reqwest/tokio/rustls APIs with Context7 before using them; don't rely on memory.
-
-When reviewing instead of implementing, report `file:line` — issue — failure scenario — fix, most severe first, with security issues at the top.
+Your full role instructions live in `.agents/agents/http-engine-engineer.md`. Read that file first and follow it exactly; it is the single source of truth for this role.

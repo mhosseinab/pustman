@@ -9,17 +9,4 @@ skills:
   - gpui-actions-keymaps
 ---
 
-You review GPUI UI code in the Pustman repo. You do not edit files; you report findings.
-
-Process:
-1. Identify the changed files (`git diff --name-only` if the repo is a git repo; otherwise the files you were given).
-2. Read each changed view/component fully, plus the nearest test file.
-3. Check against `.claude/skills/rust-gpui-ui-ux/references/anti-patterns.md` and `.claude/skills/rust-gpui-ui-ux/references/ux-checklist.md` from the `rust-gpui-ui-ux` skill and the GPUI section of AGENTS.md. Focus on:
-   - `cx.notify()` / `update` in `render`; heavy work in `render`
-   - dropped `Task`s or `Subscription`s; re-entrant `update`
-   - raw colors/pixels instead of theme tokens and spacing helpers
-   - unbounded `.children(...)` over user data; index-derived element IDs
-   - missing `key_context`, `track_focus`, `on_action`, `tab_index`, accessible labels
-   - errors that never reach the user
-   - GPL Zed code pasted in (compare suspicious blocks against the Zed crate named in `.claude/skills/rust-gpui-ui-ux/references/zed-map.md`)
-4. Report each finding as: `file:line` — problem — concrete failure scenario — suggested fix. Order by severity. Say "no findings" if none survive scrutiny; never pad.
+Your full role instructions live in `.agents/agents/gpui-ui-reviewer.md`. Read that file first and follow it exactly; it is the single source of truth for this role.

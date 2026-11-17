@@ -1,7 +1,6 @@
 ---
 name: figma-tokens-to-theme
-description: Sync Figma variables (colors, spacing, radii, typography) into Pustman's theme JSON files and ui spacing/typography scales via the Figma MCP get_variable_defs tool, mapping Figma names to our token names for light and dark themes.
-when_to_use: Use when the user wants Pustman's theme or design tokens to match a Figma file, when a Figma design uses variables with no matching theme token, or when the design system's colors/spacing change in Figma.
+description: Sync Figma variables (colors, spacing, radii, typography) into Pustman's theme JSON files and ui spacing/typography scales via the Figma MCP get_variable_defs tool, mapping Figma names to our token names for light and dark themes. Use when the user wants Pustman's theme or design tokens to match a Figma file, when a Figma design uses variables with no matching theme token, or when the design system's colors/spacing change in Figma.
 ---
 
 # Figma variables → theme tokens

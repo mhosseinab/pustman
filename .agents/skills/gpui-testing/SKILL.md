@@ -1,7 +1,6 @@
 ---
 name: gpui-testing
-description: Write deterministic GPUI tests for Pustman views, actions, async tasks and HTTP flows using the gpui::test attribute, TestAppContext and VisualTestContext, including keystroke simulation, clock control, randomized scheduling and fake HTTP.
-when_to_use: Use when writing or fixing tests for any crate that uses gpui, when a test hangs or panics with "Parking forbidden.", or when testing async request sending, debouncing, keybindings or rendering behavior.
+description: Write deterministic GPUI tests for Pustman views, actions, async tasks and HTTP flows using the gpui::test attribute, TestAppContext and VisualTestContext, including keystroke simulation, clock control, randomized scheduling and fake HTTP. Use when writing or fixing tests for any crate that uses gpui, when a test hangs or panics with "Parking forbidden.", or when testing async request sending, debouncing, keybindings or rendering behavior.
 ---
 
 # GPUI testing

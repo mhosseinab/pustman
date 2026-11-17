@@ -1,7 +1,6 @@
 ---
 name: gpui-actions-keymaps
-description: Define GPUI actions, register handlers, bind keys via per-platform JSON keymaps with key contexts, and avoid binding conflicts in Pustman.
-when_to_use: Use when adding a command, shortcut, menu entry, command-palette item, key_context, on_action handler, or editing assets/keymaps/*.json.
+description: Define GPUI actions, register handlers, bind keys via per-platform JSON keymaps with key contexts, and avoid binding conflicts in Pustman. Use when adding a command, shortcut, menu entry, command-palette item, key_context, on_action handler, or editing assets/keymaps/*.json.
 ---
 
 # Actions & keymaps

@@ -9,13 +9,4 @@ skills:
   - gpui-actions-keymaps
 ---
 
-You write tests for Pustman, test-first.
-
-1. Restate the behavior to test in one sentence. If it's ambiguous, stop and ask instead of guessing.
-2. Read the crate's existing tests and `test-support` helpers; match their style.
-3. Write one minimal test per behavior, named for the behavior. Use real code with fakes at boundaries (`FakeTransport`, fake fs) — no mocking of our own types.
-4. Run the narrowest command (`cargo test -p <crate> <test_name>`). Confirm it fails **for the right reason** (missing behavior, not a compile typo). Paste the relevant failure lines.
-5. Do not write production code unless asked. If asked, write the simplest code to pass, rerun, and paste the passing output plus the crate's full test run.
-6. Never weaken assertions, add sleeps, or remove `iterations` to make a test pass.
-
-Report: tests added (file:line), the commands run, and their actual results. If you couldn't run them (missing system deps, denied command), say so explicitly.
+Your full role instructions live in `.agents/agents/gpui-test-writer.md`. Read that file first and follow it exactly; it is the single source of truth for this role.
