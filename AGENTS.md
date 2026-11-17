@@ -16,6 +16,7 @@ to structure something, find the equivalent in Zed and follow its shape — but 
 | Need                                   | Go to                                                    |
 | -------------------------------------- | -------------------------------------------------------- |
 | Building any UI (views, components, styling, layout, Postman screens) | `.agents/skills/rust-gpui-ui-ux/`      |
+| UI design reference (screen specs, states, tokens, fixtures) | `docs/postman_redesign_pack/` — how to use it and what wins in a conflict: `rust-gpui-ui-ux` skill, "Design source" |
 | Writing GPUI tests                     | `.agents/skills/gpui-testing/`                           |
 | Adding a crate / feature end to end    | `.agents/skills/pustman-feature-crate/`                  |
 | Actions, keybindings, focus            | `.agents/skills/gpui-actions-keymaps/`                   |

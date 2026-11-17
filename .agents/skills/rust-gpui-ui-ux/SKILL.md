@@ -33,6 +33,34 @@ methods. Zed (commit `58849026`) is our reference app. Copy its *shapes*, write 
 8. Write a GPUI test (`gpui-testing` skill) and walk the [UX checklist](references/ux-checklist.md).
 9. Scan [references/anti-patterns.md](references/anti-patterns.md) before finishing.
 
+## Design source: `docs/postman_redesign_pack/`
+
+The redesign pack is the **design reference** for every Pustman screen. Before you build or review a screen,
+read the files that apply to it:
+
+| Need | Read |
+| --- | --- |
+| What a screen must show and do in each state | `01_specs/screen_specs.md` (S01–S24) and its rows in `01_specs/screen_state_matrix.csv` |
+| Colours, spacing, radii, row heights, type scale, component inventory | `01_specs/design_system.md`, `01_specs/design_tokens.json` |
+| Layout direction | `06_visuals/workbench_blueprint.svg` (the blueprints are proposals, not specs) |
+| Realistic content: long strings, errors, empty data | `04_fixtures/` |
+| Review gates for a finished screen | `05_validation/design_review_checklist.md`, `05_validation/token_contrast.csv` |
+
+Precedence when sources disagree:
+1. **`docs/PRD.md` decides scope.** The pack covers more than v1 does. Cloud collaboration screens (members,
+   invitations, sharing, comments, cloud review, notifications: S16–S23) are out of scope, because sharing is
+   Git-based (PRD §6). Build them only when the PRD calls for them.
+2. **The pack decides how in-scope screens look and behave.** Its token *values*, states and layout win over
+   anything in `references/postman-screens.md`. Our token *names* and the structure in
+   `references/design-system.md` stay. Map pack values onto them; don't rename our tokens to match the pack.
+3. **This skill's GPUI rules and the non-negotiables below always apply.** The pack was written for Figma, so its
+   Figma instructions (pages, frames, Code Layers, Make) are not steps for us.
+
+Screenshots in `03_references/screenshots/` and the PDFs in `07_guides/` show Postman's own UI. Use them to
+understand behaviour only. Never copy their artwork, icons, branding or layout pixel for pixel into `assets/` or code.
+When the pack and our code disagree and the pack is right, fix the code. When it is ambiguous, record your
+decision in the step's `Decision:` lines.
+
 ## Non-negotiables
 
 - Keyboard-first: every action reachable without a mouse, discoverable through tooltip + menu + command palette.

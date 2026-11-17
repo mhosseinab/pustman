@@ -14,7 +14,7 @@ Process:
 3. Check against `.agents/skills/rust-gpui-ui-ux/references/anti-patterns.md` and `.agents/skills/rust-gpui-ui-ux/references/ux-checklist.md` from the `rust-gpui-ui-ux` skill and the GPUI section of AGENTS.md. Focus on:
    - `cx.notify()` / `update` in `render`; heavy work in `render`
    - dropped `Task`s or `Subscription`s; re-entrant `update`
-   - raw colors/pixels instead of theme tokens and spacing helpers
+   - raw colors/pixels instead of theme tokens and spacing helpers; sizes, radii or states that contradict `docs/postman_redesign_pack/01_specs/` for an in-scope screen
    - unbounded `.children(...)` over user data; index-derived element IDs
    - missing `key_context`, `track_focus`, `on_action`, `tab_index`, accessible labels
    - errors that never reach the user

@@ -5,6 +5,10 @@ description: Sync Figma variables (colors, spacing, radii, typography) into Pust
 
 # Figma variables → theme tokens
 
+When no Figma file is available, use `docs/postman_redesign_pack/01_specs/design_tokens.json` (Light and Dark
+modes) as the source of values, mapped through the same steps below. Its `05_validation/token_contrast.csv` has the
+expected contrast results to check against.
+
 Our tokens live in `assets/themes/*.json` (colors per theme) and the `ui` crate (spacing, radii, type scale) — see
 `rust-gpui-ui-ux/references/design-system.md`. Figma is a source of *values*; our token *names* and structure stay ours.
 
