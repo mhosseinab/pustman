@@ -9,12 +9,12 @@ prints `VERIFY OK` (after S0).
 | Source | [`pustman-v1-implementation-steps.md`](pustman-v1-implementation-steps.md) (read-only) · plan [`pustman-v1-plan.md`](pustman-v1-plan.md) · driver [`pustman-v1-orchestrator-prompt.md`](pustman-v1-orchestrator-prompt.md) |
 | Integration branch | `pustman-v1/main` (created by S0's merge; until then `main`) |
 | Worker branches | `pustman-v1/S<N>` off `pustman-v1/main`, own worktree |
-| Initial commit | _not yet committed_ |
+| Initial commit | `8b2f0df` (docs seeded; before-S0 commit) |
 | Records / log | `docs/progress/pustman-v1/steps/S<N>.md` · `docs/progress/pustman-v1/log.md` |
 | Fast verify | `scripts/pustman-v1-test.sh <crate> [filter]` → `PASS <n>` |
 | Full verify | `scripts/pustman-v1-verify.sh` → `VERIFY OK` |
 | Tripwire | `scripts/pustman-v1-tripwire.sh` → `TRIPWIRE 0` (baseline 0) |
-| Review routing | recorded at SETUP (see orchestrator prompt › SETUP 3) |
+| Review routing | **always-on:** `test-integrity-reviewer`, `spec-conformance-reviewer` · **GPUI UI crates:** `gpui-ui-reviewer` + `ux-auditor` (repo-native) · **api_model/variables/http_engine:** `http-engine-engineer` (review mode) · **secrets/redaction/TLS/import/history:** `security-reviewer` · **storage/workspace_store:** `state-integrity-reviewer` (+ `migration-reviewer` on migrations) · **hotspots S12/S20/S39/S30:** + `performance-reviewer` · **CI/hooks/scripts:** `infra-ops-reviewer` · **api_model public types (S2/S9):** + `contract-drift-reviewer` · **implementers:** GPUI→`ui-implementer`, http_engine/variables/api_model→`http-engine-engineer`, others→`step-implementer`; tests delegated to `gpui-test-writer` · **S0 reviewer:** `infra-ops-reviewer` (skill agents land with S0) · missing agent → fresh general-purpose subagent with matching contract |
 
 **Writers:** only the orchestrator and the integrator write this file, the log and step records. Workers,
 fixers and reviewers never do.
