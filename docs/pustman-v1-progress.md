@@ -66,7 +66,7 @@ Last tag: _none_ · unpromoted passed steps: 0 · unapplied deltas: 0 (cap 3 / 1
 | Step | Title | Status | Att. | SHA | Record | Note |
 |---|---|---|---|---|---|---|
 | S0 | Harness: bootstrap, test runner, tripwire, hooks, promotion tooling, subagents | passed | 1 | `4cc3089` | [S0](steps/S0.md) | review PASS (no findings); full verify `VERIFY OK (no workspace yet)` at merge |
-| S1 | Cargo workspace, toolchain, lints, CI, `api_model` skeleton | in_progress | 1 | | | worktree /tmp/opencode/pustman-v1-wt/S1 |
+| S1 | Cargo workspace, toolchain, lints, CI, `api_model` skeleton | passed | 1 | `1078d67` | [S1](steps/S1.md) | PASS_WITH_ISSUES (1 LOW → issue #1); verify `VERIFY OK`; CI delta pending push+green |
 | S2 | `api_model` types: collections, folders, HTTP requests, auth, variables, settings, examples | pending | 0 | | |  |
 | S3 | Shared `redact()` (D8) | pending | 0 | | |  |
 | S4 | `variables` resolver | pending | 0 | | |  |
