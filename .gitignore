@@ -2,6 +2,9 @@
 /target
 **/*.rs.bk
 
+# Claude Code harness (subagent worktrees)
+.claude/worktrees/
+
 # Cargo.lock is committed: this is a binary application, not a library.
 
 # Secrets — this is an API client; never commit environment dumps or keys

@@ -52,7 +52,7 @@ self._subscriptions.push(cx.observe_global::<SettingsStore>(|this, cx| {
 
 | Data | Store | Notes |
 | --- | --- | --- |
-| Collections, environments | Files (Postman v2.1-compatible JSON) under the workspace dir | Users version them in git; write atomically (temp + rename) |
+| Collections, environments | Files on disk: the PRD §6.1 folder of JSON files (`pustman.json`, `collections/**`, `environments/**`, `protos/**`) — [docs/PRD.md §6.1](../../../docs/PRD.md#61-on-disk-format) | **Postman v2.1 is the import/export format only** (PRD §6.4); the on-disk format is the folder of files (ADR-0001: deterministic JSON, atomic writes — temp + rename) |
 | History, open tabs, dock sizes, last selected env, UI state | SQLite (`crates/storage`) | Per-workspace rows keyed by workspace id |
 | Small flags (dismissed banners, last version run) | Key-value table | `kv::read(key)`, `kv::write(key, value)` |
 | Secrets (tokens, passwords, secret variables) | OS keychain (e.g. `keyring` crate) | Only a reference id in files/DB |
@@ -72,7 +72,7 @@ impl Domain for HistoryDb {
 }
 ```
 
-(Choose the SQLite binding — `rusqlite` or `sqlx` — once, in `crates/storage`; features don't touch SQL drivers.)
+(The SQLite binding is **`rusqlite` with the `bundled` feature** — decided in ADR-0002/D6 — once, in `crates/storage`; features don't touch SQL drivers.)
 
 ## Traps
 - Reading files/DB in `render` or a foreground handler → use background tasks and cache results in the view.

@@ -6,8 +6,10 @@ Zed is our reference implementation for "how a large Rust desktop app should be 
 to structure something, find the equivalent in Zed and follow its shape — but write our own code
 (see [Licensing](#licensing)).
 
-> Status: the repository is **pre-scaffold**. The crate layout below is the *proposed* target, not
-> existing code. Update this file when reality diverges from it.
+> Status: v1 (M0–M2) is under construction — driver and steps in `docs/pustman-v1-plan.md`. The
+> crate layout below is the PRD §9 target; **crates appear as the steps land**. The harness
+> (bootstrap/test/verify/tripwire scripts, protection hooks, subagents, promotion tooling) exists
+> from S0. Update this file when reality diverges from it.
 
 ## Where things live
 
@@ -88,6 +90,12 @@ crates/
   environment_picker/   # PickerDelegate for active environment
   command_palette/      # action search
   history_panel/        # past requests
+  workspace_store/      # on-disk workspace format (PRD §6.1): deterministic JSON, atomic writes, watcher
+  secrets/              # OS keychain SecretStore (KeyringStore; MemorySecretStore in tests)
+  console/              # console entries, ring buffer, HAR export, redaction
+  git/                  # thin git CLI wrapper (smol::process): status, diff, commit, pull, push, branch
+  pustman_actions/      # every PRD action + default keymaps (D10); feature crates implement handlers
+  integration_tests/    # end-to-end proofs (redaction S37, sharing AC S47)
 assets/
   keymaps/default-{macos,linux,windows}.json
   settings/default.json
@@ -97,6 +105,23 @@ assets/
 
 Every crate exposes `pub fn init(cx: &mut App)`; `main.rs` calls them in dependency order:
 `settings → theme → ui → workspace → feature crates`.
+
+Later milestones add `websocket_client` (M4), `grpc_client` (M5) and `mqtt_client` (M6) — protocol
+crates with no GPUI views, sharing the `SessionEvent` shape from `docs/PRD.md` §9.
+
+## Hotspots (the v1 driver serializes these)
+
+- `Cargo.lock` — regenerated at merge, never hand-merged.
+- `crates/pustman/src/main.rs` — init order; 9 of 49 v1 steps touch it.
+- `crates/pustman/Cargo.toml` — the same steps as `main.rs`.
+
+## Git & releases (v1)
+
+- Integration branch `pustman-v1/main`; each step lands as one squash commit `S<N>: <title>`.
+- Releases are tags `release/pustman-v1-<n>` (plan D11). This is a desktop app — "staging" is the
+  build host: tag → `cargo build --release -p pustman` → human manual smoke on Linux and macOS.
+- Host/env changes are typed Deploy deltas in `DEPLOY_DELTAS.md` (`codified`/`scripted`/`manual`);
+  `scripts/promote-check.sh` refuses a promotion with pending deltas.
 
 ## Rules (traps, not maps)
 
@@ -139,6 +164,22 @@ These are the mistakes that actually bite in GPUI codebases. Zed enforces most w
 - Prefer editing existing files to adding new ones; prefer adding to an existing crate over a new one
   unless the feature is independently testable.
 - `[lints] workspace = true` in every crate.
+
+## Test placement (D9)
+
+- Unit tests live next to their code as `src/<file>_tests.rs`, wired with
+  `#[cfg(test)] #[path = "<file>_tests.rs"] mod tests;`. **No inline `mod tests {` in `src/*.rs`** —
+  `scripts/pustman-v1-tripwire.sh` counts it, and the path convention is what makes "existing tests
+  are read-only" mechanically enforceable.
+- Integration tests live in `crates/<crate>/tests/`; shared helpers in `src/test_support.rs`. A later
+  step needing more helpers adds a NEW file — it never edits an earlier step's helper.
+- Test names are behavior sentences (`test_unresolved_secret_never_sends_an_empty_string`).
+
+## Docs
+
+Docs ship only with the code they describe: a doc edit lands in the same commit as the change it
+describes (e.g. `docs/ARCHITECTURE.md` gains the crate it maps). `docs/pustman-v1-implementation-steps.md`
+and existing test files are read-only for workers — enforced by `.claude/hooks/protect-steps-and-tests.sh`.
 
 ## Security (it's an API client — it handles secrets)
 - Never log request/response bodies, `Authorization` headers, cookies, or variable values marked secret.

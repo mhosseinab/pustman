@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/protect-steps-and-tests.sh"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"Read docs/pustman-v1-progress.md and tail -n 30 docs/progress/pustman-v1/log.md before acting.\""
+          }
+        ]
+      }
+    ]
+  }
+}
