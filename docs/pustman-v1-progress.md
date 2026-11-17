@@ -64,7 +64,7 @@ Last tag: _none_ · unpromoted passed steps: 0 · unapplied deltas: 0 (cap 3 / 1
 
 | Step | Title | Status | Att. | SHA | Record | Note |
 |---|---|---|---|---|---|---|
-| S0 | Harness: bootstrap, test runner, tripwire, hooks, promotion tooling, subagents | pending | 0 | | |  |
+| S0 | Harness: bootstrap, test runner, tripwire, hooks, promotion tooling, subagents | in_progress | 1 | | | worktree /tmp/opencode/pustman-v1-wt/S0, branch pustman-v1/S0 off 9cb178d |
 | S1 | Cargo workspace, toolchain, lints, CI, `api_model` skeleton | pending | 0 | | |  |
 | S2 | `api_model` types: collections, folders, HTTP requests, auth, variables, settings, examples | pending | 0 | | |  |
 | S3 | Shared `redact()` (D8) | pending | 0 | | |  |
