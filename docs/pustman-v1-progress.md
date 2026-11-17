@@ -67,12 +67,12 @@ Last tag: _none_ · unpromoted passed steps: 0 · unapplied deltas: 0 (cap 3 / 1
 |---|---|---|---|---|---|---|
 | S0 | Harness: bootstrap, test runner, tripwire, hooks, promotion tooling, subagents | passed | 1 | `4cc3089` | [S0](steps/S0.md) | review PASS (no findings); full verify `VERIFY OK (no workspace yet)` at merge |
 | S1 | Cargo workspace, toolchain, lints, CI, `api_model` skeleton | passed | 1 | `1078d67` | [S1](steps/S1.md) | PASS_WITH_ISSUES (1 LOW → issue #1); verify `VERIFY OK`; CI delta pending push+green |
-| S2 | `api_model` types: collections, folders, HTTP requests, auth, variables, settings, examples | in_progress | 1 | | | worktree /tmp/opencode/pustman-v1-wt/S2 |
+| S2 | `api_model` types: collections, folders, HTTP requests, auth, variables, settings, examples | in_progress | 2 | | | attempt 1 returned empty (no work done); re-dispatched |
 | S3 | Shared `redact()` (D8) | pending | 0 | | |  |
 | S4 | `variables` resolver | pending | 0 | | |  |
 | S5 | `workspace_store`: on-disk format, deterministic atomic writes | pending | 0 | | |  |
-| S6 | `storage`: SQLite local store with migrations | in_progress | 1 | | | worktree /tmp/opencode/pustman-v1-wt/S6 |
-| S7 | `secrets`: OS keychain behind a trait | in_progress | 1 | | | worktree /tmp/opencode/pustman-v1-wt/S7 |
+| S6 | `storage`: SQLite local store with migrations | in_progress | 2 | | | attempt 1 returned empty (no work done); re-dispatched |
+| S7 | `secrets`: OS keychain behind a trait | in_progress | 1 | `70ae6c0` | | worker done (10 files, verify green); review pending |
 | S8 | `workspace_store` watcher: external changes and problems | pending | 0 | | |  |
 | S9 | Postman v2.1/v2.0 import, v2.1 export, environment/globals import | pending | 0 | | |  |
 | S10 | cURL import and export | pending | 0 | | |  |
