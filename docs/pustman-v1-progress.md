@@ -52,12 +52,12 @@ These run at the next human sign-off and are recorded in that sign-off's step re
 | E2E display scenario: S26 (send/cancel from the URL bar) | human | S38 | pending |
 | E2E display scenario: S28 (TLS badge, auth tabs) | human | S38 | pending |
 | E2E display scenario: S32 (console dock) | human | S38 | pending |
-| Push `pustman-v1/main` and confirm CI green (S1 delta) | human | next promotion | pending |
+| Push `pustman-v1/main` and confirm CI green (S1 delta) | human | next promotion | done 2026-11-18 (CI run 44240566190 on `e5347fc`: verify (ubuntu-latest) success, verify (macos-latest) success) |
 | Manual smoke on Linux + macOS for each `release/pustman-v1-<n>` (n ≥ 2) | human | each promotion | pending |
 
 ## Window
 
-Last tag: _none_ · unpromoted passed steps: 0 · unapplied deltas: 0 (cap 3 / 16).
+Last tag: _none_ · unpromoted passed steps: 5 (S0, S1, S2, S6, S7) · unapplied deltas: 0 (cap 3 / 16).
 
 ## Status
 
@@ -76,7 +76,7 @@ Last tag: _none_ · unpromoted passed steps: 0 · unapplied deltas: 0 (cap 3 / 1
 | S8 | `workspace_store` watcher: external changes and problems | pending | 0 | | |  |
 | S9 | Postman v2.1/v2.0 import, v2.1 export, environment/globals import | pending | 0 | | |  |
 | S10 | cURL import and export | pending | 0 | | |  |
-| G-DEPS | Install GPUI system libraries, CI push, then promote `release/pustman-v1-1` | pending | – | | | HUMAN gate |
+| G-DEPS | Install GPUI system libraries, CI push, then promote `release/pustman-v1-1` | pending | – | | | HUMAN gate; 1/3 libraries installed, 2/3 CI green (run 44240566190); 3/3 promote open |
 | S11 | `http_engine` core: transport trait, fake, error taxonomy, send/cancel | pending | 0 | | | after G-DEPS |
 | S12 | `ReqwestTransport`: settings, manual redirects, TLS toggle, timing spike (D2) | pending | 0 | | |  |
 | S13 | Send pipeline: variable resolution, auth (Basic/Bearer/API key), unresolved secrets | pending | 0 | | |  |
