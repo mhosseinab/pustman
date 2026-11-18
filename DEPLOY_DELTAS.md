@@ -14,6 +14,7 @@ done it on the build host.
 | Step | Type | What | How to apply | Status |
 |---|---|---|---|---|
 | S0 | manual | install GPUI system packages on every dev/build host: libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libvulkan-dev (this is gate G-DEPS) | the host package manager (e.g. `apt install libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libvulkan-dev`); run by the human | applied(evidence: `scripts/pustman-v1-init.sh --require-gpui` → `GPUI_DEPS=ok`, exit=0 on the build host after the human installed the packages) |
+| S6 | codified | `crates/storage/migrations` — applied at app start; every migration has a down | automatic: `LocalStore::migrate()` applies them; exercised by `scripts/pustman-v1-verify.sh` (the `every_migration_has_working_down` suite) | applied(auto: full verify `VERIFY OK` at S6 merge, migrations 1 up / 1 down with working downs) |
 | S1 | codified | `.github/workflows/ci.yml` — CI on push/PR, Linux + macOS | runs on GitHub runners; applied when the human has pushed `pustman-v1/main` and reported CI green (or waived in writing) | pending |
 | S0 | codified | `.claude/settings.json` hooks (PreToolUse protect-steps-and-tests, SessionStart progress reminder) | active in the checkout; exercised by `scripts/pustman-v1-verify.sh` and `scripts/promote-check.sh` | applied(auto: full verify `VERIFY OK (no workspace yet)` at S0 merge) |
 
