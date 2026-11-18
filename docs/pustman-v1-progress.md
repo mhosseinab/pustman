@@ -68,9 +68,9 @@ Last tag: _none_ · unpromoted passed steps: 0 · unapplied deltas: 0 (cap 3 / 1
 | S0 | Harness: bootstrap, test runner, tripwire, hooks, promotion tooling, subagents | passed | 1 | `4cc3089` | [S0](steps/S0.md) | review PASS (no findings); full verify `VERIFY OK (no workspace yet)` at merge |
 | S1 | Cargo workspace, toolchain, lints, CI, `api_model` skeleton | passed | 1 | `1078d67` | [S1](steps/S1.md) | PASS_WITH_ISSUES (1 LOW → issue #1); verify `VERIFY OK`; CI delta pending push+green |
 | S2 | `api_model` types: collections, folders, HTTP requests, auth, variables, settings, examples | passed | 3 | `1f77523` | [S2](steps/S2.md) | 2 cycles (1 HIGH fixed); verify `PASS 15`; LOWs → issues #2/#3/#4 |
-| S3 | Shared `redact()` (D8) | in_progress | 1 | | | worktree /tmp/opencode/pustman-v1-wt/S3; HIGH-STAKES secrets → 2 reviewers |
-| S4 | `variables` resolver | in_progress | 1 | | | worktree /tmp/opencode/pustman-v1-wt/S4 |
-| S5 | `workspace_store`: on-disk format, deterministic atomic writes | in_progress | 1 | | | worktree /tmp/opencode/pustman-v1-wt/S5; HIGH-STAKES persistence → 2 reviewers |
+| S3 | Shared `redact()` (D8) | in_progress | 1 | `f6a6ade` | | worker done (PASS 5); review pending (HIGH-STAKES, 2 reviewers) |
+| S4 | `variables` resolver | in_progress | 2 | `ca4cddd` | | worker done (PASS 8); review pending |
+| S5 | `workspace_store`: on-disk format, deterministic atomic writes | in_progress | 2 | `575e629` | | worker done (PASS 10); review pending (HIGH-STAKES, 2 reviewers) |
 | S6 | `storage`: SQLite local store with migrations | passed | 3 | `a84c5a3` | [S6](steps/S6.md) | 3 review rounds, 2 fix cycles (2 data-loss MEDIUMs + 2 proof-quality MEDIUMs closed); `PASS 22`; LOWs → issues #5/#6 |
 | S7 | `secrets`: OS keychain behind a trait | passed | 1 | `626aa12` | [S7](steps/S7.md) | 2 reviewers converged on 1 MEDIUM → fixed; re-review PASS; live keyring → S25 gate |
 | S8 | `workspace_store` watcher: external changes and problems | pending | 0 | | |  |
