@@ -1,0 +1,23 @@
+{
+  "id": "01ARZ3NDEKTSV4RRFFQ69G5FB0",
+  "name": "Users API",
+  "description": "Team collection for the users service.",
+  "variables": [
+    {
+      "key": "base_url",
+      "value": "https://api.example.com",
+      "kind": "default",
+      "enabled": true,
+      "description": "Shared base URL."
+    },
+    {
+      "key": "api_key",
+      "kind": "secret",
+      "description": "Per-user key; never committed."
+    }
+  ],
+  "order": [
+    "01ARZ3NDEKTSV4RRFFQ69G5FB1",
+    "01ARZ3NDEKTSV4RRFFQ69G5FB2"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "type": "http",
+  "id": "01ARZ3NDEKTSV4RRFFQ69G5FB2",
+  "name": "Get user"
+  "method": "GET",
+  "url": "{{base_url}}/users/1"
+}

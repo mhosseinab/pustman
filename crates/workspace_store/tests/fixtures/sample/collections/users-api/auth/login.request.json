@@ -1,0 +1,12 @@
+{
+  "type": "http",
+  "id": "01ARZ3NDEKTSV4RRFFQ69G5FB3",
+  "name": "Login",
+  "method": "POST",
+  "url": "{{base_url}}/login",
+  "body": {
+    "mode": "raw",
+    "language": "text",
+    "text": "grant_type=password"
+  }
+}

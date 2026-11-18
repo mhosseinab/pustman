@@ -1,0 +1,17 @@
+{
+  "id": "01ARZ3NDEKTSV4RRFFQ69G5FB4",
+  "name": "Staging",
+  "variables": [
+    {
+      "key": "base_url",
+      "value": "https://staging.example.com",
+      "kind": "default",
+      "enabled": true
+    },
+    {
+      "key": "api_key",
+      "kind": "secret",
+      "description": "Staging key."
+    }
+  ]
+}
