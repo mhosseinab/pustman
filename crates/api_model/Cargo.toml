@@ -13,4 +13,5 @@ path = "src/api_model.rs"
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+shlex.workspace = true
 ulid.workspace = true

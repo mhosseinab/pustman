@@ -7,6 +7,7 @@
 
 mod auth;
 mod collection;
+mod curl;
 mod environment;
 mod example;
 mod postman;
@@ -17,6 +18,7 @@ mod variable;
 
 pub use auth::{ApiKeyLocation, Auth, AuthSource, EffectiveAuth, effective_auth};
 pub use collection::{Child, Collection, Folder, Workspace};
+pub use curl::{CurlError, parse_curl, to_curl};
 pub use environment::Environment;
 pub use example::{Example, ExampleResponse};
 pub use postman::{
