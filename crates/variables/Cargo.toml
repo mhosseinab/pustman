@@ -1,0 +1,21 @@
+# `variables` — {{name}} resolution: scopes, dynamic values, cycles, spans (PRD §7).
+# Domain crate: no gpui, no UI, no IO. Pure functions over api_model::Variable.
+
+[package]
+name = "variables"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/variables.rs"
+
+[dependencies]
+api_model.workspace = true
+rand.workspace = true
+thiserror.workspace = true
+time.workspace = true
+uuid.workspace = true
