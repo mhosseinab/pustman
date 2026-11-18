@@ -133,7 +133,7 @@ Each entry is a fact a later step must know, with its source record linked.
 
 ## Learnings (≤ 15)
 
-_None yet._
+- **Dispatch: up to 2 parallel workers is safe for SHORT prompts (probe range ≤ ~400 chars), with an automatic fall back to one at a time after the first empty reply; reviewers stay in pairs.** Evidence: the operator's DISPATCH DIAGNOSTIC probe (2 build probes with genuinely overlapping `cargo build --workspace` + 2 no-build probes, all 4 replies non-empty, all 4 commits present; worktrees/branches removed after). The cause of the older empty replies is a long-prompt *hypothesis*, not confirmed — identical serial prompts failed then passed on retry unchanged, so flakiness is a co-factor. Always check `git log pustman-v1/main..pustman-v1/S<N>` before treating a subagent return as progress. (2026-11-18)
 
 ## Promotions
 
