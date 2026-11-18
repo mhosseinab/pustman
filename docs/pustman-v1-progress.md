@@ -69,7 +69,7 @@ Last tag: _none_ · unpromoted passed steps: 5 (S0, S1, S2, S6, S7) · unapplied
 | S1 | Cargo workspace, toolchain, lints, CI, `api_model` skeleton | passed | 1 | `1078d67` | [S1](steps/S1.md) | PASS_WITH_ISSUES (1 LOW → issue #1); verify `VERIFY OK`; CI delta pending push+green |
 | S2 | `api_model` types: collections, folders, HTTP requests, auth, variables, settings, examples | passed | 3 | `1f77523` | [S2](steps/S2.md) | 2 cycles (1 HIGH fixed); verify `PASS 15`; LOWs → issues #2/#3/#4 |
 | S3 | Shared `redact()` (D8) | in_progress | 1 | `f6a6ade` | | worker done (PASS 5); review pending (HIGH-STAKES, 2 reviewers) |
-| S4 | `variables` resolver | in_progress | 2 | `ca4cddd` | | worker done (PASS 8); review pending |
+| S4 | `variables` resolver | passed | 2 | (see git) | [S4](steps/S4.md) | PASS_WITH_ISSUES (3 LOW → issues #8/#9/#10); `PASS 8` |
 | S5 | `workspace_store`: on-disk format, deterministic atomic writes | passed | 2 | `b08d9a8` | [S5](steps/S5.md) | 3 review rounds, 3 fix cycles; R3 PASS / PASS_WITH_ISSUES (1 pre-existing api_model LOW → issue #7); `PASS 30` |
 | S6 | `storage`: SQLite local store with migrations | passed | 3 | `a84c5a3` | [S6](steps/S6.md) | 3 review rounds, 2 fix cycles (2 data-loss MEDIUMs + 2 proof-quality MEDIUMs closed); `PASS 22`; LOWs → issues #5/#6 |
 | S7 | `secrets`: OS keychain behind a trait | passed | 1 | `626aa12` | [S7](steps/S7.md) | 2 reviewers converged on 1 MEDIUM → fixed; re-review PASS; live keyring → S25 gate |
