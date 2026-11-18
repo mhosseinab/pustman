@@ -119,6 +119,13 @@ crates with no GPUI views, sharing the `SessionEvent` shape from `docs/PRD.md` �
 ## Git & releases (v1)
 
 - Integration branch `pustman-v1/main`; each step lands as one squash commit `S<N>: <title>`.
+- Step worktrees live at `.claude/worktrees/pustman-v1/S<N>` (gitignored, survives reboots; never `/tmp`), one
+  worktree and one branch `pustman-v1/S<N>` per step. Work only inside your own worktree; never touch another
+  worktree, the main checkout or `pustman-v1/main`. Worker briefs go in `.claude/worktrees/pustman-v1/.briefs/`.
+- Run cargo from inside your worktree and let it use the worktree's own `target/`; don't set `CARGO_TARGET_DIR`
+  to a shared path (parallel builds then block on one cache). `.claude/worktrees/pustman-v1/.cargo/config.toml`
+  caps every worktree build at `[build] jobs = 4` so 4 parallel workers fit 16 cores. It is gitignored, so
+  recreate it if missing.
 - Releases are tags `release/pustman-v1-<n>` (plan D11). This is a desktop app — "staging" is the
   build host: tag → `cargo build --release -p pustman` → human manual smoke on Linux and macOS.
 - Host/env changes are typed Deploy deltas in `DEPLOY_DELTAS.md` (`codified`/`scripted`/`manual`);
