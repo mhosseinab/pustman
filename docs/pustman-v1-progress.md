@@ -75,7 +75,7 @@ Last tag: _none_ · unpromoted passed steps: 5 (S0, S1, S2, S6, S7) · unapplied
 | S7 | `secrets`: OS keychain behind a trait | passed | 1 | `626aa12` | [S7](steps/S7.md) | 2 reviewers converged on 1 MEDIUM → fixed; re-review PASS; live keyring → S25 gate |
 | S8 | `workspace_store` watcher: external changes and problems | in_progress | 1 | | | worktree .claude/worktrees/pustman-v1/S8 |
 | S9 | Postman v2.1/v2.0 import, v2.1 export, environment/globals import | passed | 1 | (see git) | [S9](steps/S9.md) | 2 review rounds, 2 fix cycles; R2 PASS_WITH_ISSUES ×2 (both recommend merge); `PASS 8` |
-| S10 | cURL import and export | pending | 0 | | |  |
+| S10 | cURL import and export | in_progress | 1 | | | worktree .claude/worktrees/pustman-v1/S10; BUILD phase only |
 | G-DEPS | Install GPUI system libraries, CI push, then promote `release/pustman-v1-1` | pending | – | | | HUMAN gate; 1/3 libraries installed, 2/3 CI green (run 44240566190); 3/3 promote open |
 | S11 | `http_engine` core: transport trait, fake, error taxonomy, send/cancel | pending | 0 | | | after G-DEPS |
 | S12 | `ReqwestTransport`: settings, manual redirects, TLS toggle, timing spike (D2) | pending | 0 | | |  |
