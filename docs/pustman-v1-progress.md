@@ -126,6 +126,7 @@ Last tag: _none_ · unpromoted passed steps: 5 (S0, S1, S2, S6, S7) · unapplied
 _None._
 
 ## Active CARRY-FORWARD
+- **`SecretValues::refused_count()` must be read and surfaced by its first caller (2026-11-18, from the S3 handover).** `insert` now returns `bool` and `refused_count()` reports values the redactor cannot mask (currently: values containing U+2022, plus too-short values; empty is not counted). F3 is only half closed until the step that wires `SecretValues` into History/Console/export reads `refused_count()` and warns the user — AGENTS.md requires errors to reach the user, and a silently dropped secret is a guaranteed leak. No code outside `api_model` calls `SecretValues` yet. Source: S3 handover + review round 3 (`585cac7`/`8623d58`).
 
 Each entry is a fact a later step must know, with its source record linked.
 
