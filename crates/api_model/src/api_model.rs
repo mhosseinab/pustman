@@ -9,6 +9,7 @@ mod auth;
 mod collection;
 mod environment;
 mod example;
+mod postman;
 mod redact;
 mod request;
 mod settings;
@@ -18,6 +19,10 @@ pub use auth::{ApiKeyLocation, Auth, AuthSource, EffectiveAuth, effective_auth};
 pub use collection::{Child, Collection, Folder, Workspace};
 pub use environment::Environment;
 pub use example::{Example, ExampleResponse};
+pub use postman::{
+    ExportReport, ImportError, ImportLimits, ImportProblem, ImportReport, SecretValuesToStore,
+    export_collection, import_collection, import_environment, import_globals,
+};
 pub use redact::{SecretValues, redact_headers, redact_text, redact_url};
 pub use request::{
     Body, FormField, HttpRequest, KeyValue, Method, MethodError, RawLanguage, Request,
