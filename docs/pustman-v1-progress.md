@@ -141,3 +141,4 @@ Each entry is a fact a later step must know, with its source record linked.
 
 | Tag | SHA | Steps | promote-check | Build | Smoke (Linux / macOS) | Brief |
 |---|---|---|---|---|---|---|
+| `release/pustman-v1-1` | `6620061` | S0–S10 | PROMOTABLE 9/9 | none (domain-only, D11) | none (domain-only, D11) | [brief](briefs/release/pustman-v1-1.md) |
