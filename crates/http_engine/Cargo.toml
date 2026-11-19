@@ -1,0 +1,32 @@
+# `http_engine` — sending requests through a Transport, the PRD §8.6 error taxonomy and
+# send/cancel (PRD §5.1, REQ-HTTP-12). The GPUI entity that owns an in-flight send lives
+# here; `ReqwestTransport` (the tokio-backed one) lands in a later step.
+
+[package]
+name = "http_engine"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/http_engine.rs"
+
+[features]
+# Exposes `FakeTransport` to other crates' tests; compiled into this crate's own tests
+# through `cfg(test)`.
+test-support = []
+
+[dependencies]
+api_model.workspace = true
+futures.workspace = true
+gpui.workspace = true
+gpui_tokio.workspace = true
+thiserror.workspace = true
+url.workspace = true
+variables.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
