@@ -1,6 +1,7 @@
 # Pustman v1 (M0–M2) — Step-by-Step Implementation
 
-**Status: READY TO EXECUTE (2026-11-17).** Companion to [`pustman-v1-plan.md`](pustman-v1-plan.md)
+**Status: READY TO EXECUTE (2026-11-17). Revised 2026-11-19 into smaller steps** (see
+[Smaller steps](#smaller-steps-2026-11-19-revision)). Companion to [`pustman-v1-plan.md`](pustman-v1-plan.md)
 (the *why*). This is the *how*: ordered, **standalone, independently verifiable** steps, each with a
 prompt you can paste as-is and an explicit Verify block. **Read-only for workers**: a worker never
 edits a Goal, a Verify block, an existing test, or this file.
@@ -119,17 +120,86 @@ earlier step's helper. No stubs, `todo!()`, `unimplemented!()` or TODO comments.
 | E2E (UI steps) | `cargo run -p pustman` + the scenario in the step | the observed behavior (needs a display; otherwise it goes to the deferred gate) |
 | Test files untouched | `git diff --name-status pustman-v1/main...HEAD -- 'crates/**/tests/**' 'crates/**/*_tests.rs' 'crates/**/test_support.rs' \| grep -v '^A'` | empty |
 
+
+## Smaller steps (2026-11-19 revision)
+
+The original 49 steps were sized for one long worker session each. This revision splits every large
+step into **sub-steps** `S<N>a`, `S<N>b`, … that each fit a short session in any harness (Claude
+Code, pi, opencode), with one module, two to four tests and a module-scoped Verify. Steps that were
+already passed or small stay whole, and their text is unchanged except for dependency IDs. The
+numbering keeps D11: a sub-step belongs to its parent's milestone tag (`S26a` is in `-3`).
+
+Five conventions make the sub-steps independent:
+
+1. **One new module per test-adding sub-step.** Existing test files are read-only, so a sub-step
+   that adds tests creates `src/<module>.rs` + `src/<module>_tests.rs` (wired with
+   `#[cfg(test)] #[path = "<module>_tests.rs"] mod tests;`). Its Verify filters on `<module>::`, so
+   the expected count is exact and no cumulative `n ≥` counts remain. Module names are unique inside
+   a crate, and no module name is a substring of another one in the same crate's filters.
+2. **Append-only shared lines are not an overlap.** Two unordered sub-steps may both append to:
+   - the crate root's `mod` declarations,
+   - one-line `<module>::init(cx)` calls inside the crate's `pub fn init`,
+   - `[dependencies]` lines in the crate's `Cargo.toml`,
+   - rows in `docs/ARCHITECTURE.md`.
+
+   They may not both edit any other line of the same file. The integrator resolves conflicts in
+   these appended lines by keeping both sides; anything else is a rebase for the rebase-resolver.
+3. **Module-local `impl` blocks.** A sub-step that adds behavior to an entity defined elsewhere adds
+   an `impl <Entity>` block in its own module instead of editing the entity's file, when the entity's
+   fields already allow it. When a new field is needed, the entity's file is in the sub-step's Edits
+   and the graph orders it after every other sub-step that edits that file.
+4. **Wire steps own the binary.** S22e turns `crates/pustman` into a library (`src/pustman.rs` with
+   `pub fn init(cx: &mut App)` holding the init order) plus a thin `src/main.rs` that only opens the
+   window. Afterwards, a crate gets registered in the app only by a **wire step** `S<N>w`. A wire step:
+   - edits `crates/pustman/src/pustman.rs` and `crates/pustman/Cargo.toml`,
+   - adds `crates/pustman/tests/wire_<feature>.rs` whose test functions are named `wire_<feature>_…`,
+   - verifies with `scripts/pustman-v1-test.sh pustman wire_<feature>` → `PASS 1` and
+     `cargo build -p pustman` → exit 0, plus the step's E2E scenario when it has one.
+
+   Feature sub-steps never touch `crates/pustman/**`.
+5. **Serial files stay serial.** A crate's main view file (`request_editor.rs`, `response_viewer.rs`,
+   `tree.rs`, `workspace.rs`, `reqwest_transport.rs`) is edited by one chain of sub-steps at a time;
+   the graph below orders every pair that shares one. Parallelism comes from new modules and from
+   different crates.
+
+**High-stakes sub-steps** (consensus review, as before): S13c and S16a (secrets), S28c (TLS),
+S43a/S43b/S43c (secrets), S45a/S45b (import), plus the unsplit S12, S37 and S47.
+
+**In-flight mapping** (2026-11-19): S12 is unchanged. The S19 worktree already holds most of the
+component files; its work continues as **S19a**, and S19b/S19c start after S19a merges.
+
+## Step counts (2026-11-19 revision)
+
+Measured by a validator script over this file and the 2026-11-17 version. Stubs and G-DEPS are not counted.
+
+| Measure | 2026-11-17 | This revision |
+| --- | --- | --- |
+| Steps (human sign-offs included) | 49 | 109 |
+| Steps touching a hotspot | 9 (18%) | 9 (8%) — only the wire steps |
+| Longest dependency chain, in steps | 23 | 31 |
+| Widest graph level (steps with no edge between them) | 5 | 10 |
+| Unordered step pairs sharing a non-append, non-hotspot file | — | 0 |
+| Original test names missing from this file | — | 0 |
+
+The chain is longer in steps but shorter in work, because each step on it is smaller. The longest chain runs
+S0→S1→S17→S18→S19a→S22a→S22b→S23a→S23b→S25→S26a→…→S28c→S29e→S33a→S33b→S33c→S38→S39a→S39b→S40a→S40b→S42a→S45a→S45b→S48.
+The driver's concurrency cap (3 workers) limits how much of the wider graph runs at once. Raising the cap
+is a driver setting; this file does not change it.
+
+
 ## Hotspots (the driver serializes them even when the graph says independent)
 
 ```
 hotspots:
-  - Cargo.lock                    # regenerate at merge, never hand-merged
-  - crates/pustman/src/main.rs    # init order; touched by S22 S24 S26 S29 S32 S34 S35 S39 S44 (9 of 49 = 18%)
-  - crates/pustman/Cargo.toml     # same steps as main.rs
+  - Cargo.lock                      # regenerate at merge, never hand-merged
+  - crates/pustman/src/pustman.rs   # init order (from S22e); touched only by wire steps
+  - crates/pustman/src/main.rs      # thin window opener; touched only by S22e
+  - crates/pustman/Cargo.toml       # same steps as pustman.rs
 ```
 
-These are under the 25% gate, so no refactor-for-parallelism step is needed. Two design choices keep
-other files off this list:
+Only the wire steps touch these files: S22e, S24w, S26w, S29w, S32w, S34w, S35w, S39w and S44w. The
+validation numbers are in [Step counts](#step-counts-2026-11-19-revision). Two earlier design
+choices still keep other files off this list:
 
 - The root `Cargo.toml` uses `members = ["crates/*"]` and declares every dependency in S1.
 - Keymaps are written once in S21.
@@ -137,30 +207,55 @@ other files off this list:
 ## Dependency graph (quick view)
 
 `A→B` = B depends on A. Steps on separate lines with no edge between them run in parallel.
-`⟂G` = waits for human gate G-DEPS.
+`⟂G` = waits for human gate G-DEPS. Each step's own **Depends on** line is authoritative; this view
+abbreviates.
 
 ```
 Phase 0 harness        S0
 Phase 1 domain         S0→S1 ; S1→S2→S3→S9→S10 ; S2→S4 ; S2→S5→S8 ; S1→S6 ; S1→S7
                        ── G-DEPS (human: install GPUI libs, push for CI) ── promote release/pustman-v1-1 ──
-Phase 2 http_engine ⟂G S2,S4→S11→S12→S13→S14→S15→S16   (S13 also needs S7; S15 needs S6; S16 needs S3,S6)
-Phase 3 shell ⟂G       S1→S17→S18→S19→S20 ; S1→S21 ; S6,S19,S21→S22→S23 ; S20,S22→S24
-                       S23,S24→S25 (M0 SIGN-OFF, human) ── promote -2
-Phase 4 HTTP UI        S16,S24,S25→S26→S27→S28→S29→S30→S31→S36
-                       S22,S16,S25→S32 ; S28,S29→S33 ; S20,S22,S4,S7,S25→S34 ; S26→S35
-                       S5,S16,S32→S37
-                       S31,S32,S33,S34,S35,S36,S37→S38 (M1 SIGN-OFF, human) ── promote -3
-Phase 5 workspaces     S38→S39→S40 ; S23,S39→S41 ; S8,S40,S41→S42 ; S36,S38→S43
-                       S41→S44 ; S9,S42→S45 ; S41→S46 ; S37,S43,S44→S47
-                       S42,S43,S45,S46,S47→S48 (M2 SIGN-OFF, human) ── promote -4
+Phase 2 http_engine ⟂G S2,S4→S11→S12
+                       S12→S13a ; S12→S13b ; S12→S14b ; S12→S15a          (parallel, new modules; S12 declares http_engine/**)
+                       S13a,S13b,S12,S7→S13c ; S12→S14c
+                       S13c,S14b,S14c→S14a ; S15a,S6→S15b ; S15a,S14a→S15c
+                       S13c,S14c,S3,S6→S16a→S16b
+Phase 3 shell ⟂G       S1→S17→S18→S19a→{S19b, S19c} ; S1→S21
+                       S19a→S20a→S20b→S20c
+                       S19a,S21→S22a→{S22b, S22c, S22d}
+                       S22a,S22d,S6,S17,S18,S21→S22e (wire)
+                       S22b,S22c,S22d,S6→S23a→S23b
+                       S19a,S20a→S24a ; S24a,S21,S22d→S24b ; S24b,S22e→S24w
+                       S19b,S19c,S20c,S23b,S24w→S25 (M0 SIGN-OFF, human) ── promote -2
+Phase 4 HTTP UI        request_editor  S25,S15c,S16b→S26a→S26b→S27a→S27b→S27c→S28a→S28b→S28c
+                                       S26b,S22e→S26w
+                       response_viewer S25,S16b→S29a→{S29b, S29c}
+                                       S29b→S30a→S30b→S30c
+                                       S29c→S30d→S30e→S31a→S31b ; S30e,S15b,S22d→S36a→S36b
+                                       S29c,S28c→S29e ; S29c,S26w→S29w
+                       variables UI    S29e→S33a→S33b→S33c ; S29e→S33d
+                       console         S25,S3,S11→S32a→{S32b, S32c, S32d} ; S32b,S32c,S32d,S22e→S32w
+                       environments    S25,S4,S7,S6→S34a→S34b ; S34b,S22e→S34w
+                       history         S25,S16b,S22c,S6→S35a→{S35b, S35c} ; S35b,S35c,S22e→S35w
+                       security        S5,S16b,S15c,S32c→S37
+                       Phase 4 leaves→S38 (M1 SIGN-OFF, human) ── promote -3
+Phase 5 workspaces     S38→S39a→S39b→{S39w, S40a} ; S40a→S40b ; S38→S40c
+                       S38,S23b,S39a→S41a→S41c ; S41a,S24b→S41b
+                       S40b,S41a,S8→S42a ; S40b→S42b ; S40c,S42a→S42c
+                       S38→S43a→S43b→S43c
+                       S38→S44a ; S44a,S41a→S44b→S44w
+                       S9,S42a,S40a→S45a→S45b ; S40b→S45c
+                       S41a,S24a→S46 ; S37,S43b,S44a→S47
+                       Phase 5 leaves→S48 (M2 SIGN-OFF, human) ── promote -4
 Phase 6+ (stubs)       S48→STUB-M3 ; S48→STUB-M4 ; S48→STUB-M5 ; S48→STUB-M6 ; STUB-M3..M6→STUB-M7
 ```
 
-The serial chains are deliberate:
+These chains are serial on purpose, because each shares a file:
 - S3→S9→S10 share `crates/api_model/src/api_model.rs`.
-- S11–S16 share `crates/http_engine/src/http_engine.rs`.
-- S26→S28→S29→S33 share `crates/request_editor/**` (S29 also edits it, so S33 waits for S29).
-- S29→S31 and S36 share `crates/response_viewer/**`.
+- `reqwest_transport.rs`: S14c→S14a→S15c. `client.rs`: S13c→S16a.
+- `request_editor.rs`: S26a→…→S28c→S29e→S33d, and S33a–c edit the field modules after S29e.
+- `response_viewer.rs`: S29a→S29c→S30d→S30e→S31a; `body_view.rs`: S29b→S30a→S30b→S30c.
+- `tree.rs`: S39a→S39b→S40a→S40b→S42b.
+- `workspace.rs`: S22a→S22d. S22b and S22c each add their own module.
 
 ---
 
@@ -638,100 +733,224 @@ timings_are_none_or_measured_never_estimated.
 - `scripts/pustman-v1-test.sh http_engine reqwest_transport` → `PASS 8`.
 - `test -f docs/decisions/ADR-0003-timing-phases.md && grep -c 'Status: Accepted' docs/decisions/ADR-0003-timing-phases.md` → `1`.
 
-### S13 — Send pipeline: variable resolution, auth (Basic/Bearer/API key), unresolved secrets
-**Goal:** `HttpRequest` + scopes + secrets become a `ResolvedRequest`:
-- Effective auth is applied.
-- Unresolved variables are reported.
-- A secret with no local value fails as `UnresolvedSecret` before any network call.
 
-**Depends on:** S12, S7.
-**Deploy delta:** none.
-**Edits:** `crates/http_engine/**`.
-
-```
-Read crates/http_engine, crates/variables, crates/secrets, crates/api_model/src/auth.rs, docs/PRD.md
-REQ-VAR-01/02/07, REQ-MODEL-01, REQ-HTTP-06 (M1 subset only: Inherit, None, Basic, Bearer, API key
-in header or query), §8.6 UnresolvedSecret. Add pipeline.rs: `prepare(request, ancestors: &[&Auth],
-scopes, secrets: &dyn SecretStore, dynamic: &mut DynamicValues) -> Result<Prepared, TransportError>`
-where Prepared = { resolved: ResolvedRequest, warnings: Vec<Warning> (UnresolvedVariables(names),
-TlsVerifyDisabled), secrets_used: SecretValues (for redaction downstream) }. Resolve URL, params,
-headers, body text, auth fields; one DynamicValues per send. Secret with no local value →
-Err(UnresolvedSecret{names}) without touching the transport. Wire HttpClient::send to call
-prepare then the transport. Do not log any value. Tests: resolves_url_headers_and_body,
-basic_auth_header_applied, bearer_inherited_from_collection, api_key_in_query,
-unresolved_variable_warns_but_sends, missing_secret_fails_before_network (assert FakeTransport saw
-zero calls), dynamic_guid_same_across_fields_in_one_send.
-```
-
-**Verify:** `scripts/pustman-v1-test.sh http_engine pipeline` → `PASS 7`.
-
-### S14 — Request bodies, file refs, auto headers, large response spill
-**Goal:**
-- Request bodies:
-  - All M1 body modes send correctly.
-  - File references resolve relative to the workspace root, and a missing file gives `FileNotFound`.
-  - Auto headers are added and listed.
-- Large responses: anything over 10 MB keeps an in-memory prefix and spills to a temp file.
-
-**Depends on:** S13. **Deploy delta:** none.
-**Edits:** `crates/http_engine/**`.
+### S13a — Variable resolution of URL, params, headers and body text
+**Goal:** a pure function turns an `HttpRequest` plus a scope stack into resolved URL, params,
+headers and body text. Unresolved names come back as a warning, and dynamic values stay stable within
+one send.
+**Depends on:** S11, S12. **Deploy delta:** none.
+**Edits:** `crates/http_engine/src/pipeline.rs`, `crates/http_engine/src/pipeline_tests.rs`,
+`crates/http_engine/src/http_engine.rs` (append `mod`), `crates/http_engine/Cargo.toml` (append deps).
 
 ```
-Read crates/http_engine, docs/PRD.md REQ-HTTP-03/04/05, REQ-RESP-06, REQ-NFR-03. Add body.rs:
-encode Body modes (form-data with text + file fields and per-field content type via reqwest
-multipart; x-www-form-urlencoded; raw with Content-Type from language unless the user set one;
-binary file) and auto headers (Content-Type, Content-Length, User-Agent "Pustman/<version>",
-Accept "*/*", Accept-Encoding, Host) listed in `ResolvedRequest.auto_headers` so the UI can show
-them; a user header with the same name wins. File refs: relative → workspace_root.join; absolute
-kept; missing → FileNotFound{path}. Responses stream: keep the first 10 MB (configurable via
-RequestSettings / global default) in memory as `ResponseBody::Prefix` and stream the rest to a
-tempfile in the OS temp dir → `ResponseBody::Spilled{prefix, path, total_len}`; temp files deleted
-on drop of the owning handle. Tests: json_raw_body_sets_content_type,
-user_content_type_overrides_auto, urlencoded_body_encodes_pairs, form_data_file_field_sent,
-relative_file_ref_resolves_from_workspace_root, missing_file_is_file_not_found_error,
+Read crates/http_engine (request.rs ResolvedRequest), crates/variables, docs/PRD.md REQ-VAR-01/02/07.
+Add src/pipeline.rs + src/pipeline_tests.rs: `resolve_request(request: &HttpRequest, scopes:
+&ScopeStack, dynamic: &mut DynamicValues) -> (ResolvedRequest, Vec<Warning>)` resolving URL,
+query params, headers and raw/urlencoded body text through crates/variables. Define `pub enum
+Warning { UnresolvedVariables(Vec<String>), TlsVerifyDisabled }` here. One DynamicValues per send:
+the same {{$guid}} in two fields resolves to the same value. Auth, secrets and body encoding are
+NOT part of this step (S13b, S13c, S14a). Pure: no IO, no logging of any value. Do not edit
+client.rs, request.rs or reqwest_transport.rs. Tests: resolves_url_headers_and_body,
+unresolved_variable_warns_but_sends, dynamic_guid_same_across_fields_in_one_send.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine pipeline::` → `PASS 3`.
+
+### S13b — Effective auth applied to a request (Basic, Bearer, API key)
+**Goal:** a pure function applies the effective auth (own or inherited) to resolved headers and query.
+**Depends on:** S11, S12. **Deploy delta:** none.
+**Edits:** `crates/http_engine/src/request_auth.rs`, `crates/http_engine/src/request_auth_tests.rs`,
+`crates/http_engine/src/http_engine.rs` (append `mod`).
+
+```
+Read crates/api_model/src/auth.rs (effective_auth), crates/http_engine/src/request.rs, docs/PRD.md
+REQ-MODEL-01, REQ-HTTP-06 (M1 subset only: Inherit, None, Basic, Bearer, API key in header or
+query). Add src/request_auth.rs + src/request_auth_tests.rs: `apply_auth(resolved: &mut
+ResolvedRequest, own: &Auth, ancestors: &[&Auth], resolve: impl Fn(&str) -> String)` — Inherit walks
+the ancestors (request → folder → collection), None adds nothing, Basic sets `Authorization: Basic
+<base64>`, Bearer sets `Authorization: Bearer <token>`, API key adds a header or a query param. Auth
+field values go through `resolve` so {{vars}} work. Pure: no IO, no logging. Do not edit client.rs or
+pipeline.rs. Tests: basic_auth_header_applied, bearer_inherited_from_collection, api_key_in_query.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine request_auth::` → `PASS 3`.
+
+### S13c — `prepare` + `HttpClient::send` wiring; unresolved secret fails before the network
+**Goal:** `HttpClient::send` prepares every request (variables, auth, secrets) before the transport.
+A secret with no local value fails as `UnresolvedSecret` and the transport sees zero calls.
+**Depends on:** S13a, S13b, S12, S7. **Deploy delta:** none. **High-stakes (secrets).**
+**Edits:** `crates/http_engine/src/prepare.rs`, `crates/http_engine/src/prepare_tests.rs`,
+`crates/http_engine/src/client.rs`, `crates/http_engine/src/http_engine.rs` (append `mod`),
+`crates/http_engine/Cargo.toml` (append deps).
+
+```
+Read crates/http_engine (client.rs, pipeline.rs, request_auth.rs), crates/secrets (SecretStore,
+MemorySecretStore), docs/PRD.md §8.6 UnresolvedSecret. Add src/prepare.rs + src/prepare_tests.rs:
+`prepare(request, ancestors: &[&Auth], scopes, secrets: &dyn SecretStore, dynamic: &mut
+DynamicValues) -> Result<Prepared, TransportError>` where Prepared = { resolved: ResolvedRequest,
+warnings: Vec<Warning>, secrets_used: SecretValues (for redaction downstream) }. Look up every
+secret variable the request references; any with no local value → Err(UnresolvedSecret{names})
+before anything else runs. Then resolve_request (pipeline.rs) and apply_auth (request_auth.rs).
+Wire HttpClient::send to call prepare, then the transport. Never log a value; secrets_used carries
+them only for redaction. Test: missing_secret_fails_before_network (assert FakeTransport saw zero
+calls).
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine prepare::` → `PASS 1`.
+
+### S14b — File references resolve from the workspace root
+**Goal:** body file references resolve relative to the workspace root. A missing file is a
+`FileNotFound` error naming the path.
+**Depends on:** S11, S12. **Deploy delta:** none.
+**Edits:** `crates/http_engine/src/file_ref.rs`, `crates/http_engine/src/file_ref_tests.rs`,
+`crates/http_engine/src/http_engine.rs` (append `mod`).
+
+```
+Read crates/http_engine/src/error.rs, docs/PRD.md REQ-HTTP-04/05. Add src/file_ref.rs +
+src/file_ref_tests.rs: `resolve_file_ref(workspace_root: &Path, reference: &str) -> Result<PathBuf,
+TransportError>` — relative → workspace_root.join, absolute kept, missing → FileNotFound{path}. The
+existence check runs where the caller runs it (the body encoder calls it from a background task,
+never the foreground). Tests: relative_file_ref_resolves_from_workspace_root,
+missing_file_is_file_not_found_error.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine file_ref::` → `PASS 2`.
+
+### S14c — Large responses spill to a temp file
+**Goal:** a response over the limit (10 MB by default) keeps an in-memory prefix and streams the rest
+to a temp file, which is deleted when its owning handle drops.
+**Depends on:** S12. **Deploy delta:** none.
+**Edits:** `crates/http_engine/src/spill.rs`, `crates/http_engine/src/spill_tests.rs`,
+`crates/http_engine/src/response.rs`, `crates/http_engine/src/reqwest_transport.rs`,
+`crates/http_engine/src/http_engine.rs` (append `mod`), `crates/http_engine/Cargo.toml` (append deps).
+
+```
+Read crates/http_engine (response.rs ResponseBody, reqwest_transport.rs), docs/PRD.md REQ-RESP-06,
+REQ-NFR-03. Add src/spill.rs + src/spill_tests.rs: a writer that keeps the first N bytes (N from
+RequestSettings / global default, 10 MB) as `ResponseBody::Prefix` and streams the remainder to a
+tempfile in the OS temp dir → `ResponseBody::Spilled{prefix, path, total_len}`; the temp file is
+removed when the owning handle drops. Make ReqwestTransport stream the body through it (no whole-body
+buffering). Do not change redirect, TLS or timing behavior from S12. Tests:
 response_over_limit_spills_to_temp_file, temp_file_removed_on_drop.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh http_engine body` → `PASS 8`.
+**Verify:** `scripts/pustman-v1-test.sh http_engine spill::` → `PASS 2`.
 
-### S15 — Cookie jar per workspace
-**Goal:** cookies are captured from responses, applied to matching requests, and persisted per
-workspace through `storage`. Workspace files never hold them.
-**Depends on:** S14, S6. **Deploy delta:** none.
-**Edits:** `crates/http_engine/**`.
-
-```
-Read docs/PRD.md REQ-HTTP-08, REQ-WSP-06, crates/storage (cookies table), crates/http_engine. Add
-cookies.rs: a per-workspace `CookieJar` (cookie_store crate) applied manually in ReqwestTransport
-(so redirect hops capture/apply cookies too); load from / save to storage on a background task
-(never on the foreground); API for the Manage Cookies UI: list, add, edit, delete, clear by
-domain. The applied Cookie header appears in the resolved request (REQ-NET-04). Tests:
-set_cookie_captured_and_sent_on_next_request, cookie_scoped_by_domain_and_path,
-redirect_hop_cookie_applied, jar_persists_and_reloads_from_storage, delete_cookie_removes_it.
-```
-
-**Verify:** `scripts/pustman-v1-test.sh http_engine cookie` → `PASS 5`.
-
-### S16 — History recording with redaction, 1 MB cap, retention
-**Goal:** every send writes a history row with redacted, pre-resolution request data. The response
-summary is stored and bodies are capped at 1 MB. Retention prunes old rows.
-**Depends on:** S15, S3, S6. **Deploy delta:** none.
-**Edits:** `crates/http_engine/**`.
+### S14a — Request body modes and auto headers
+**Goal:** all M1 body modes send correctly. Auto headers are added, listed in the resolved request,
+and a user header with the same name wins.
+**Depends on:** S13c, S14b, S14c. **Deploy delta:** none.
+**Edits:** `crates/http_engine/src/body.rs`, `crates/http_engine/src/body_tests.rs`,
+`crates/http_engine/src/request.rs`, `crates/http_engine/src/prepare.rs`,
+`crates/http_engine/src/reqwest_transport.rs`, `crates/http_engine/src/http_engine.rs` (append `mod`),
+`crates/http_engine/Cargo.toml` (append deps).
 
 ```
-Read docs/PRD.md §8.5 (REQ-HIST-01..04), REQ-NFR-04, crates/api_model/src/redact.rs, crates/storage
-history repo. Add history.rs: after each send (success, error or cancel) build a HistoryRecord from
-the PRE-resolution HttpRequest (so {{vars}} stay as written) + response summary (status, timings,
-sizes, headers redacted) + body prefix ≤ 1 MB; run redact on every text field with the send's
-secrets_used plus header rules; write on a background task; prune by the retention setting
-(default 30 days) at most once per app session. Tests: history_stores_pre_resolution_request,
-history_never_contains_secret_value (scan the whole SQLite file bytes for the secret),
-history_body_capped_at_one_megabyte, cancelled_send_recorded_as_cancelled,
+Read crates/http_engine (prepare.rs, file_ref.rs, reqwest_transport.rs), docs/PRD.md REQ-HTTP-03/04/05.
+Add src/body.rs + src/body_tests.rs: encode Body modes — form-data with text + file fields and
+per-field content type via reqwest multipart; x-www-form-urlencoded; raw with Content-Type from the
+language unless the user set one; binary file. File fields use resolve_file_ref. Auto headers
+(Content-Type, Content-Length, User-Agent "Pustman/<version>", Accept "*/*", Accept-Encoding, Host)
+are listed in a new `ResolvedRequest.auto_headers` so the UI can show them; a user header with the
+same name wins. prepare() fills them; ReqwestTransport sends the encoded body. File reads happen on
+a background task. Tests: json_raw_body_sets_content_type, user_content_type_overrides_auto,
+urlencoded_body_encodes_pairs, form_data_file_field_sent.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine body::` → `PASS 4`.
+
+### S15a — Per-workspace cookie jar and its management API
+**Goal:** a `CookieJar` stores cookies with domain and path scoping and offers the list, add, edit,
+delete and clear-by-domain API the Manage Cookies UI needs.
+**Depends on:** S11, S12. **Deploy delta:** none.
+**Edits:** `crates/http_engine/src/cookies.rs`, `crates/http_engine/src/cookies_tests.rs`,
+`crates/http_engine/src/http_engine.rs` (append `mod`), `crates/http_engine/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md REQ-HTTP-08, REQ-WSP-06. Check the cookie_store crate's current API with Context7
+before using it. Add src/cookies.rs + src/cookies_tests.rs: a per-workspace `CookieJar` wrapping
+cookie_store: `store_response_cookies(url, set_cookie_headers)`, `cookie_header_for(url) ->
+Option<String>`, and `list`, `add`, `edit`, `delete`, `clear_domain`. No transport wiring (S15c) and
+no persistence (S15b) here. Never log cookie values. Tests: cookie_scoped_by_domain_and_path,
+delete_cookie_removes_it.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine cookies::` → `PASS 2`.
+
+### S15b — Cookie jar persists through `storage`
+**Goal:** the jar loads from and saves to the `storage` cookies table on a background task. Workspace
+files never hold cookies.
+**Depends on:** S15a, S6. **Deploy delta:** none.
+**Edits:** `crates/http_engine/src/cookie_persistence.rs`,
+`crates/http_engine/src/cookie_persistence_tests.rs`, `crates/http_engine/src/http_engine.rs`
+(append `mod`), `crates/http_engine/Cargo.toml` (append deps).
+
+```
+Read crates/storage (cookies table), crates/http_engine/src/cookies.rs, docs/PRD.md REQ-WSP-06.
+Add src/cookie_persistence.rs + src/cookie_persistence_tests.rs: `load_jar(store, workspace_id)`
+and `save_jar(store, workspace_id, &CookieJar)`, both run on a background task (never the
+foreground). Cookies are local state: they go to SQLite, never to workspace files. Test:
+jar_persists_and_reloads_from_storage.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine cookie_persistence::` → `PASS 1`.
+
+### S15c — Cookies applied by the transport, including redirect hops
+**Goal:** `ReqwestTransport` captures `Set-Cookie` and applies the jar on every hop, including
+redirects. The applied `Cookie` header appears in the resolved request.
+**Depends on:** S15a, S14a. **Deploy delta:** none.
+**Edits:** `crates/http_engine/src/cookie_transport.rs`,
+`crates/http_engine/src/cookie_transport_tests.rs`, `crates/http_engine/src/reqwest_transport.rs`,
+`crates/http_engine/src/http_engine.rs` (append `mod`).
+
+```
+Read crates/http_engine (cookies.rs, reqwest_transport.rs manual redirects), docs/PRD.md REQ-HTTP-08,
+REQ-NET-04. Add src/cookie_transport.rs + src/cookie_transport_tests.rs: ReqwestTransport holds a
+shared CookieJar handle and applies it manually on each hop (reqwest's own cookie store stays off),
+so redirect hops capture and apply cookies too; the Cookie header actually sent is recorded in the
+resolved request. Do not edit client.rs. Never log cookie values. Tests (loopback servers from
+test_server.rs): set_cookie_captured_and_sent_on_next_request, redirect_hop_cookie_applied.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine cookie_transport::` → `PASS 2`.
+
+### S16a — History recording with redaction and a 1 MB body cap
+**Goal:** every send (success, error or cancel) writes a history row built from the redacted,
+pre-resolution request plus a response summary with the body capped at 1 MB.
+**Depends on:** S13c, S14c, S3, S6. **Deploy delta:** none. **High-stakes (secrets).**
+**Edits:** `crates/http_engine/src/history.rs`, `crates/http_engine/src/history_tests.rs`,
+`crates/http_engine/src/client.rs`, `crates/http_engine/src/http_engine.rs` (append `mod`),
+`crates/http_engine/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md §8.5 (REQ-HIST-01..03), REQ-NFR-04, crates/api_model/src/redact.rs, crates/storage
+history repo, crates/http_engine/src/client.rs. Add src/history.rs + src/history_tests.rs: after
+each send (success, error or cancel) build a HistoryRecord from the PRE-resolution HttpRequest (so
+{{vars}} stay as written) + response summary (status, timings, sizes, headers redacted) + body
+prefix ≤ 1 MB; run redact on every text field with the send's secrets_used plus header rules; write
+on a background task. Hook it into HttpClient::send. Retention is S16b. Never log values. Tests:
+history_stores_pre_resolution_request, history_never_contains_secret_value (scan the whole SQLite
+file bytes for the secret), history_body_capped_at_one_megabyte, cancelled_send_recorded_as_cancelled.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine history::` → `PASS 4`.
+
+### S16b — History retention
+**Goal:** history rows older than the retention setting (30 days by default) are pruned at most once
+per app session.
+**Depends on:** S16a. **Deploy delta:** none.
+**Edits:** `crates/http_engine/src/retention.rs`, `crates/http_engine/src/retention_tests.rs`,
+`crates/http_engine/src/history.rs`, `crates/http_engine/src/http_engine.rs` (append `mod`).
+
+```
+Read docs/PRD.md REQ-HIST-04, crates/http_engine/src/history.rs, crates/storage history repo. Add
+src/retention.rs + src/retention_tests.rs: prune by the retention setting (default 30 days) at most
+once per app session, triggered from the history writer on a background task. Test:
 retention_prunes_entries_older_than_setting.
 ```
 
 **Verify:**
-- `scripts/pustman-v1-test.sh http_engine history` → `PASS 5`.
+- `scripts/pustman-v1-test.sh http_engine retention::` → `PASS 1`.
 - At merge: `scripts/pustman-v1-verify.sh | tail -1` → `VERIFY OK`.
 
 ---
@@ -783,50 +1002,128 @@ text/background pairs listed in a const table).
 
 **Verify:** `scripts/pustman-v1-test.sh theme` → `PASS 3`.
 
-### S19 — `ui` design-system crate: tokens and base components
-**Goal:** a prelude of our own components that every later UI step uses:
-- Button, IconButton, Label, Icon, Tab/TabBar, Table, Toggle, Tooltip, ContextMenu, Modal frame,
-  Toast, Badge, Divider, List with virtualization
 
+### S19a — `ui` crate root, prelude and base components
+**Goal:** the `ui` crate builds with a `prelude` holding the base components: Button, IconButton,
+Label, Icon, Tab/TabBar, Table, Toggle, Tooltip, Modal frame, Toast, Badge and Divider. It also ships
+the 16x16 icon set and its license.
 **Depends on:** S18. **Deploy delta:** none.
 **Edits:**
-- `crates/ui/**`
+- `crates/ui/Cargo.toml`, `crates/ui/src/ui.rs`, `crates/ui/src/prelude.rs`
+- `crates/ui/src/components/*.rs`, except `context_menu.rs`, `list.rs`, `tab_bar_tests.rs` and `toast_tests.rs`
 - `assets/icons/**`
 
 ```
 Load the rust-gpui-ui-ux skill (components, spacing, accessibility references). Read docs/PRD.md §3,
-REQ-UI-07, REQ-NFR-06. Build crates/ui with a `prelude` module; every component is RenderOnce or
-an Entity as the skill prescribes, reads colors only from cx.theme(), takes a stable ElementId,
-is keyboard-focusable where interactive, and has an accessible label. Icons: 16x16 SVGs
-(Lucide-derived, ISC license noted in assets/icons/LICENSE) for the set PRD M0–M2 needs; embed via
-an AssetSource. Do NOT generate raster images. Include a `story`-style test view rendering every
-component. Tests (#[gpui::test] with VisualTestContext): all_components_render_in_both_themes,
-button_activates_on_enter_and_space, tab_bar_cycles_with_keyboard, toast_auto_dismisses_after_timeout
-(GPUI timer), virtual_list_renders_only_visible_rows.
-Report which ux-checklist.md items you verified.
+REQ-UI-07, REQ-NFR-06. Build crates/ui with a `prelude` module. Every component is RenderOnce or an
+Entity as the skill prescribes, reads colors only from cx.theme(), takes a stable ElementId, is
+keyboard-focusable where interactive, and has an accessible label. Components here: Button,
+IconButton, Label, Icon, Tab/TabBar, Table, Toggle, Tooltip, Modal frame, Toast, Badge, Divider.
+ContextMenu, the virtual List and the story view are S19b; the TabBar and Toast tests are S19c.
+Icons: 16x16 SVGs (Lucide-derived, ISC license noted in assets/icons/LICENSE) for the set PRD M0–M2
+needs, embedded via an AssetSource. Do NOT generate raster images. No tests in this step: it is the
+base S19b/S19c test against. If you are resuming the S19 worktree, keep its work and trim it to
+this scope.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh ui` → `PASS 5`.
+**Verify:**
+- `cargo build -p ui` → exit 0.
+- `cargo clippy -p ui --all-targets -- -D warnings` → exit 0.
+- `test -f assets/icons/LICENSE && echo ok` → `ok`.
 
-### S20 — `text_input` crate: single- and multi-line editing
-**Goal:** text fields support typing, selection, clipboard, undo and IME through
-`EntityInputHandler`. They expose highlight ranges for variable spans.
-**Depends on:** S19. **Deploy delta:** none.
-**Edits:** `crates/text_input/**`.
+### S19b — ContextMenu, virtual List and the story view
+**Goal:** ContextMenu and a virtualized List join the prelude, and a story view renders every
+component in both themes.
+**Depends on:** S19a. **Deploy delta:** none.
+**Edits:**
+- `crates/ui/src/components/context_menu.rs`, `crates/ui/src/components/list.rs`, `crates/ui/src/components/list_tests.rs`
+- `crates/ui/src/story.rs`, `crates/ui/src/story_tests.rs`
+- `crates/ui/src/ui.rs`, `crates/ui/src/prelude.rs`, `crates/ui/src/components.rs` (append `mod`/`pub use` lines only)
+
+```
+Load rust-gpui-ui-ux (components, lists). Read crates/ui (S19a). Add ContextMenu (keyboard
+navigable, Esc closes, accessible labels) and a virtualized List built on GPUI's uniform_list
+(renders only visible rows, stable ids from item keys). Add src/story.rs: a test view rendering
+every prelude component. Theme colors only via cx.theme(). Tests (#[gpui::test] with
+VisualTestContext): story_tests.rs: all_components_render_in_both_themes,
+button_activates_on_enter_and_space; components/list_tests.rs: virtual_list_renders_only_visible_rows.
+Do not edit any other component's file. Report which ux-checklist.md items you verified.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh ui story::` → `PASS 2`.
+- `scripts/pustman-v1-test.sh ui components::list::` → `PASS 1`.
+
+### S19c — TabBar keyboard cycling and Toast auto-dismiss
+**Goal:** TabBar cycles with the keyboard, and Toast dismisses itself after its timeout on a GPUI timer.
+**Depends on:** S19a. **Deploy delta:** none.
+**Edits:**
+- `crates/ui/src/components/tab_bar_tests.rs`, `crates/ui/src/components/toast_tests.rs`
+- `crates/ui/src/components/tab_bar.rs`, `crates/ui/src/components/toast.rs` (only the `#[cfg(test)] #[path]` line, plus behavior when the tests need it)
+
+```
+Load rust-gpui-ui-ux and gpui-testing. Read crates/ui/src/components/{tab_bar,toast}.rs. Add tests,
+and the behavior they need when it is missing: tab_bar_tests.rs: tab_bar_cycles_with_keyboard;
+toast_tests.rs: toast_auto_dismisses_after_timeout (advance the GPUI test clock; never
+smol::Timer or thread::sleep). Toast timers are Tasks stored on the entity. Do not touch
+context_menu.rs, list.rs or story.rs.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh ui components::tab_bar::` → `PASS 1`.
+- `scripts/pustman-v1-test.sh ui components::toast::` → `PASS 1`.
+
+### S20a — `text_input`: buffer and single-line TextInput
+**Goal:** a single-line TextInput supports typing, cursor movement by character and word,
+shift-selection, IME through `EntityInputHandler`, a placeholder and read-only mode. Enter emits
+`Submitted`, and edits emit `Changed`.
+**Depends on:** S19a. **Deploy delta:** none.
+**Edits:** `crates/text_input/Cargo.toml`, `crates/text_input/src/text_input.rs`,
+`crates/text_input/src/buffer.rs`, `crates/text_input/src/input.rs`, `crates/text_input/src/input_tests.rs`.
 
 ```
 Load the rust-gpui-ui-ux skill (text input reference) and read GPUI's examples/input.rs at the
-pinned rev (Apache — may be adapted). Build TextInput (single-line) and TextArea (multi-line,
-line numbers optional, soft wrap) entities: cursor movement by char/word/line, selection with
-shift, select-all, copy/cut/paste, undo/redo, IME via EntityInputHandler, placeholder, read-only
-mode, `set_highlights(Vec<(Range<usize>, HighlightStyle)>)` for variable spans, emits
-`Changed`/`Submitted` events. Typing must not reallocate the whole buffer per keystroke for large
-bodies (use a rope or gap buffer; record a Decision). Tests: typing_inserts_at_cursor,
-word_motion_and_shift_selection, undo_redo_restores_text, paste_replaces_selection,
-highlights_survive_edits_before_them, enter_in_single_line_emits_submitted.
+pinned rev (Apache — may be adapted). src/buffer.rs: a rope or gap buffer so typing never
+reallocates the whole text per keystroke (record a Decision). src/input.rs: TextInput entity —
+cursor by char/word, shift selection, select-all, IME via EntityInputHandler, placeholder,
+read-only, `Changed`/`Submitted` events. Clipboard and undo are S20b; TextArea and highlights are
+S20c. Tests (input_tests.rs): typing_inserts_at_cursor, word_motion_and_shift_selection,
+enter_in_single_line_emits_submitted.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh text_input` → `PASS 6`.
+**Verify:** `scripts/pustman-v1-test.sh text_input input::` → `PASS 3`.
+
+### S20b — Clipboard and undo/redo
+**Goal:** copy, cut and paste work, and undo/redo restores text and selection.
+**Depends on:** S20a. **Deploy delta:** none.
+**Edits:** `crates/text_input/src/editing.rs`, `crates/text_input/src/editing_tests.rs`,
+`crates/text_input/src/input.rs` (action registration), `crates/text_input/src/text_input.rs` (append `mod`).
+
+```
+Read crates/text_input (buffer.rs, input.rs). src/editing.rs: an undo stack of edit transactions
+(coalescing consecutive typing), copy/cut/paste through cx clipboard, paste replaces the selection.
+Register the actions on TextInput. Tests (editing_tests.rs): undo_redo_restores_text,
+paste_replaces_selection.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh text_input editing::` → `PASS 2`.
+
+### S20c — Multi-line TextArea and highlight ranges
+**Goal:** a multi-line TextArea (soft wrap, optional line numbers) shares the buffer and editing.
+`set_highlights(Vec<(Range<usize>, HighlightStyle)>)` survives edits made before a highlighted span.
+**Depends on:** S20b. **Deploy delta:** none.
+**Edits:** `crates/text_input/src/text_area.rs`, `crates/text_input/src/highlights.rs`,
+`crates/text_input/src/highlights_tests.rs`, `crates/text_input/src/input.rs`,
+`crates/text_input/src/text_input.rs` (append `mod`).
+
+```
+Read crates/text_input. src/text_area.rs: TextArea entity — line motion, soft wrap, optional line
+numbers, the same editing actions as TextInput. src/highlights.rs: `set_highlights` on both inputs;
+ranges shift with edits before them (anchors). Tests (highlights_tests.rs):
+highlights_survive_edits_before_them.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh text_input highlights::` → `PASS 1`.
 
 ### S21 — `pustman_actions` + complete default keymaps (D10)
 **Goal:** every PRD action is declared in one crate, and the default keymaps bind every PRD
@@ -853,83 +1150,189 @@ PRD §3 bindings asserted against each platform file), no_duplicate_bindings_in_
 
 **Verify:** `scripts/pustman-v1-test.sh pustman_actions` → `PASS 4`.
 
-### S22 — `pustman` binary + `workspace` shell (window, docks, panes/tabs, status bar, toasts)
-**Goal:** `cargo run -p pustman` opens a window with:
-- a left dock
-- a center pane with tabs
-- a bottom dock
-- a status bar
-- toasts
 
-Startup time is traced.
-**Depends on:** S6, S19, S21. **Deploy delta:** none.
-**Edits:**
-- `crates/pustman/**` (hotspot)
-- `crates/workspace/**`
+### S22a — `workspace` crate: Workspace, docks and status bar
+**Goal:** a `Workspace` entity renders a left dock, a center pane, a bottom dock and a status bar
+(`add_left_item` and `add_right_item`). `ToggleSidebar` and `ToggleConsole` hide and show the docks.
+**Depends on:** S19a, S21. **Deploy delta:** none.
+**Edits:** `crates/workspace/Cargo.toml`, `crates/workspace/src/workspace.rs`,
+`crates/workspace/src/workspace_tests.rs`, `crates/workspace/src/pane.rs`,
+`crates/workspace/src/dock.rs`, `crates/workspace/src/status_bar.rs`.
 
 ```
-Load rust-gpui-ui-ux and pustman-feature-crate skills. Read AGENTS.md (init order), docs/PRD.md §3
-(REQ-UI-01/02/04/07), REQ-NFR-02. Write our own workspace crate (Zed's is GPL — patterns only):
-Workspace entity with left Dock, center PaneGroup (single Pane with tabs is enough for M0;
-reorder, close, pin, dirty dot), bottom Dock, StatusBar with `add_left_item/add_right_item`,
-`Panel` trait so feature crates register their own panels (no edits to workspace for each
-panel), `Item` trait for tab contents, ModalLayer, toast notifications (`workspace.show_toast`).
-A placeholder "Welcome" item is allowed as the empty-state view (it is real UI, not a stub).
-Handlers for NewTab/CloseTab/NextTab/PreviousTab/ToggleSidebar/ToggleConsole. crates/pustman:
-main.rs initializes settings → theme → ui → pustman_actions keymap → storage (open LocalStore in
-the platform data dir on a background task; failure → toast and in-memory store) → workspace, opens
-the window. With PUSTMAN_STARTUP_TRACE=1 print `startup_ms=<n>` to stderr at the first frame
-painted. Tests (#[gpui::test]): workspace_opens_with_docks_and_status_bar,
-close_tab_action_closes_active_tab, next_tab_cycles, toggle_sidebar_hides_left_dock,
-toast_shows_and_dismisses, panel_registration_adds_dock_entry.
+Load rust-gpui-ui-ux and pustman-feature-crate. Read AGENTS.md (init order), docs/PRD.md §3
+(REQ-UI-01/02/04/07). Write our own workspace crate (Zed's is GPL — patterns only): Workspace entity
+with left Dock, center Pane (a minimal pane holding items; tabs are S22b), bottom Dock, StatusBar
+with add_left_item/add_right_item; `pub fn init(cx)` registering ToggleSidebar/ToggleConsole
+handlers. Do not touch crates/pustman. Tests (workspace_tests.rs):
+workspace_opens_with_docks_and_status_bar, toggle_sidebar_hides_left_dock.
 ```
 
 **Verify:**
-- `scripts/pustman-v1-test.sh workspace` → `PASS 6`.
+- `scripts/pustman-v1-test.sh workspace workspace_opens_with_docks_and_status_bar` → `PASS 1`.
+- `scripts/pustman-v1-test.sh workspace toggle_sidebar_hides_left_dock` → `PASS 1`.
+
+### S22b — Pane tabs and the `Item` trait
+**Goal:** the center pane shows tabs (reorder, close, pin, dirty dot) for items that implement the
+`Item` trait. A Welcome item is the empty state. `NewTab`, `CloseTab`, `NextTab` and `PreviousTab` work.
+**Depends on:** S22a. **Deploy delta:** none.
+**Edits:** `crates/workspace/src/item.rs`, `crates/workspace/src/pane_tabs.rs`,
+`crates/workspace/src/pane_tabs_tests.rs`, `crates/workspace/src/welcome.rs`,
+`crates/workspace/src/pane.rs`, `crates/workspace/src/workspace.rs` (append `mod`/init lines only).
+
+```
+Read crates/workspace. src/item.rs: `Item` trait for tab contents (title, dirty, serialize_draft hook
+returning Option<String>, default None). src/pane_tabs.rs: tab strip on Pane using ui TabBar —
+reorder, close, pin, dirty dot; handlers for NewTab/CloseTab/NextTab/PreviousTab. src/welcome.rs: a
+Welcome item as the empty state (real UI, not a stub). Tests (pane_tabs_tests.rs):
+close_tab_action_closes_active_tab, next_tab_cycles.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh workspace pane_tabs::` → `PASS 2`.
+
+### S22c — `Panel` trait and dock registration
+**Goal:** feature crates register their own dock panels through a `Panel` trait, so a new panel
+never needs a workspace edit.
+**Depends on:** S22a. **Deploy delta:** none.
+**Edits:** `crates/workspace/src/panel.rs`, `crates/workspace/src/panel_tests.rs`,
+`crates/workspace/src/dock.rs`, `crates/workspace/src/workspace.rs` (append `mod`/init lines only).
+
+```
+Read crates/workspace (dock.rs). src/panel.rs: `Panel` trait (id, title, icon, position Left/Bottom,
+focus) and `Workspace::register_panel` storing panels in their dock; dock shows a selector entry per
+panel. Tests (panel_tests.rs): panel_registration_adds_dock_entry.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh workspace panel::` → `PASS 1`.
+
+### S22d — Toasts and the modal layer
+**Goal:** `workspace.show_toast(...)` shows a toast that dismisses itself, and a `ModalLayer` hosts
+one modal at a time.
+**Depends on:** S22a. **Deploy delta:** none.
+**Edits:** `crates/workspace/src/toast_layer.rs`, `crates/workspace/src/toast_layer_tests.rs`,
+`crates/workspace/src/modal_layer.rs`, `crates/workspace/src/status_bar.rs`,
+`crates/workspace/src/workspace.rs`.
+
+```
+Read crates/workspace, crates/ui Toast. src/toast_layer.rs: Workspace::show_toast(message, level,
+optional action) using ui Toast, timers as stored Tasks. src/modal_layer.rs: ModalLayer
+(toggle_modal, dismiss on Esc and click-outside, focus restore). Render both from workspace.rs.
+Tests (toast_layer_tests.rs): toast_shows_and_dismisses.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh workspace toast_layer::` → `PASS 1`.
+
+### S22e — `pustman` binary becomes library + window (wire step)
+**Goal:** `cargo run -p pustman` opens the workspace window. `crates/pustman` becomes a library:
+`src/pustman.rs` holds `pub fn init(cx)` and the init order, and `src/main.rs` only opens the
+window. Startup time is traced.
+**Depends on:** S22a, S22d, S6, S17, S18, S21. **Deploy delta:** none.
+**Edits:**
+- `crates/pustman/Cargo.toml` (hotspot)
+- `crates/pustman/src/pustman.rs` (hotspot)
+- `crates/pustman/src/main.rs` (hotspot)
+- `crates/pustman/tests/wire_shell.rs`
+
+```
+Load pustman-feature-crate. Read AGENTS.md (init order), docs/PRD.md REQ-NFR-02, the "Smaller steps"
+section of this doc (convention 4). crates/pustman: [lib] path = "src/pustman.rs" with `pub fn
+init(cx: &mut App)` calling settings → theme → ui → pustman_actions keymap → storage (open
+LocalStore in the platform data dir on a background task; failure → toast and in-memory store) →
+workspace, one line per crate so later wire steps append. src/main.rs: run the app, call
+pustman::init, open the window; with PUSTMAN_STARTUP_TRACE=1 print `startup_ms=<n>` to stderr at the
+first painted frame. tests/wire_shell.rs (#[gpui::test]): wire_shell_init_opens_workspace_with_docks.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh pustman wire_shell` → `PASS 1`.
 - `cargo build -p pustman` → exit 0.
 - E2E (display): `PUSTMAN_STARTUP_TRACE=1 cargo run --release -p pustman` prints `startup_ms=<n>`, and the window shows the docks and status bar.
 
-### S23 — Tab and layout restore
-**Goal:** open tabs (with unsaved drafts), dock sizes and visibility are restored after a restart.
-Drafts autosave every 2 s.
-**Depends on:** S22. **Deploy delta:** none.
-**Edits:** `crates/workspace/**`.
+### S23a — Layout and tab restore
+**Goal:** dock sizes, dock visibility and open tabs (order, pinned, active, draft) are restored
+after a restart. A tab whose backing file vanished is reported, not restored.
+**Depends on:** S22b, S22c, S22d, S6. **Deploy delta:** none.
+**Edits:** `crates/workspace/src/restore.rs`, `crates/workspace/src/restore_tests.rs`,
+`crates/workspace/src/workspace.rs` (append `mod`/init lines only), `crates/workspace/Cargo.toml` (append deps).
 
 ```
 Read docs/PRD.md REQ-UI-01/02, REQ-NFR-05, crates/workspace, crates/storage (open_tabs, layout).
-Serialize layout (dock sizes/visibility) and open tabs (item ids, order, pinned, active,
-draft_json via an `Item::serialize_draft` hook) to storage on change, debounced, on a background
-task; restore on window open; autosave drafts every 2 s using a GPUI timer task stored on the
-Workspace. Items whose backing file vanished restore as closed and a toast says so. Tests:
-layout_restored_after_reopen, tabs_restored_in_order_with_active_and_pinned,
-draft_autosaved_after_two_seconds (advance the test clock), missing_item_reported_not_restored.
+src/restore.rs: serialize layout and open tabs (item ids, order, pinned, active, draft_json via
+Item::serialize_draft) to storage on change, debounced, on a background task; restore on window
+open; vanished items → toast, not restored. Tests (restore_tests.rs): layout_restored_after_reopen,
+tabs_restored_in_order_with_active_and_pinned, missing_item_reported_not_restored.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh workspace restore` → `PASS 4` (filter matches the 4 new tests).
+**Verify:** `scripts/pustman-v1-test.sh workspace restore::` → `PASS 3`.
 
-### S24 — Command palette
-**Goal:** `Ctrl/Cmd-Shift-P` opens a fuzzy palette listing every available action with its keybinding.
-Choosing an entry dispatches the action.
-**Depends on:** S20, S22. **Deploy delta:** none.
-**Edits:**
-- `crates/command_palette/**`
-- `crates/pustman/src/main.rs` (hotspot)
-- `crates/pustman/Cargo.toml` (hotspot)
+### S23b — Draft autosave
+**Goal:** dirty drafts autosave every 2 s on a GPUI timer task stored on the Workspace.
+**Depends on:** S23a. **Deploy delta:** none.
+**Edits:** `crates/workspace/src/autosave.rs`, `crates/workspace/src/autosave_tests.rs`,
+`crates/workspace/src/workspace.rs` (append `mod`/init lines only).
 
 ```
-Load rust-gpui-ui-ux and gpui-actions-keymaps. Read docs/PRD.md REQ-UI-05. Write our own Picker
-(Zed's picker is GPL — patterns only) inside crates/command_palette (or crates/ui if generic —
-record a Decision): modal with TextInput query, fuzzy-ranked list (own simple scorer), keyboard
-up/down/enter/escape, shows the binding for each action from the active keymap. Register init in
-main.rs. Tests: palette_lists_every_registered_action_with_binding, fuzzy_query_ranks_prefix_first,
-enter_dispatches_selected_action, escape_dismisses.
+Read crates/workspace (restore.rs). src/autosave.rs: a 2 s repeating GPUI timer Task stored on the
+Workspace writes dirty drafts through the restore path on a background task. Tests
+(autosave_tests.rs): draft_autosaved_after_two_seconds (advance the test clock).
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh command_palette` → `PASS 4`.
+**Verify:** `scripts/pustman-v1-test.sh workspace autosave::` → `PASS 1`.
+
+### S24a — Picker and fuzzy scorer
+**Goal:** a reusable modal Picker (TextInput query, up/down/enter/escape) ranks items with our own
+fuzzy scorer.
+**Depends on:** S19a, S20a. **Deploy delta:** none.
+**Edits:** `crates/command_palette/Cargo.toml`, `crates/command_palette/src/command_palette.rs`,
+`crates/command_palette/src/picker.rs`, `crates/command_palette/src/picker_tests.rs`,
+`crates/command_palette/src/fuzzy.rs`, `crates/command_palette/src/fuzzy_tests.rs`.
+
+```
+Load rust-gpui-ui-ux and gpui-actions-keymaps. Write our own Picker (Zed's picker is GPL — patterns
+only): `PickerDelegate` trait (items, match, confirm, dismiss), modal view with a TextInput query and
+a keyboard-driven list. src/fuzzy.rs: a simple scorer where prefix and word-start matches rank first.
+Keep Picker generic so S34a, S41b and S46 can reuse it (record a Decision on where it lives). Tests:
+picker_tests.rs: escape_dismisses; fuzzy_tests.rs: fuzzy_query_ranks_prefix_first.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh command_palette picker::` → `PASS 1`.
+- `scripts/pustman-v1-test.sh command_palette fuzzy::` → `PASS 1`.
+
+### S24b — Command palette delegate
+**Goal:** `Ctrl/Cmd-Shift-P` opens the palette with every available action and its binding from the
+active keymap. Choosing an entry dispatches the action.
+**Depends on:** S24a, S21, S22d. **Deploy delta:** none.
+**Edits:** `crates/command_palette/src/palette.rs`, `crates/command_palette/src/palette_tests.rs`,
+`crates/command_palette/src/command_palette.rs` (append `mod`/init lines only), `crates/command_palette/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md REQ-UI-05, crates/pustman_actions, crates/command_palette (picker.rs). src/palette.rs:
+a PickerDelegate listing every registered action (humanized name + binding), opened through the
+workspace ModalLayer by the palette toggle action. Do not touch crates/pustman. Tests
+(palette_tests.rs): palette_lists_every_registered_action_with_binding, enter_dispatches_selected_action.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh command_palette palette::` → `PASS 2`.
+
+### S24w — Wire the command palette
+**Goal:** the running app opens the palette with `Ctrl/Cmd-Shift-P`.
+**Depends on:** S24b, S22e. **Deploy delta:** none.
+**Edits:** `crates/pustman/src/pustman.rs` (hotspot), `crates/pustman/Cargo.toml` (hotspot),
+`crates/pustman/tests/wire_command_palette.rs`.
+
+```
+Append `command_palette::init(cx)` to pustman::init after workspace, and add the dependency. Test
+(tests/wire_command_palette.rs): wire_command_palette_toggle_opens_modal.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh pustman wire_command_palette` → `PASS 1`.
+- `cargo build -p pustman` → exit 0.
 
 ### S25 — M0 SIGN-OFF (HUMAN)
 **Goal:** the M0 exit criteria are proven on real machines.
-**Depends on:** S23, S24. **Deploy delta:** none. **Edits:** none.
+**Depends on:** S19b, S19c, S20c, S23b, S24w. **Deploy delta:** none. **Edits:** none.
 
 ```
 Human validation, not code. On Linux (X11 and Wayland if available) and macOS:
@@ -941,289 +1344,665 @@ Human validation, not code. On Linux (X11 and Wayland if available) and macOS:
 Record results + go/no-go in the S25 step record via the driver. Then /promote → release/pustman-v1-2.
 ```
 
-**Verify:** the human records `M0 GO` with the 5 results in the log. CI is green on Linux and macOS at the S24 merge SHA.
+**Verify:** the human records `M0 GO` with the 5 results in the log. CI is green on Linux and macOS at the S24w merge SHA.
 
 ---
 
 # Phase 4 — HTTP UI + debugging (M1) [GPUI]
 
-### S26 — `request_editor`: URL bar, method, send/cancel, response status line
-**Goal:** a request tab shows a method picker and URL input. `Ctrl-Enter` sends through
-`http_engine` and `Esc` cancels. A status line shows status, time and size, or the error.
-**Depends on:** S16, S24, S25. **Deploy delta:** none.
-**Edits:**
-- `crates/request_editor/**`
-- `crates/pustman/src/main.rs` (hotspot)
-- `crates/pustman/Cargo.toml` (hotspot)
+
+### S26a — `request_editor` crate: Item, URL bar, method picker, NewRequest
+**Goal:** `NewRequest` opens a request tab with a method picker (standard verbs plus a validated
+custom token) and a URL input. `Ctrl-L` focuses the URL bar, and the tab shows a dirty dot.
+**Depends on:** S25, S15c, S16b. **Deploy delta:** none.
+**Edits:** `crates/request_editor/Cargo.toml`, `crates/request_editor/src/request_editor.rs`,
+`crates/request_editor/src/url_bar.rs`, `crates/request_editor/src/method.rs`,
+`crates/request_editor/src/method_tests.rs`, `crates/request_editor/src/new_request.rs`,
+`crates/request_editor/src/new_request_tests.rs`.
 
 ```
-Load rust-gpui-ui-ux. Read docs/PRD.md REQ-HTTP-01/12, REQ-UI-02/03, REQ-RESP-01, crates/http_engine,
-crates/workspace (Item trait). RequestEditor Item: method dropdown (standard verbs + custom
-token, validated), URL TextInput, Send/Cancel button that toggles while in flight, dirty dot via
-Item; handlers for request::Send, request::Cancel (Esc), request::FocusUrlBar (Ctrl-L),
-workspace::NewRequest. Holds `pending_send: Option<Task<()>>`; send failures render an inline error
-(not only logs). Status line: status code colored by class, reason, total time, size. Register
-init in main.rs. Tests: ctrl_enter_sends_via_fake_transport, esc_cancels_in_flight_send,
-send_button_toggles_to_cancel_while_in_flight, error_shows_inline_message_and_fix,
-custom_method_rejects_invalid_token, new_request_action_opens_tab.
-Report ux-checklist items verified.
+Load rust-gpui-ui-ux. Read docs/PRD.md REQ-HTTP-01, REQ-UI-02/03, crates/workspace (Item trait),
+crates/text_input. src/request_editor.rs: RequestEditor Item holding the HttpRequest draft, fields
+`pending_send: Option<Task<()>>`, `inline_error`, and a status line area (filled by S26b); `pub fn
+init`. src/url_bar.rs: method dropdown + URL TextInput with `url()`, `set_url()` and a `UrlChanged`
+event. src/method.rs: custom method token validation (RFC 9110 token). src/new_request.rs: handler
+for workspace::NewRequest and request::FocusUrlBar. Do not touch crates/pustman. Tests:
+method_tests.rs: custom_method_rejects_invalid_token; new_request_tests.rs:
+new_request_action_opens_tab.
 ```
 
 **Verify:**
-- `scripts/pustman-v1-test.sh request_editor` → `PASS 6`.
-- E2E: `cargo run -p pustman`, then New Request, `GET https://example.com`, then `Ctrl-Enter`. The status line shows 200 and the time.
+- `scripts/pustman-v1-test.sh request_editor method::` → `PASS 1`.
+- `scripts/pustman-v1-test.sh request_editor new_request::` → `PASS 1`.
 
-### S27 — Params, path variables, headers tables; cURL paste/copy
-**Goal:**
-- Params:
-  - URL query and the Params table stay in sync both ways.
-  - `:path` variables get rows.
-- Headers:
-  - The table shows auto headers (read-only).
-- cURL:
-  - Pasting a cURL command into the URL bar imports it.
-  - Copy-as-cURL works.
-
-**Depends on:** S26, S10. **Deploy delta:** none.
-**Edits:** `crates/request_editor/**`.
+### S26b — Send and cancel with a status line and inline errors
+**Goal:** `Ctrl-Enter` sends through `http_engine` and `Esc` cancels. Send toggles to Cancel while a
+request is in flight. The status line shows status (colored by class), reason, time and size, and a
+failure shows an inline message with its suggested fix.
+**Depends on:** S26a. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/send.rs`, `crates/request_editor/src/send_tests.rs`,
+`crates/request_editor/src/request_editor.rs`.
 
 ```
-Read docs/PRD.md REQ-HTTP-02/03/13, crates/api_model/src/curl.rs, crates/ui Table. Add a reusable
-KeyValueTable (key, value, description, enabled; add/remove rows; keyboard navigable) in
-request_editor; Params tab synced both ways with the URL (edit either side, no feedback loop);
-path variables from `:name` segments; Headers tab with header-name autocomplete from a static
-common-headers list and auto headers shown greyed with a "auto" badge (from
-ResolvedRequest.auto_headers via a dry prepare). Paste into the URL bar of text starting with
-`curl ` → parse_curl → replace the request (undoable), parse error → inline error. request::CopyAsCurl
-copies to_curl output. Tests: editing_url_updates_params_table, editing_params_updates_url,
-path_variable_rows_follow_url, auto_headers_listed_read_only, pasting_curl_imports_request,
+Read docs/PRD.md REQ-HTTP-12, REQ-RESP-01, crates/http_engine (HttpClient, FakeTransport,
+TransportError user_message/suggested_fix). src/send.rs: request::Send / request::Cancel handlers;
+the send Task is stored in pending_send (replacing it cancels); results update the status line;
+errors render inline (never only logged). Tests (send_tests.rs, FakeTransport):
+ctrl_enter_sends_via_fake_transport, esc_cancels_in_flight_send,
+send_button_toggles_to_cancel_while_in_flight, error_shows_inline_message_and_fix.
+Report ux-checklist items verified.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor send::` → `PASS 4`.
+
+### S26w — Wire the request editor
+**Goal:** the running app opens request tabs and sends real requests.
+**Depends on:** S26b, S22e. **Deploy delta:** none.
+**Edits:** `crates/pustman/src/pustman.rs` (hotspot), `crates/pustman/Cargo.toml` (hotspot),
+`crates/pustman/tests/wire_request_editor.rs`.
+
+```
+Append `request_editor::init(cx)` to pustman::init and add the dependency (HttpClient built on
+ReqwestTransport, using gpui_tokio). Test (tests/wire_request_editor.rs):
+wire_request_editor_new_request_opens_tab.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh pustman wire_request_editor` → `PASS 1`.
+- `cargo build -p pustman` → exit 0.
+- E2E: `cargo run -p pustman`, then New Request, `GET https://example.com`, then `Ctrl-Enter`. The status line shows 200 and the time.
+
+### S27a — KeyValueTable and the Params tab with path variables
+**Goal:** the Params table and the URL query stay in sync both ways with no feedback loop, and
+`:name` path segments get rows.
+**Depends on:** S26b. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/key_value_table.rs`, `crates/request_editor/src/params.rs`,
+`crates/request_editor/src/params_tests.rs`, `crates/request_editor/src/request_editor.rs`.
+
+```
+Read docs/PRD.md REQ-HTTP-02, crates/ui Table. src/key_value_table.rs: reusable KeyValueTable (key,
+value, description, enabled; add/remove rows; keyboard navigable). src/params.rs: Params tab,
+two-way sync with url_bar via UrlChanged/set_url (guard against loops); path-variable rows from
+`:name`. Add the request tab strip (Params now; later tabs append) to request_editor.rs. Tests
+(params_tests.rs): editing_url_updates_params_table, editing_params_updates_url,
+path_variable_rows_follow_url.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor params::` → `PASS 3`.
+
+### S27b — Headers tab with auto headers
+**Goal:** the Headers tab edits headers, autocompletes header names, and shows auto headers greyed
+with an "auto" badge.
+**Depends on:** S27a. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/headers.rs`, `crates/request_editor/src/headers_tests.rs`,
+`crates/request_editor/src/request_editor.rs`.
+
+```
+Read docs/PRD.md REQ-HTTP-03, crates/http_engine (ResolvedRequest.auto_headers, prepare).
+src/headers.rs: Headers tab on KeyValueTable; header-name autocomplete from a static common-headers
+list; auto headers from a dry prepare shown read-only. Tests (headers_tests.rs):
+auto_headers_listed_read_only.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor headers::` → `PASS 1`.
+
+### S27c — cURL paste and Copy as cURL
+**Goal:** pasting text that starts with `curl ` into the URL bar imports the request (undoable,
+parse errors inline). `request::CopyAsCurl` copies the request as a cURL command.
+**Depends on:** S27b, S10. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/curl_paste.rs`, `crates/request_editor/src/curl_paste_tests.rs`,
+`crates/request_editor/src/request_editor.rs` (append `mod`/init lines only).
+
+```
+Read docs/PRD.md REQ-HTTP-13, crates/api_model/src/curl.rs. src/curl_paste.rs: intercept paste in the
+URL bar → parse_curl → replace the request as one undoable change; error → inline. CopyAsCurl →
+to_curl to the clipboard. Tests (curl_paste_tests.rs): pasting_curl_imports_request,
 copy_as_curl_writes_clipboard.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh request_editor` → `PASS n` (n ≥ 12).
+**Verify:** `scripts/pustman-v1-test.sh request_editor curl_paste::` → `PASS 2`.
 
-### S28 — Body, auth and settings tabs (TLS badge)
-**Goal:** all M1 body modes and auth types are editable, and the effective auth source is shown.
-Per-request settings are editable, and disabling TLS verification shows a persistent warning badge.
-**Depends on:** S27. **Deploy delta:** none.
-**Edits:** `crates/request_editor/**`.
+### S28a — Body tab
+**Goal:** every M1 body mode is editable (none, form-data with a file picker, urlencoded, raw with
+a language, binary). File paths inside the workspace are stored relative to its root.
+**Depends on:** S27c. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/body_tab.rs`, `crates/request_editor/src/body_tab_tests.rs`,
+`crates/request_editor/src/request_editor.rs`.
 
 ```
-Read docs/PRD.md REQ-HTTP-04/05/06/09/10, REQ-MODEL-01/03, REQ-VAR-SHARE-03, and the HTTP AC about
-self-signed TLS. Body tab: mode switcher (none, form-data with file picker, urlencoded, raw with
-language, binary); file paths stored relative to the workspace root when inside it. Auth tab:
-Inherit/None/Basic/Bearer/API key; shows "Inherited from <collection/folder>" via effective_auth;
-typing a literal token into a shared field shows the REQ-VAR-SHARE-03 hint suggesting a secret
-variable. Settings tab: each RequestSettings field with "use global default" state. Disabling
-verify_tls shows a warning badge next to Send while active. When a send fails with Tls, the error
-offers a "Disable verification for this request" button that sets the override and re-sends.
-Tests: body_mode_switch_preserves_other_modes_data, file_path_saved_relative_to_workspace,
-auth_tab_shows_inherited_source, literal_token_shows_secret_hint,
+Read docs/PRD.md REQ-HTTP-04/05, crates/api_model Body. src/body_tab.rs: mode switcher that keeps each
+mode's data when switching; form-data rows with file fields (file dialog); raw TextArea with a
+language picker; binary file picker; workspace-relative paths. Tests (body_tab_tests.rs):
+body_mode_switch_preserves_other_modes_data, file_path_saved_relative_to_workspace.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor body_tab::` → `PASS 2`.
+
+### S28b — Auth tab
+**Goal:** the Auth tab edits Inherit, None, Basic, Bearer and API key, shows "Inherited from
+<collection/folder>", and hints at a secret variable when a literal token is typed.
+**Depends on:** S28a. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/auth_tab.rs`, `crates/request_editor/src/auth_tab_tests.rs`,
+`crates/request_editor/src/request_editor.rs`.
+
+```
+Read docs/PRD.md REQ-HTTP-06, REQ-MODEL-01/03, REQ-VAR-SHARE-03, crates/api_model/src/auth.rs
+(effective_auth). src/auth_tab.rs: the auth types; inherited source label; a literal token in a
+shared field shows the REQ-VAR-SHARE-03 hint. Never log values. Tests (auth_tab_tests.rs):
+auth_tab_shows_inherited_source, literal_token_shows_secret_hint.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor auth_tab::` → `PASS 2`.
+
+### S28c — Settings tab and TLS verification badge
+**Goal:** per-request settings are editable, each with a "use global default" state. Turning TLS
+verification off shows a persistent warning badge beside Send. A TLS failure offers "Disable
+verification for this request", which sets the override and re-sends.
+**Depends on:** S28b. **Deploy delta:** none. **High-stakes (TLS).**
+**Edits:** `crates/request_editor/src/settings_tab.rs`, `crates/request_editor/src/settings_tab_tests.rs`,
+`crates/request_editor/src/request_editor.rs`, `crates/request_editor/src/send.rs`.
+
+```
+Read docs/PRD.md REQ-HTTP-09/10, the HTTP AC about self-signed TLS, crates/http_engine
+RequestSettings. src/settings_tab.rs: each RequestSettings field with "use global default". The badge
+shows next to Send whenever verify_tls is off for this request. On TransportError::Tls the inline
+error offers "Disable verification for this request" → set the override, re-send. TLS stays on by
+default; never disable it globally from here. Tests (settings_tab_tests.rs):
 tls_error_offers_disable_and_resend, tls_badge_visible_while_verify_disabled.
 ```
 
 **Verify:**
-- `scripts/pustman-v1-test.sh request_editor` → `PASS n` (n ≥ 18).
+- `scripts/pustman-v1-test.sh request_editor settings_tab::` → `PASS 2`.
 - E2E: run `openssl s_server` on a self-signed cert at `https://localhost:8443`. The first send shows the TLS error. "Disable verification" makes it succeed, and the badge stays visible.
 
-### S29 — `response_viewer`: Pretty/Raw body, headers, error panel
-**Goal:** the response pane shows:
-- the body as Pretty (JSON/XML/HTML formatted) or Raw
-- a headers table that keeps duplicates in order
-- an error panel with type, message, suggested fix and a link to the Console
-
-**Depends on:** S28.
-**Deploy delta:** none.
-**Edits:**
-- `crates/response_viewer/**`
-- `crates/request_editor/**`
-- `crates/pustman/src/main.rs` (hotspot)
-- `crates/pustman/Cargo.toml` (hotspot)
+### S29a — `response_viewer` crate: status line, headers, Raw body
+**Goal:** a `ResponseView` shows the status line (status colored from the theme, reason, time,
+size), a headers table that keeps duplicates in order, and the body in Raw mode as a virtualized
+list of lines.
+**Depends on:** S25, S16b. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/Cargo.toml`, `crates/response_viewer/src/response_viewer.rs`,
+`crates/response_viewer/src/status_line.rs`, `crates/response_viewer/src/status_line_tests.rs`,
+`crates/response_viewer/src/headers_view.rs`, `crates/response_viewer/src/headers_view_tests.rs`,
+`crates/response_viewer/src/body_view.rs`, `crates/response_viewer/src/body_view_tests.rs`.
 
 ```
-Load rust-gpui-ui-ux. Read docs/PRD.md REQ-RESP-01/02/05 (headers part)/08, §8.6. Create
-crates/response_viewer: ResponseView entity (status line moved here from request_editor), tabs
-Body/Headers (Cookies/Timeline come in S30/S31), Body sub-modes Pretty (JSON pretty-print,
-XML/HTML indent; auto-detected from Content-Type with manual override) and Raw; virtualized line
-list for large bodies; error panel for TransportError with user_message/suggested_fix and an
-"Open in Console" link (dispatches console::Focus once it exists — until then the link is
-hidden, not stubbed). Embed ResponseView under the request editor (split, resizable). Register
-init in main.rs. Tests: json_body_pretty_printed, raw_mode_shows_exact_bytes,
-content_type_override_switches_formatter, duplicate_headers_kept_in_order,
-transport_error_renders_panel_with_fix, status_class_colors_from_theme.
+Load rust-gpui-ui-ux. Read docs/PRD.md REQ-RESP-01/02/05 (headers part), crates/http_engine Response.
+src/response_viewer.rs: ResponseView entity with `set_response(...)`, tabs Body/Headers (later tabs
+append), `pub fn init`. src/status_line.rs, src/headers_view.rs, src/body_view.rs (Raw mode only;
+Pretty is S29b). Do not touch request_editor or crates/pustman. Tests: status_line_tests.rs:
+status_class_colors_from_theme; headers_view_tests.rs: duplicate_headers_kept_in_order;
+body_view_tests.rs: raw_mode_shows_exact_bytes.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh response_viewer` → `PASS 6`.
+**Verify:**
+- `scripts/pustman-v1-test.sh response_viewer status_line::` → `PASS 1`.
+- `scripts/pustman-v1-test.sh response_viewer headers_view::` → `PASS 1`.
+- `scripts/pustman-v1-test.sh response_viewer body_view::` → `PASS 1`.
 
-### S30 — Response: Hex, Preview, Find, save/copy, large bodies, Cookies tab
-**Goal:**
-- Body views: Hex and safe Preview views.
-- Find: `Ctrl-F` with regex and case options.
-- Save and copy: the body saves to a file and copies, and a header can be copied.
-- Large bodies: Pretty falls back to Raw above the limit.
-- Cookies tab: lists the response's cookies.
-
-**Depends on:** S29. **Deploy delta:** none.
-**Edits:** `crates/response_viewer/**`.
+### S29b — Pretty body mode
+**Goal:** the Pretty mode formats JSON and indents XML and HTML. The formatter is auto-detected from
+Content-Type and can be overridden by hand.
+**Depends on:** S29a. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/pretty.rs`, `crates/response_viewer/src/pretty_tests.rs`,
+`crates/response_viewer/src/body_view.rs`, `crates/response_viewer/src/response_viewer.rs` (append `mod` only).
 
 ```
-Read docs/PRD.md REQ-RESP-02/03/05/06/07. Hex view (offset | hex | ascii, virtualized); Preview:
-images rendered with GPUI img from bytes, HTML shown as sanitized plain text with a note (no
-script execution, no network fetch); Find bar (regex, case toggle, next/prev, match count);
-response::SaveBody (file dialog, write on background task, error → toast), CopyBody, copy single
-header from the context menu; bodies over `response_pretty_limit_mb` (setting) show Raw with a
-banner and offer "open temp file location"; Cookies tab lists Set-Cookie parsed with all
-attributes. Tests: hex_view_formats_offsets, find_regex_counts_matches, find_case_sensitive_toggle,
-save_body_writes_file, large_body_falls_back_to_raw_with_banner, cookies_tab_lists_attributes,
-html_preview_does_not_execute_or_fetch.
+Read docs/PRD.md REQ-RESP-02. src/pretty.rs: formatters (serde_json pretty; simple XML/HTML indent)
+and Content-Type detection; body_view gains a Pretty/Raw switch and a formatter override. Tests
+(pretty_tests.rs): json_body_pretty_printed, content_type_override_switches_formatter.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh response_viewer` → `PASS n` (n ≥ 13).
+**Verify:** `scripts/pustman-v1-test.sh response_viewer pretty::` → `PASS 2`.
 
-### S31 — Timeline tab: phases, network info, redirect chain, resolved request as sent
-**Goal:** the Timeline shows:
-- measured timing phases, with omitted ones absent rather than zeroed
-- network/TLS info
-- each redirect hop
-- the exact request as sent, with secrets masked
+### S29c — Error panel
+**Goal:** a `TransportError` renders a panel with its type, message and suggested fix. The "Open in
+Console" link stays hidden until the console exists; it is never stubbed.
+**Depends on:** S29a. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/error_panel.rs`, `crates/response_viewer/src/error_panel_tests.rs`,
+`crates/response_viewer/src/response_viewer.rs`.
 
-**Depends on:** S30.
-**Deploy delta:** none.
-**Edits:** `crates/response_viewer/**`.
+```
+Read docs/PRD.md REQ-RESP-08, §8.6. src/error_panel.rs: panel from TransportError
+user_message/suggested_fix; ResponseView shows it instead of the body on error; the "Open in Console"
+link dispatches console::Focus only when that action is registered, otherwise it is hidden. Tests
+(error_panel_tests.rs): transport_error_renders_panel_with_fix.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh response_viewer error_panel::` → `PASS 1`.
+
+### S29e — Embed the response view under the request editor
+**Goal:** the request editor shows a `ResponseView` below it in a resizable split. The status line
+moves from the editor into the viewer.
+**Depends on:** S29c, S28c. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/response_split.rs`, `crates/request_editor/src/response_split_tests.rs`,
+`crates/request_editor/src/request_editor.rs`, `crates/request_editor/src/send.rs`,
+`crates/request_editor/Cargo.toml` (append deps).
+
+```
+Read crates/request_editor (request_editor.rs, send.rs), crates/response_viewer. src/response_split.rs:
+resizable vertical split; send results go to ResponseView::set_response; remove the editor's own
+status line (S26b tests must stay green — if one asserts on the old status line, stop and ask the
+driver). Tests (response_split_tests.rs): send_result_appears_in_embedded_response_view.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh request_editor response_split::` → `PASS 1`.
+- `scripts/pustman-v1-test.sh request_editor send::` → `PASS 4`.
+
+### S29w — Wire the response viewer
+**Goal:** the running app shows responses and the error panel.
+**Depends on:** S29c, S26w. **Deploy delta:** none.
+**Edits:** `crates/pustman/src/pustman.rs` (hotspot), `crates/pustman/Cargo.toml` (hotspot),
+`crates/pustman/tests/wire_response_viewer.rs`.
+
+```
+Append `response_viewer::init(cx)` to pustman::init before request_editor, and add the dependency.
+Test (tests/wire_response_viewer.rs): wire_response_viewer_init_registers_actions.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh pustman wire_response_viewer` → `PASS 1`.
+- `cargo build -p pustman` → exit 0.
+
+### S30a — Hex and safe Preview views
+**Goal:** a Hex view (offset | hex | ascii, virtualized) and a Preview view: images render from
+bytes, and HTML shows as sanitized text with no script execution and no network fetch.
+**Depends on:** S29b. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/hex_view.rs`, `crates/response_viewer/src/hex_view_tests.rs`,
+`crates/response_viewer/src/preview.rs`, `crates/response_viewer/src/preview_tests.rs`,
+`crates/response_viewer/src/body_view.rs`, `crates/response_viewer/src/response_viewer.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-RESP-02/03. src/hex_view.rs (virtualized rows). src/preview.rs: GPUI img from
+bytes; HTML as sanitized plain text with a note. Add both to body_view's mode switch. Tests:
+hex_view_tests.rs: hex_view_formats_offsets; preview_tests.rs: html_preview_does_not_execute_or_fetch.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh response_viewer hex_view::` → `PASS 1`.
+- `scripts/pustman-v1-test.sh response_viewer preview::` → `PASS 1`.
+
+### S30b — Find in body
+**Goal:** `Ctrl-F` opens a find bar with regex and case options, next and previous, and a match count.
+**Depends on:** S30a. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/find.rs`, `crates/response_viewer/src/find_tests.rs`,
+`crates/response_viewer/src/body_view.rs`, `crates/response_viewer/src/response_viewer.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-RESP-05. src/find.rs: find bar (regex, case toggle, next/prev, count); matches
+highlighted in body_view; regex compile errors shown inline. Tests (find_tests.rs):
+find_regex_counts_matches, find_case_sensitive_toggle.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh response_viewer find::` → `PASS 2`.
+
+### S30c — Large-body fallback
+**Goal:** a body over `response_pretty_limit_mb` shows Raw with a banner that offers "open temp file
+location".
+**Depends on:** S30b. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/large_body.rs`, `crates/response_viewer/src/large_body_tests.rs`,
+`crates/response_viewer/src/body_view.rs`, `crates/response_viewer/src/response_viewer.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-RESP-06, crates/http_engine ResponseBody::Spilled. src/large_body.rs: limit check
+from settings; banner; reveal the spilled temp file. Tests (large_body_tests.rs):
+large_body_falls_back_to_raw_with_banner.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh response_viewer large_body::` → `PASS 1`.
+
+### S30d — Save and copy the body; copy a header
+**Goal:** `response::SaveBody` writes the body to a chosen file on a background task (an error shows
+a toast). `CopyBody` copies the body, and the header context menu copies a single header.
+**Depends on:** S29c. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/save_body.rs`, `crates/response_viewer/src/save_body_tests.rs`,
+`crates/response_viewer/src/response_viewer.rs`, `crates/response_viewer/src/headers_view.rs`.
+
+```
+Read docs/PRD.md REQ-RESP-07. src/save_body.rs: SaveBody (file dialog, background write, toast on
+error), CopyBody; a "Copy" item in headers_view's context menu. Tests (save_body_tests.rs):
+save_body_writes_file.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh response_viewer save_body::` → `PASS 1`.
+
+### S30e — Cookies tab
+**Goal:** a Cookies tab lists the response's `Set-Cookie` headers, parsed, with every attribute.
+**Depends on:** S30d. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/cookies_tab.rs`, `crates/response_viewer/src/cookies_tab_tests.rs`,
+`crates/response_viewer/src/response_viewer.rs`.
+
+```
+Read docs/PRD.md REQ-RESP-02 (cookies), REQ-HTTP-08. src/cookies_tab.rs: parse Set-Cookie (name, value,
+domain, path, expires, max-age, secure, httponly, samesite) into a table; add the tab to
+response_viewer.rs. Tests (cookies_tab_tests.rs): cookies_tab_lists_attributes.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh response_viewer cookies_tab::` → `PASS 1`.
+
+### S31a — Timeline tab: phases, network info, redirect chain
+**Goal:** the Timeline tab draws bars only for measured phases and notes the phases this transport
+cannot measure. It also shows network and TLS info and every redirect hop.
+**Depends on:** S30e. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/timeline.rs`, `crates/response_viewer/src/timeline_tests.rs`,
+`crates/response_viewer/src/response_viewer.rs`.
 
 ```
 Read docs/PRD.md §8.2 (REQ-NET-01..04), docs/decisions/ADR-0003-timing-phases.md, crates/http_engine
-Response/Timings/NetworkInfo/RedirectHop. Timeline tab: horizontal bars only for phases that are
-Some; a note listing phases this transport cannot measure (from ADR-0003); network info section;
-redirect chain list (method, URL, status, Location, timing; expandable headers); "Request as
-sent": final URL, method, every header incl. auto/auth/cookie headers, body preview — passed
-through api_model::redact with the send's secrets. Tests: absent_phases_not_rendered,
-redirect_chain_lists_every_hop, request_as_sent_includes_auto_and_cookie_headers,
+Response/Timings/NetworkInfo/RedirectHop. src/timeline.rs: bars only for phases that are Some; the
+ADR-0003 note; network info section; redirect chain list (method, URL, status, Location, timing;
+expandable headers). Add the tab. Tests (timeline_tests.rs): absent_phases_not_rendered,
+redirect_chain_lists_every_hop.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh response_viewer timeline::` → `PASS 2`.
+
+### S31b — Request as sent
+**Goal:** the Timeline's "Request as sent" section shows the final URL, the method, every header
+(auto, auth and cookie headers included) and a body preview, with secrets and `Authorization` masked.
+**Depends on:** S31a. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/request_as_sent.rs`, `crates/response_viewer/src/request_as_sent_tests.rs`,
+`crates/response_viewer/src/timeline.rs`, `crates/response_viewer/src/response_viewer.rs` (append `mod` only).
+
+```
+Read crates/api_model/src/redact.rs, crates/http_engine ResolvedRequest/secrets_used. src/request_as_sent.rs:
+render through api_model::redact with the send's secrets. Never log values. Tests
+(request_as_sent_tests.rs): request_as_sent_includes_auto_and_cookie_headers,
 request_as_sent_masks_secrets_and_authorization.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh response_viewer timeline` → `PASS 4`.
+**Verify:** `scripts/pustman-v1-test.sh response_viewer request_as_sent::` → `PASS 2`.
 
-### S32 — `console` crate (bottom dock)
-**Goal:** every send adds a Console entry with a summary line and expandable raw request/response
-text. The Console supports filters, clear and pause, and is capped at 5,000 entries in memory.
-Warnings land in it.
-**Depends on:** S16, S22, S25. **Deploy delta:** none.
-**Edits:**
-- `crates/console/**`
-- `crates/pustman/src/main.rs` (hotspot)
-- `crates/pustman/Cargo.toml` (hotspot)
+### S36a — Manage Cookies dialog: list and delete
+**Goal:** a modal lists the workspace cookie jar grouped by domain and can delete a cookie or clear a
+domain. It opens from the Cookies tab and from `cookies::Manage`.
+**Depends on:** S30e, S15b, S22d. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/cookie_dialog.rs`, `crates/response_viewer/src/cookie_dialog_tests.rs`,
+`crates/response_viewer/src/cookies_tab.rs`, `crates/response_viewer/src/response_viewer.rs` (append `mod`/init lines only).
 
 ```
-Load rust-gpui-ui-ux. Read docs/PRD.md §8.3 (REQ-CON-01..04, 06), REQ-HTTP-12 (Cancelled entry),
-REQ-NFR-04. Create crates/console: ConsoleStore Global (ring buffer, cap from settings
-console_max_entries, memory only, never written to disk), fed by http_engine SendEvents
-(subscribe; add a small event hook in http_engine ONLY if missing — if so, list it as a Decision
-and ask the driver, because http_engine is outside this Edits set); entries: summary line (method,
-URL, status, time, size), level, protocol, raw request/response text exactly as on the wire
-(HTTP/1.1 form; HTTP/2 as pseudo-headers), redacted with api_model::redact. Console panel registers
-in the bottom dock via the Panel trait; filters (level, protocol, text), clear, pause; toggled by
-Ctrl-Alt-C. Warnings (unresolved vars, TLS disabled, missing body file, script not executed)
-appear as warning entries. `export_text(entries) -> String` (redacted) for the S37 test. Tests:
-send_creates_entry_with_summary, raw_view_shows_resolved_request_exactly,
-cap_drops_oldest_entries, filters_by_level_and_text, pause_stops_new_entries,
-tls_disabled_warning_logged, export_text_contains_no_secret.
+Load rust-gpui-ui-ux. Read docs/PRD.md REQ-HTTP-08, crates/http_engine/src/{cookies,cookie_persistence}.rs,
+crates/workspace ModalLayer. src/cookie_dialog.rs: modal grouped by domain; delete one / clear domain;
+persisted through the CookieJar API on a background task; errors inline. A "Manage cookies" button
+in cookies_tab.rs; register cookies::Manage. Never log cookie values. Tests (cookie_dialog_tests.rs):
+dialog_lists_cookies_by_domain, delete_cookie_removes_row.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh response_viewer cookie_dialog::` → `PASS 2`.
+
+### S36b — Manage Cookies dialog: add and edit
+**Goal:** the dialog's add and edit form validates input and persists the change.
+**Depends on:** S36a. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/cookie_form.rs`, `crates/response_viewer/src/cookie_form_tests.rs`,
+`crates/response_viewer/src/cookie_dialog.rs`, `crates/response_viewer/src/response_viewer.rs` (append `mod` only).
+
+```
+Read crates/response_viewer/src/cookie_dialog.rs. src/cookie_form.rs: add/edit form (name, value,
+domain, path, expiry, flags) with validation; save through CookieJar on a background task. Tests
+(cookie_form_tests.rs): add_cookie_persists, edit_cookie_updates_value.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh response_viewer cookie_form::` → `PASS 2`.
+
+### S32a — `console` crate: ConsoleStore ring buffer
+**Goal:** a `ConsoleStore` global keeps entries in a ring buffer capped by `console_max_entries`
+(5,000 by default). It is memory only and never written to disk, and it can be paused.
+**Depends on:** S25, S3, S11. **Deploy delta:** none.
+**Edits:** `crates/console/Cargo.toml`, `crates/console/src/console.rs`, `crates/console/src/store.rs`,
+`crates/console/src/store_tests.rs`.
+
+```
+Read docs/PRD.md §8.3 (REQ-CON-01..04, 06), REQ-NFR-04. src/store.rs: ConsoleEntry (summary line:
+method, URL, status, time, size; level; protocol; raw request/response text) and the ConsoleStore
+Global (ring buffer, cap from settings, pause flag, clear). src/console.rs: `pub fn init`. Do not touch
+crates/pustman or http_engine. Tests (store_tests.rs): cap_drops_oldest_entries, pause_stops_new_entries.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh console store::` → `PASS 2`.
+
+### S32b — Console feed from sends and warnings
+**Goal:** every send adds an entry whose raw view shows the resolved request and response exactly as
+on the wire (HTTP/1.1 form; HTTP/2 as pseudo-headers), redacted. Warnings (unresolved variables, TLS
+disabled, missing body file, script not executed) and cancelled sends land as entries too.
+**Depends on:** S32a, S16b, S15c. **Deploy delta:** none.
+**Edits:** `crates/console/src/feed.rs`, `crates/console/src/feed_tests.rs`,
+`crates/console/src/console.rs` (append `mod`/init lines only), `crates/console/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md REQ-CON-01/02, REQ-HTTP-12 (Cancelled entry), crates/http_engine (SendEvents,
+Warning), crates/api_model/src/redact.rs. src/feed.rs: subscribe to http_engine SendEvents and build
+entries, redacted with the send's secrets. If http_engine has no event hook to subscribe to, do NOT
+edit http_engine (outside this Edits set): record a Decision and stop to ask the driver. Tests
+(feed_tests.rs): send_creates_entry_with_summary, raw_view_shows_resolved_request_exactly,
+tls_disabled_warning_logged.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh console feed::` → `PASS 3`.
+
+### S32c — Redacted text export
+**Goal:** `export_text(entries) -> String` exports entries as redacted text. S37 relies on it.
+**Depends on:** S32a. **Deploy delta:** none.
+**Edits:** `crates/console/src/export.rs`, `crates/console/src/export_tests.rs`,
+`crates/console/src/console.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-CON-05/06, crates/api_model/src/redact.rs. src/export.rs: `pub fn
+export_text(entries: &[ConsoleEntry], secrets: &SecretValues) -> String`, redacting header rules
+and secret values again even though entries are already redacted (defense in depth). Tests
+(export_tests.rs): export_text_contains_no_secret.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh console export::` → `PASS 1`.
+
+### S32d — Console panel
+**Goal:** the Console registers in the bottom dock through the `Panel` trait, with level, protocol
+and text filters, clear and pause. `Ctrl-Alt-C` toggles it.
+**Depends on:** S32a, S22c. **Deploy delta:** none.
+**Edits:** `crates/console/src/panel.rs`, `crates/console/src/panel_tests.rs`,
+`crates/console/src/console.rs` (append `mod`/init lines only), `crates/console/Cargo.toml` (append deps).
+
+```
+Load rust-gpui-ui-ux. Read crates/workspace/src/panel.rs, crates/console/src/store.rs. src/panel.rs:
+ConsolePanel with a virtualized entry list, expandable raw view, filters, clear, pause; registers
+console::Focus and the toggle. Tests (panel_tests.rs): filters_by_level_and_text.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh console panel::` → `PASS 1`.
+
+### S32w — Wire the console
+**Goal:** the running app logs every send to the Console.
+**Depends on:** S32b, S32c, S32d, S22e. **Deploy delta:** none.
+**Edits:** `crates/pustman/src/pustman.rs` (hotspot), `crates/pustman/Cargo.toml` (hotspot),
+`crates/pustman/tests/wire_console.rs`.
+
+```
+Append `console::init(cx)` to pustman::init after workspace, and add the dependency. Test
+(tests/wire_console.rs): wire_console_panel_registered_in_bottom_dock.
 ```
 
 **Verify:**
-- `scripts/pustman-v1-test.sh console` → `PASS 7`.
-- E2E: send `POST {{base}}/users` with the JSON body `{"name":"{{name}}"}` to a local echo server. The Console raw view shows the resolved URL, the body and `Content-Type: application/json`. This is the first PRD HTTP AC.
+- `scripts/pustman-v1-test.sh pustman wire_console` → `PASS 1`.
+- `cargo build -p pustman` → exit 0.
 
-### S33 — Variable highlighting, autocomplete, hover, pre-send warning
-**Goal:** in every request field:
-- `{{var}}` is highlighted green (resolved), red (unresolved) or masked (secret).
-- Variable names autocomplete after `{{`.
-- Hover shows the value and its scope.
-- Sending with unresolved variables shows a non-blocking warning.
-
-**Depends on:** S28, S29 (both edit `crates/request_editor/**`). **Deploy delta:** none.
-**Edits:**
-- `crates/request_editor/**`
-- `crates/text_input/**`
+### S33a — Variable highlighting in request fields
+**Goal:** `{{var}}` in the URL, params, headers, raw body and auth fields is highlighted green when
+resolved, red when unresolved, and masked when it is a secret.
+**Depends on:** S29e. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/variable_highlight.rs`, `crates/request_editor/src/variable_highlight_tests.rs`,
+`crates/request_editor/src/url_bar.rs`, `crates/request_editor/src/params.rs`,
+`crates/request_editor/src/headers.rs`, `crates/request_editor/src/body_tab.rs`,
+`crates/request_editor/src/auth_tab.rs`, `crates/request_editor/src/request_editor.rs` (append `mod` only).
 
 ```
-Read docs/PRD.md REQ-VAR-03/04/07, crates/variables (spans), crates/text_input (set_highlights).
-Wire variables::spans into URL, params, headers, body raw and auth fields; autocomplete popover
-after `{{` listing names across scopes in effect (keyboard navigable); hover tooltip shows the
-value (masked for secrets, with a reveal toggle) and the scope it came from; before send, if
-prepare() returns UnresolvedVariables, show a non-blocking warning bar listing them with "Send
-anyway" (also logged to Console). text_input changes limited to what highlighting/autocomplete
-need. Tests: resolved_unresolved_secret_spans_highlighted, autocomplete_lists_names_after_braces,
-autocomplete_inserts_selected_name, hover_masks_secret_value, unresolved_warning_lists_names_and_allows_send.
+Read docs/PRD.md REQ-VAR-03, crates/variables (spans), crates/text_input (set_highlights).
+src/variable_highlight.rs: compute spans for a field from the current scope stack, map them to
+theme highlight styles, and refresh when the field or the scopes change. Hook it into each field
+module. Tests (variable_highlight_tests.rs): resolved_unresolved_secret_spans_highlighted.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor variable_highlight::` → `PASS 1`.
+
+### S33b — Variable autocomplete
+**Goal:** typing `{{` opens a keyboard-navigable popover with the variable names of every scope in
+effect, and choosing one inserts it.
+**Depends on:** S33a. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/variable_autocomplete.rs`, `crates/request_editor/src/variable_autocomplete_tests.rs`,
+`crates/request_editor/src/request_editor.rs` (append `mod` only), `crates/text_input/src/completion.rs`,
+`crates/text_input/src/text_input.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-VAR-04, crates/text_input. text_input/src/completion.rs: the minimum hook for a
+completion popover (trigger text, anchor position, insert) — nothing else in text_input changes.
+request_editor/src/variable_autocomplete.rs: names across scopes, keyboard navigation, insertion.
+Tests (variable_autocomplete_tests.rs): autocomplete_lists_names_after_braces,
+autocomplete_inserts_selected_name.
 ```
 
 **Verify:**
-- `scripts/pustman-v1-test.sh request_editor variable` → `PASS 5`.
-- `scripts/pustman-v1-test.sh text_input` → `PASS n` (n ≥ 6).
+- `scripts/pustman-v1-test.sh request_editor variable_autocomplete::` → `PASS 2`.
+- `scripts/pustman-v1-test.sh text_input input::` → `PASS 3`.
 
-### S34 — `environment_picker` + quick-look
-**Goal:** the title-bar picker selects the active environment, which is persisted per workspace in
-local state. The quick-look popover lists environment and global values, with secrets masked.
-**Depends on:** S4, S7, S20, S22, S25. **Deploy delta:** none.
-**Edits:**
-- `crates/environment_picker/**`
-- `crates/pustman/src/main.rs` (hotspot)
-- `crates/pustman/Cargo.toml` (hotspot)
+### S33c — Variable hover
+**Goal:** hovering a `{{var}}` shows its value and the scope it came from. Secrets are masked, with
+a reveal toggle.
+**Depends on:** S33b. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/variable_hover.rs`, `crates/request_editor/src/variable_hover_tests.rs`,
+`crates/request_editor/src/request_editor.rs` (append `mod` only).
 
 ```
-Load rust-gpui-ui-ux. Read docs/PRD.md REQ-VAR-08, REQ-VAR-SHARE-01/02. Picker (reuse the
-command_palette picker if it was made generic, else a small dropdown) in the title bar listing
-environments + "No environment"; selection stored in storage kv per workspace; quick-look popover
-listing active env and globals: key, shared value, local value, secret masked (reveal toggle
-reads the keychain on a background task); unset secrets labelled "unset". Register init.
-Tests: selecting_environment_persists_per_workspace, quick_look_masks_secrets,
-unset_secret_labelled_unset, no_environment_option_clears_selection.
+Read docs/PRD.md REQ-VAR-07, crates/request_editor/src/variable_highlight.rs. src/variable_hover.rs:
+a tooltip over highlighted spans; the reveal toggle reads the keychain on a background task. Never
+log values. Tests (variable_hover_tests.rs): hover_masks_secret_value.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh environment_picker` → `PASS 4`.
+**Verify:** `scripts/pustman-v1-test.sh request_editor variable_hover::` → `PASS 1`.
 
-### S35 — `history_panel`
-**Goal:** the left-dock History panel groups sends by day and supports search. Opening an entry
-restores the pre-resolution request and the response summary. Entries can be deleted or cleared,
-and retention is honored.
-**Depends on:** S26. **Deploy delta:** none.
-**Edits:**
-- `crates/history_panel/**`
-- `crates/pustman/src/main.rs` (hotspot)
-- `crates/pustman/Cargo.toml` (hotspot)
+### S33d — Pre-send unresolved-variable warning
+**Goal:** when `prepare()` reports `UnresolvedVariables`, a non-blocking warning bar lists the names
+and offers "Send anyway". The warning is also logged to the Console.
+**Depends on:** S29e. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/unresolved_warning.rs`, `crates/request_editor/src/unresolved_warning_tests.rs`,
+`crates/request_editor/src/send.rs`, `crates/request_editor/src/request_editor.rs`.
+
+```
+Read docs/PRD.md REQ-VAR-04, crates/http_engine Warning, crates/request_editor/src/send.rs.
+src/unresolved_warning.rs: warning bar above the URL bar; "Send anyway" proceeds; the warning
+travels with the send's events, which feed the Console. Tests (unresolved_warning_tests.rs):
+unresolved_warning_lists_names_and_allows_send.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor unresolved_warning::` → `PASS 1`.
+
+### S34a — `environment_picker` crate: active environment selector
+**Goal:** a title-bar picker lists the environments plus "No environment". The selection is stored
+per workspace in local state.
+**Depends on:** S25, S4, S7, S6. **Deploy delta:** none.
+**Edits:** `crates/environment_picker/Cargo.toml`, `crates/environment_picker/src/environment_picker.rs`,
+`crates/environment_picker/src/selector.rs`, `crates/environment_picker/src/selector_tests.rs`.
+
+```
+Load rust-gpui-ui-ux. Read docs/PRD.md REQ-VAR-08, crates/storage kv, crates/command_palette picker
+(reuse it if generic, otherwise a small dropdown). src/selector.rs: picker, selection persisted in
+storage kv per workspace on a background task; `pub fn init`. Do not touch crates/pustman. Tests
+(selector_tests.rs): selecting_environment_persists_per_workspace,
+no_environment_option_clears_selection.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh environment_picker selector::` → `PASS 2`.
+
+### S34b — Environment quick-look
+**Goal:** a quick-look popover lists the active environment and globals (key, shared value, local
+value), with secrets masked and unset secrets labelled "unset".
+**Depends on:** S34a. **Deploy delta:** none.
+**Edits:** `crates/environment_picker/src/quick_look.rs`, `crates/environment_picker/src/quick_look_tests.rs`,
+`crates/environment_picker/src/environment_picker.rs` (append `mod`/init lines only).
+
+```
+Read docs/PRD.md REQ-VAR-SHARE-01/02, crates/secrets. src/quick_look.rs: popover; the reveal toggle
+reads the keychain on a background task. Never log values. Tests (quick_look_tests.rs):
+quick_look_masks_secrets, unset_secret_labelled_unset.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh environment_picker quick_look::` → `PASS 2`.
+
+### S34w — Wire the environment picker
+**Goal:** the running app shows the environment picker in the title bar.
+**Depends on:** S34b, S22e. **Deploy delta:** none.
+**Edits:** `crates/pustman/src/pustman.rs` (hotspot), `crates/pustman/Cargo.toml` (hotspot),
+`crates/pustman/tests/wire_environment_picker.rs`.
+
+```
+Append `environment_picker::init(cx)` to pustman::init and add the dependency. Test
+(tests/wire_environment_picker.rs): wire_environment_picker_init_registers_actions.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh pustman wire_environment_picker` → `PASS 1`.
+- `cargo build -p pustman` → exit 0.
+
+### S35a — `history_panel` crate: list grouped by day, with search
+**Goal:** a left-dock History panel lists entries grouped by day in a virtualized list with a search box.
+**Depends on:** S25, S16b, S22c, S6. **Deploy delta:** none.
+**Edits:** `crates/history_panel/Cargo.toml`, `crates/history_panel/src/history_panel.rs`,
+`crates/history_panel/src/history_list.rs`, `crates/history_panel/src/history_list_tests.rs`.
 
 ```
 Load rust-gpui-ui-ux. Read docs/PRD.md §8.5 (REQ-HIST-01..04), crates/storage history repo,
-crates/request_editor. Panel registered in the left dock via the Panel trait; virtualized list
-grouped by day; search box; open entry → new request tab with the stored pre-resolution request
-and a read-only response summary; delete entry, clear all (confirm modal); "Save to collection"
-is deferred to M2 (hidden, not stubbed). All DB access on background tasks; errors → toast.
-Tests: entries_grouped_by_day, search_filters_entries, open_entry_restores_unresolved_request,
+crates/workspace/src/panel.rs. src/history_list.rs: Panel in the left dock; DB access on background
+tasks; errors → toast. "Save to collection" is M2 (hidden, not stubbed). Do not touch crates/pustman.
+Tests (history_list_tests.rs): entries_grouped_by_day, search_filters_entries.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh history_panel history_list::` → `PASS 2`.
+
+### S35b — Open a history entry
+**Goal:** opening an entry opens a request tab with the stored pre-resolution request and a read-only
+response summary.
+**Depends on:** S35a, S26b. **Deploy delta:** none.
+**Edits:** `crates/history_panel/src/open_entry.rs`, `crates/history_panel/src/open_entry_tests.rs`,
+`crates/history_panel/src/history_panel.rs` (append `mod`/init lines only), `crates/history_panel/Cargo.toml` (append deps).
+
+```
+Read crates/request_editor (opening a tab from an HttpRequest). src/open_entry.rs: open → new
+RequestEditor tab; the response summary is read-only. Tests (open_entry_tests.rs):
+open_entry_restores_unresolved_request.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh history_panel open_entry::` → `PASS 1`.
+
+### S35c — Delete and clear history
+**Goal:** a single entry can be deleted, and "Clear all" (behind a confirm modal) removes every entry.
+**Depends on:** S35a. **Deploy delta:** none.
+**Edits:** `crates/history_panel/src/delete_entries.rs`, `crates/history_panel/src/delete_entries_tests.rs`,
+`crates/history_panel/src/history_panel.rs` (append `mod`/init lines only).
+
+```
+Read crates/storage history repo, crates/workspace ModalLayer. src/delete_entries.rs: delete one,
+clear all with confirm; background tasks; errors → toast. Tests (delete_entries_tests.rs):
 delete_and_clear_all_remove_entries.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh history_panel` → `PASS 4`.
+**Verify:** `scripts/pustman-v1-test.sh history_panel delete_entries::` → `PASS 1`.
 
-### S36 — Manage Cookies dialog
-**Goal:** a dialog lets the user view, add, edit and delete the workspace cookie jar. It opens from
-the response Cookies tab and from the `cookies::Manage` action.
-**Depends on:** S31, S15. **Deploy delta:** none.
-**Edits:** `crates/response_viewer/**`.
+### S35w — Wire the history panel
+**Goal:** the running app shows the History panel in the left dock.
+**Depends on:** S35b, S35c, S22e. **Deploy delta:** none.
+**Edits:** `crates/pustman/src/pustman.rs` (hotspot), `crates/pustman/Cargo.toml` (hotspot),
+`crates/pustman/tests/wire_history_panel.rs`.
 
 ```
-Load rust-gpui-ui-ux. Read docs/PRD.md REQ-HTTP-08 and crates/http_engine/src/cookies.rs. Modal
-(workspace ModalLayer) grouped by domain; add/edit form with validation; delete one / clear domain;
-changes persist through the CookieJar API on a background task; errors → inline. Tests:
-dialog_lists_cookies_by_domain, add_cookie_persists, edit_cookie_updates_value,
-delete_cookie_removes_row.
+Append `history_panel::init(cx)` to pustman::init and add the dependency. Test
+(tests/wire_history_panel.rs): wire_history_panel_registered_in_left_dock.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh response_viewer cookie` → `PASS n` (n ≥ 4).
+**Verify:**
+- `scripts/pustman-v1-test.sh pustman wire_history_panel` → `PASS 1`.
+- `cargo build -p pustman` → exit 0.
 
 ### S37 — Redaction NFR test (integration)
 **Goal:** one test proves that no secret value reaches workspace files, the SQLite file bytes, or
 Console export text.
-**Depends on:** S5, S16, S32. **Deploy delta:** none.
+**Depends on:** S5, S16b, S15c, S32c. **Deploy delta:** none. **High-stakes (secrets).**
 **Edits:** `crates/integration_tests/**`.
 
 ```
@@ -1242,18 +2021,21 @@ workspace files, and record that Decision), console::export_text output. Name th
 `secret_variable_file_has_key_kind_description_only`.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh integration_tests redaction` → `PASS 2`.
+**Verify:** `scripts/pustman-v1-test.sh integration_tests secret` → `PASS 2`. The filter `secret`
+matches both test names. The original filter `redaction` matched neither, because the runner's
+filter matches the bare function names of integration tests.
 
 ### S38 — M1 SIGN-OFF (HUMAN)
 **Goal:** the M1 exit criteria are proven: the PRD HTTP ACs pass, the redaction test passes, and the manual run-through is done.
-**Depends on:** S31, S32, S33, S34, S35, S36, S37. **Deploy delta:** none. **Edits:** none.
+**Depends on:** S26w, S28c, S29w, S29e, S30c, S31b, S32w, S33c, S33d, S34w, S35w, S36b, S37. **Deploy delta:** none. **Edits:** none.
 
 ```
-Human validation on Linux + macOS: the four PRD §5.1 HTTP ACs by hand (echo server; a 6-hop
-redirect server with max 5; openssl s_server self-signed; cancel immediately after send — Console
+Human validation on Linux + macOS: the four PRD §5.1 HTTP ACs by hand (echo server: send `POST {{base}}/users`
+with the JSON body `{"name":"{{name}}"}`; the Console raw view shows the resolved URL, the body and `Content-Type: application/json`;
+a 6-hop redirect server with max 5; openssl s_server self-signed; cancel immediately after send — Console
 shows Cancelled, no retry); variables highlighting/autocomplete; history open/restore; cookies
 dialog; cURL paste/copy; Timeline on a real HTTPS host. Confirm `scripts/pustman-v1-test.sh
-integration_tests redaction` → PASS 2 on the merge SHA. Record M1 GO/NO-GO; then /promote →
+integration_tests secret` → PASS 2 on the merge SHA. Record M1 GO/NO-GO; then /promote →
 release/pustman-v1-3.
 ```
 
@@ -1263,176 +2045,377 @@ release/pustman-v1-3.
 
 # Phase 5 — Workspaces + sharing (M2) [GPUI]
 
-### S39 — `collections_panel`: tree
+### S39a — `collections_panel` crate: virtualized tree
 **Goal:** the left dock shows the open workspace's collections, folders and requests as a
-virtualized, keyboard-navigable tree. Opening a request opens its tab.
+virtualized tree that follows the `order` arrays, with method badges and expand/collapse.
 **Depends on:** S38. **Deploy delta:** none.
-**Edits:**
-- `crates/collections_panel/**`
-- `crates/pustman/src/main.rs` (hotspot)
-- `crates/pustman/Cargo.toml` (hotspot)
+**Edits:** `crates/collections_panel/Cargo.toml`, `crates/collections_panel/src/collections_panel.rs`,
+`crates/collections_panel/src/tree.rs`, `crates/collections_panel/src/tree_tests.rs`.
 
 ```
 Load rust-gpui-ui-ux. Read docs/PRD.md REQ-UI-01, REQ-NFR-02 (10,000-item tree at 60 fps),
-crates/workspace_store (snapshot), crates/request_editor. Panel in the left dock: tree from the
-WorkspaceSnapshot honoring `order`; expand/collapse; arrow-key navigation; Enter opens the request
-tab (one tab per item id; re-opening focuses it); method badges; virtualized (uniform_list);
-element ids from ItemId. Problems from the snapshot show an error badge (detail UI is S42). Tests:
-tree_follows_order_arrays, keyboard_navigation_expands_and_opens, opening_twice_focuses_existing_tab,
+crates/workspace_store (snapshot), crates/workspace/src/panel.rs. src/tree.rs: Panel in the left
+dock; rows from the WorkspaceSnapshot honoring `order`; expand/collapse; method badges; virtualized
+(uniform_list); element ids from ItemId. Problems from the snapshot show an error badge (detail UI
+is S42b). Keyboard navigation and opening tabs are S39b. `pub fn init` in collections_panel.rs. Do
+not touch crates/pustman. Tests (tree_tests.rs): tree_follows_order_arrays,
 ten_thousand_items_render_only_visible_rows.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh collections_panel` → `PASS 4`.
+**Verify:** `scripts/pustman-v1-test.sh collections_panel tree::` → `PASS 2`.
 
-### S40 — Collection CRUD, save, ordering, dirty state
-**Goal:** the user can create, rename, duplicate, delete and drag-reorder collections, folders and
-requests. `Ctrl-S` saves the active request to its file through `workspace_store`, and the dirty dot
-clears.
-**Depends on:** S39, S33. **Deploy delta:** none.
-**Edits:**
-- `crates/collections_panel/**`
-- `crates/request_editor/**`
+### S39b — Tree keyboard navigation and opening requests
+**Goal:** arrow keys move through the tree and expand or collapse folders. Enter opens the request's
+tab, one tab per item id, and opening it again focuses the existing tab.
+**Depends on:** S39a. **Deploy delta:** none.
+**Edits:** `crates/collections_panel/src/navigation.rs`, `crates/collections_panel/src/navigation_tests.rs`,
+`crates/collections_panel/src/tree.rs`, `crates/collections_panel/src/collections_panel.rs` (append `mod`/init lines only),
+`crates/collections_panel/Cargo.toml` (append deps).
 
 ```
-Read docs/PRD.md REQ-WSP-01..03, REQ-UI-02/03, crates/workspace_store save_item. Context menu +
-actions: new collection/folder/request, rename (inline), duplicate, delete (confirm modal), drag
-to reorder/move (updates the parent's order array). workspace::Save in the request editor calls
-save_item on a background task; success clears the dirty dot; failure → toast with the path and
-reason. Deleting removes the file(s). Tests: create_request_writes_file_and_appears_in_tree,
-rename_keeps_id_and_updates_slug, reorder_updates_parent_order_array, delete_removes_file_after_confirm,
-ctrl_s_saves_and_clears_dirty, save_failure_shows_toast.
+Read crates/collections_panel/src/tree.rs, crates/request_editor (opening a tab for an item),
+crates/workspace (Item, Pane). src/navigation.rs: selection model, Up/Down/Left/Right/Enter
+handlers; Enter opens or focuses the RequestEditor tab keyed by ItemId. Tests (navigation_tests.rs):
+keyboard_navigation_expands_and_opens, opening_twice_focuses_existing_tab.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh collections_panel` → `PASS n` (n ≥ 10); `scripts/pustman-v1-test.sh request_editor save` → `PASS n` (n ≥ 2).
+**Verify:** `scripts/pustman-v1-test.sh collections_panel navigation::` → `PASS 2`.
 
-### S41 — Open, create and recent workspaces; format-version banner
-**Goal:** the user can open a folder as a workspace, create a new one, or pick from the recent list.
-The last workspace reopens at launch. A newer-major format opens read-only with a banner.
-**Depends on:** S23, S39. **Deploy delta:** none.
-**Edits:** `crates/workspace/**`.
+### S39w — Wire the collections panel
+**Goal:** the running app shows the collections tree in the left dock.
+**Depends on:** S39b. **Deploy delta:** none.
+**Edits:** `crates/pustman/src/pustman.rs` (hotspot), `crates/pustman/Cargo.toml` (hotspot),
+`crates/pustman/tests/wire_collections_panel.rs`.
+
+```
+Append `collections_panel::init(cx)` to pustman::init and add the dependency. Test
+(tests/wire_collections_panel.rs): wire_collections_panel_registered_in_left_dock.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh pustman wire_collections_panel` → `PASS 1`.
+- `cargo build -p pustman` → exit 0.
+
+### S40a — Collection CRUD
+**Goal:** a context menu and actions create, rename (inline), duplicate and delete (behind a confirm
+modal) collections, folders and requests. Every change writes through `workspace_store`.
+**Depends on:** S39b. **Deploy delta:** none.
+**Edits:** `crates/collections_panel/src/crud.rs`, `crates/collections_panel/src/crud_tests.rs`,
+`crates/collections_panel/src/tree.rs`, `crates/collections_panel/src/collections_panel.rs` (append `mod`/init lines only).
+
+```
+Read docs/PRD.md REQ-WSP-01..03, REQ-UI-03, crates/workspace_store save_item, crates/workspace
+ModalLayer. src/crud.rs: context menu (ui ContextMenu) + actions new collection/folder/request,
+rename (keeps the id, updates the slug), duplicate, delete with confirm (removes the file(s)). File
+IO on background tasks; failures → toast with path and reason. Tests (crud_tests.rs):
+create_request_writes_file_and_appears_in_tree, rename_keeps_id_and_updates_slug,
+delete_removes_file_after_confirm.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh collections_panel crud::` → `PASS 3`.
+
+### S40b — Drag to reorder and move
+**Goal:** dragging a node reorders it or moves it into another folder, and the parent's `order` array
+is updated on disk.
+**Depends on:** S40a. **Deploy delta:** none.
+**Edits:** `crates/collections_panel/src/reorder.rs`, `crates/collections_panel/src/reorder_tests.rs`,
+`crates/collections_panel/src/tree.rs`, `crates/collections_panel/src/collections_panel.rs` (append `mod`/init lines only).
+
+```
+Read crates/collections_panel (tree.rs, crud.rs), crates/workspace_store. src/reorder.rs: drag and
+drop on tree rows (GPUI on_drag/on_drop) plus keyboard move actions; writes the parent's order array
+via workspace_store on a background task; failure → toast. Tests (reorder_tests.rs):
+reorder_updates_parent_order_array.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh collections_panel reorder::` → `PASS 1`.
+
+### S40c — Save the active request (`Ctrl-S`)
+**Goal:** `workspace::Save` in the request editor writes the request to its file through
+`workspace_store`. Success clears the dirty dot, and failure shows a toast with the path and reason.
+**Depends on:** S38. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/save.rs`, `crates/request_editor/src/save_tests.rs`,
+`crates/request_editor/src/request_editor.rs` (append `mod`/init lines only), `crates/request_editor/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md REQ-WSP-01, REQ-UI-02, crates/workspace_store save_item, crates/request_editor.
+src/save.rs: Save handler registered on RequestEditor; save_item on a background task; clears dirty
+on success; toast on failure. Tests (save_tests.rs): ctrl_s_saves_and_clears_dirty,
+save_failure_shows_toast.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor save::` → `PASS 2`.
+
+### S41a — Open and create workspaces
+**Goal:** the user can open a folder as a workspace or create a new one, one workspace per window.
+The last workspace reopens at launch and is recorded in the recent list.
+**Depends on:** S38, S23b, S39a. **Deploy delta:** none.
+**Edits:** `crates/workspace/src/workspace_open.rs`, `crates/workspace/src/workspace_open_tests.rs`,
+`crates/workspace/src/workspace.rs` (append `mod`/init lines only), `crates/workspace/Cargo.toml` (append deps).
 
 ```
 Read docs/PRD.md REQ-WSP-04/05, REQ-COLLAB-06, crates/workspace_store open, crates/storage
-recent_workspaces. Actions OpenWorkspace (folder dialog), CreateWorkspace (writes pustman.json +
-layout; inside a git repo, show the REQ-COLLAB-06 note that no local files are stored there),
-OpenRecent (picker); one workspace per window; last-opened workspace reopens at launch; read_only
-snapshot → banner + editing disabled (save actions no-op with a toast). Errors → toast. Tests:
-create_workspace_writes_pustman_json, open_workspace_loads_snapshot_and_records_recent,
-newer_major_opens_read_only_with_banner, recent_list_most_recent_first.
+recent_workspaces. src/workspace_open.rs: OpenWorkspace (folder dialog), CreateWorkspace (writes
+pustman.json + layout; inside a git repo, show the REQ-COLLAB-06 note that no local files are
+stored there); records the workspace in recent_workspaces; reopens the last one at launch. IO on
+background tasks; errors → toast. Tests (workspace_open_tests.rs): create_workspace_writes_pustman_json,
+open_workspace_loads_snapshot_and_records_recent.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh workspace workspace_` → `PASS n` (n ≥ 4).
+**Verify:** `scripts/pustman-v1-test.sh workspace workspace_open::` → `PASS 2`.
 
-### S42 — External change bar and problem badges
-**Goal:** watcher events update the tree within 1 s. An open, dirty tab whose file changed shows a
-"Changed on disk — Reload / Keep mine / Compare" bar. Conflict or invalid JSON files show an error
-badge that names the file and line.
-**Depends on:** S8, S40, S41. **Deploy delta:** none.
-**Edits:**
-- `crates/collections_panel/**`
-- `crates/request_editor/**`
+### S41b — Open recent
+**Goal:** an `OpenRecent` picker lists recent workspaces, most recent first.
+**Depends on:** S41a, S24b. **Deploy delta:** none.
+**Edits:** `crates/command_palette/src/recent.rs`, `crates/command_palette/src/recent_tests.rs`,
+`crates/command_palette/src/command_palette.rs` (append `mod`/init lines only), `crates/command_palette/Cargo.toml` (append deps).
 
 ```
-Read docs/PRD.md REQ-COLLAB-01/02, crates/workspace_store watcher. Start the watcher when a
-workspace opens (store the subscription/task); apply FsChange to the snapshot and tree; clean
-open tabs reload silently; dirty tabs show the bar: Reload (discard draft), Keep mine (save
-overwrites), Compare (side-by-side field diff using `similar`). Problem badge on the tree item +
-a message naming file and line. Tests (use a tempdir workspace and the real watcher with a
-bounded GPUI-timer wait): external_add_appears_in_tree, dirty_tab_shows_changed_on_disk_bar,
-reload_discards_draft, keep_mine_overwrites_on_save, conflict_file_shows_badge_with_line.
+Read crates/workspace/src/workspace_open.rs, crates/command_palette (picker.rs, palette.rs). The
+picker lives in command_palette because command_palette already depends on workspace (ModalLayer);
+workspace must never depend on command_palette. src/recent.rs: OpenRecent action → Picker over
+recent_workspaces, newest first; Enter opens via workspace_open. Do not touch crates/workspace or
+crates/pustman (command_palette::init is already wired by S24w). Tests (recent_tests.rs):
+recent_list_most_recent_first.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh collections_panel external` → `PASS n` (n ≥ 2); `scripts/pustman-v1-test.sh request_editor disk` → `PASS n` (n ≥ 3).
+**Verify:** `scripts/pustman-v1-test.sh command_palette recent::` → `PASS 1`.
 
-### S43 — Environment editor: shared, local and secret values; set-secret prompt on send
-**Goal:** the user can edit environments, collection variables and globals:
-- Shared values are saved to files and local values to storage.
-- Secrets go to the keychain and never get a shared value.
-
-Sending with an unset secret prompts the user to set it.
-**Depends on:** S36, S38.
-**Deploy delta:** none.
-**Edits:**
-- `crates/environment_picker/**`
-- `crates/response_viewer/**`
+### S41c — Newer-format read-only banner
+**Goal:** a workspace whose format has a newer major version opens read-only with a banner. Editing
+is disabled, and save actions do nothing except show a toast.
+**Depends on:** S41a. **Deploy delta:** none.
+**Edits:** `crates/workspace/src/read_only.rs`, `crates/workspace/src/read_only_tests.rs`,
+`crates/workspace/src/workspace.rs`.
 
 ```
-Read docs/PRD.md §6.2 (REQ-VAR-SHARE-01..03), §8.6 UnresolvedSecret, the sharing AC. Environment
-editor (item or modal): table of key, shared value, local value, kind (Default/Secret), enabled,
-description; Secret rows have no shared-value field; local values in storage.local_values;
-secret values via SecretStore on background tasks; saving writes the environment file via
-workspace_store. UnresolvedSecret error panel (response_viewer) gets a "Set <name>" button that
-opens the editor focused on that secret; after setting, re-send works. Tests:
-shared_value_written_to_file_local_value_to_storage, secret_value_goes_to_keychain_not_file,
-secret_row_has_no_shared_value_field, unresolved_secret_panel_offers_set_and_resend.
+Read docs/PRD.md REQ-WSP-05, crates/workspace_store (read_only snapshot flag). src/read_only.rs:
+banner rendered from workspace.rs; a read_only flag items query to disable editing; Save → toast.
+Tests (read_only_tests.rs): newer_major_opens_read_only_with_banner.
 ```
 
-**Verify:**
-- `scripts/pustman-v1-test.sh environment_picker` → `PASS n` (n ≥ 7).
-- `scripts/pustman-v1-test.sh response_viewer secret` → `PASS n` (n ≥ 1).
+**Verify:** `scripts/pustman-v1-test.sh workspace read_only::` → `PASS 1`.
 
-### S44 — `git` crate + status bar branch and dirty count
-**Goal:** inside a Git repository, the status bar shows the branch and the number of dirty files.
-Both refresh on watcher events and on focus.
-**Depends on:** S41. **Deploy delta:** none.
-**Edits:**
-- `crates/git/**`
-- `crates/pustman/src/main.rs` (hotspot)
-- `crates/pustman/Cargo.toml` (hotspot)
+### S42a — Watcher updates the tree
+**Goal:** the watcher starts when a workspace opens, and external adds, edits and deletes show up in
+the tree within 1 s.
+**Depends on:** S40b, S41a, S8. **Deploy delta:** none.
+**Edits:** `crates/collections_panel/src/external.rs`, `crates/collections_panel/src/external_tests.rs`,
+`crates/collections_panel/src/collections_panel.rs` (append `mod`/init lines only), `crates/collections_panel/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md REQ-COLLAB-01, crates/workspace_store watcher, crates/workspace/src/workspace_open.rs.
+src/external.rs: start the watcher on workspace open (store the subscription/task); apply FsChange
+to the snapshot; the tree re-renders from the snapshot (do not edit tree.rs). Tests (external_tests.rs;
+tempdir workspace, real watcher, bounded GPUI-timer wait): external_add_appears_in_tree.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh collections_panel external::` → `PASS 1`.
+
+### S42b — Problem badges with file and line
+**Goal:** a conflicted or invalid-JSON file shows an error badge on its tree item and a message that
+names the file and the line.
+**Depends on:** S40b. **Deploy delta:** none.
+**Edits:** `crates/collections_panel/src/problems.rs`, `crates/collections_panel/src/problems_tests.rs`,
+`crates/collections_panel/src/tree.rs`, `crates/collections_panel/src/collections_panel.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-COLLAB-02, crates/workspace_store (Problem). src/problems.rs: badge + tooltip
+message "<file>:<line> <reason>" on the tree row; clicking it opens a details popover. Tests
+(problems_tests.rs): conflict_file_shows_badge_with_line.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh collections_panel problems::` → `PASS 1`.
+
+### S42c — "Changed on disk" bar in the request editor
+**Goal:** a clean open tab reloads silently when its file changes. A dirty tab shows a "Changed on
+disk — Reload / Keep mine / Compare" bar.
+**Depends on:** S40c, S42a. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/disk_change.rs`, `crates/request_editor/src/disk_change_tests.rs`,
+`crates/request_editor/src/request_editor.rs`, `crates/request_editor/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md REQ-COLLAB-02, crates/workspace_store watcher, crates/request_editor/src/save.rs.
+src/disk_change.rs: on FsChange for the tab's item: clean → reload; dirty → bar with Reload
+(discard the draft), Keep mine (next save overwrites), Compare (side-by-side field diff using
+`similar`). Tests (disk_change_tests.rs): dirty_tab_shows_changed_on_disk_bar, reload_discards_draft,
+keep_mine_overwrites_on_save.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor disk_change::` → `PASS 3`.
+
+### S43a — Environment editor: shared and local values
+**Goal:** an editor for environments, collection variables and globals shows key, shared value,
+local value, kind (Default/Secret), enabled and description. Shared values save to the file and local
+values to storage. Secret rows have no shared-value field.
+**Depends on:** S38. **Deploy delta:** none. **High-stakes (secrets).**
+**Edits:** `crates/environment_picker/src/env_editor.rs`, `crates/environment_picker/src/env_editor_tests.rs`,
+`crates/environment_picker/src/environment_picker.rs` (append `mod`/init lines only), `crates/environment_picker/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md §6.2 (REQ-VAR-SHARE-01..03), crates/workspace_store, crates/storage local_values.
+src/env_editor.rs: editor item or modal with a ui Table; Secret rows render no shared-value field;
+saving writes the environment file via workspace_store and local values via storage, both on
+background tasks; errors → toast. Secret values are S43b. Tests (env_editor_tests.rs):
+secret_row_has_no_shared_value_field, shared_value_written_to_file_local_value_to_storage.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh environment_picker env_editor::` → `PASS 2`.
+
+### S43b — Secret values go to the keychain
+**Goal:** a secret's value is set and read through `SecretStore` (the OS keychain) and never written
+to the environment file or storage.
+**Depends on:** S43a. **Deploy delta:** none. **High-stakes (secrets).**
+**Edits:** `crates/environment_picker/src/secret_values.rs`, `crates/environment_picker/src/secret_values_tests.rs`,
+`crates/environment_picker/src/env_editor.rs`, `crates/environment_picker/src/environment_picker.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-VAR-SHARE-02, crates/secrets (SecretStore, MemorySecretStore in tests),
+crates/environment_picker/src/env_editor.rs. src/secret_values.rs: masked value field on Secret rows;
+set/read via SecretStore on background tasks; never log values. Tests (secret_values_tests.rs):
+secret_value_goes_to_keychain_not_file.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh environment_picker secret_values::` → `PASS 1`.
+
+### S43c — "Set secret" from the unresolved-secret error panel
+**Goal:** the `UnresolvedSecret` error panel offers a "Set <name>" button that opens the editor
+focused on that secret. After it is set, re-sending works.
+**Depends on:** S43b. **Deploy delta:** none. **High-stakes (secrets).**
+**Edits:** `crates/response_viewer/src/set_secret.rs`, `crates/response_viewer/src/set_secret_tests.rs`,
+`crates/response_viewer/src/error_panel.rs`, `crates/response_viewer/src/response_viewer.rs` (append `mod` only),
+`crates/response_viewer/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md §8.6 UnresolvedSecret, crates/response_viewer/src/error_panel.rs,
+crates/environment_picker (opening the editor focused on a key). src/set_secret.rs: button per
+missing name → open the editor focused on it; on save, offer Resend. Tests (set_secret_tests.rs):
+unresolved_secret_panel_offers_set_and_resend.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh response_viewer set_secret::` → `PASS 1`.
+
+### S44a — `git` crate: status
+**Goal:** `status(root) -> Result<Option<GitStatus { branch, dirty }>>` reports the branch and dirty
+count. It returns `Ok(None)` outside a repository or when `git` is not installed.
+**Depends on:** S38. **Deploy delta:** none.
+**Edits:** `crates/git/Cargo.toml`, `crates/git/src/git.rs`, `crates/git/src/status.rs`,
+`crates/git/src/status_tests.rs`.
 
 ```
 Read docs/PRD.md REQ-COLLAB-03, AGENTS.md (smol::process, never std::process::Command). Create
-crates/git (domain: no gpui; smol): `status(root) -> Result<Option<GitStatus{branch, dirty}>>`
-via `git -C <root> status --porcelain=v2 --branch` with smol::process; Ok(None) when not a repo
-or git is not installed (no error toast — the item hides). A small GPUI status-bar item lives in
-the git crate behind a `ui` feature OR in crates/workspace — choose the option that keeps the git
-crate GPUI-free and record a Decision (if workspace, this step's Edits must not grow: put the item
-in crates/git/src/status_item.rs under a `gpui` feature). Register init. Tests (tempdir repos made
-with smol::process git init): status_reports_branch_and_dirty_count, non_repo_returns_none,
-detached_head_reported.
+crates/git (domain: no gpui by default; smol). src/status.rs: `git -C <root> status --porcelain=v2
+--branch` via smol::process; parse branch (detached HEAD reported as such) and dirty count; Ok(None)
+for a non-repo or missing git. Tests (status_tests.rs; tempdir repos made with smol::process git
+init): status_reports_branch_and_dirty_count, non_repo_returns_none, detached_head_reported.
 ```
 
 **Verify:**
-- `scripts/pustman-v1-test.sh git` → `PASS n` (n ≥ 3).
+- `scripts/pustman-v1-test.sh git status::` → `PASS 3`.
 - `cargo tree -p git --no-default-features | grep -c gpui` → `0`.
 
-### S45 — Import/export UI (Postman collection, environment, globals)
-**Goal:** a user can import a Postman collection, environment or globals file into the open
-workspace and sees a report. Imported secrets go to the keychain. Exporting a collection writes
-Postman v2.1 with warnings for skipped items.
-**Depends on:** S9, S42. **Deploy delta:** none.
-**Edits:** `crates/collections_panel/**`.
+### S44b — Status-bar branch item
+**Goal:** inside a Git repository, the status bar shows the branch and dirty count. Both refresh on
+watcher events and on window focus. Outside a repository the item hides.
+**Depends on:** S44a, S41a. **Deploy delta:** none.
+**Edits:** `crates/git/src/status_item.rs`, `crates/git/src/status_item_tests.rs`,
+`crates/git/src/git.rs` (append `mod`/init lines only), `crates/git/Cargo.toml` (append deps).
 
 ```
-Read docs/PRD.md §6.4 (REQ-IO-01/02/03/06), crates/api_model/src/postman.rs. import_export::Import
-(file dialog; read on a background task with the 50 MB check before reading fully) → import →
-save_item for each item → report modal (imported, preserved-but-not-executed scripts, unsupported
-auth, warnings); environment import puts SecretValuesToStore into SecretStore; export via
-context menu → file dialog → write; failures → toast. Tests:
-import_collection_writes_files_and_shows_report, import_environment_secrets_go_to_keychain,
-oversized_file_rejected_with_message, export_writes_v21_and_lists_skipped.
+Load rust-gpui-ui-ux. Read crates/workspace/src/status_bar.rs, crates/git/src/status.rs.
+src/status_item.rs behind a `gpui` cargo feature, on by default so the test runner builds it
+(the domain API stays GPUI-free under `--no-default-features`): a status-bar item
+added with add_left_item; refresh on a background task. `pub fn init` behind the feature. Tests
+(status_item_tests.rs): status_item_shows_branch_and_dirty_count.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh collections_panel import` → `PASS n` (n ≥ 3); `scripts/pustman-v1-test.sh collections_panel export` → `PASS n` (n ≥ 1).
+**Verify:**
+- `scripts/pustman-v1-test.sh git status_item::` → `PASS 1`.
+- `cargo tree -p git --no-default-features | grep -c gpui` → `0`.
+
+### S44w — Wire the git status item
+**Goal:** the running app shows the branch in the status bar inside a repository.
+**Depends on:** S44b. **Deploy delta:** none.
+**Edits:** `crates/pustman/src/pustman.rs` (hotspot), `crates/pustman/Cargo.toml` (hotspot),
+`crates/pustman/tests/wire_git.rs`.
+
+```
+Append `git::init(cx)` to pustman::init and depend on git with the `gpui` feature. Test
+(tests/wire_git.rs): wire_git_status_item_registered.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh pustman wire_git` → `PASS 1`.
+- `cargo build -p pustman` → exit 0.
+
+### S45a — Import a Postman collection
+**Goal:** importing a Postman collection writes its items into the open workspace and shows a report.
+Files over 50 MB are rejected with a message.
+**Depends on:** S9, S42a, S40a. **Deploy delta:** none. **High-stakes (import).**
+**Edits:** `crates/collections_panel/src/import.rs`, `crates/collections_panel/src/import_tests.rs`,
+`crates/collections_panel/src/collections_panel.rs` (append `mod`/init lines only), `crates/collections_panel/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md §6.4 (REQ-IO-01/02/06), crates/api_model/src/postman.rs. src/import.rs:
+import_export::Import (file dialog; size check before reading fully; read on a background task) →
+import → save_item for each item → report modal (imported, preserved-but-not-executed scripts,
+unsupported auth, warnings); failures → toast. Imported scripts are never executed. Tests
+(import_tests.rs): import_collection_writes_files_and_shows_report, oversized_file_rejected_with_message.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh collections_panel import::` → `PASS 2`.
+
+### S45b — Import environments and globals
+**Goal:** importing a Postman environment or globals file writes it into the workspace, and its
+secret values go to the keychain.
+**Depends on:** S45a. **Deploy delta:** none. **High-stakes (secrets).**
+**Edits:** `crates/collections_panel/src/import_environment.rs`, `crates/collections_panel/src/import_environment_tests.rs`,
+`crates/collections_panel/src/collections_panel.rs` (append `mod`/init lines only), `crates/collections_panel/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md REQ-IO-03, crates/api_model/src/postman.rs (SecretValuesToStore), crates/secrets.
+src/import_environment.rs: reuse import.rs's dialog/size check; write the environment file; put
+SecretValuesToStore into SecretStore on a background task; never log values. Tests
+(import_environment_tests.rs): import_environment_secrets_go_to_keychain.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh collections_panel import_environment::` → `PASS 1`.
+
+### S45c — Export a collection
+**Goal:** exporting a collection from its context menu writes Postman v2.1 and lists the items it skipped.
+**Depends on:** S40b. **Deploy delta:** none.
+**Edits:** `crates/collections_panel/src/export.rs`, `crates/collections_panel/src/export_tests.rs`,
+`crates/collections_panel/src/crud.rs`, `crates/collections_panel/src/collections_panel.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-IO-06, crates/api_model/src/postman.rs (export), crates/collections_panel/src/crud.rs.
+src/export.rs: context-menu entry (added in crud.rs) → file dialog → write on a background task →
+a warnings list of skipped items; failure → toast. Tests (export_tests.rs):
+export_writes_v21_and_lists_skipped.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh collections_panel export::` → `PASS 1`.
 
 ### S46 — Quick open (`Ctrl/Cmd-P`)
 **Goal:** a fuzzy finder over every request in the workspace that opens the chosen one.
-**Depends on:** S41. **Deploy delta:** none.
-**Edits:** `crates/command_palette/**`.
+**Depends on:** S41a, S24a. **Deploy delta:** none.
+**Edits:** `crates/command_palette/src/quick_open.rs`, `crates/command_palette/src/quick_open_tests.rs`,
+`crates/command_palette/src/command_palette.rs` (append `mod`/init lines only), `crates/command_palette/Cargo.toml` (append deps).
 
 ```
-Read docs/PRD.md REQ-UI-05, crates/command_palette. Add a QuickOpen picker (same crate, reusing the
-picker) listing requests from the open workspace snapshot as "Collection / Folder / Name" with
-method badge; Enter opens/focuses the tab. Bound by quick_open::Toggle (already in keymaps). Tests:
-quick_open_lists_all_requests_with_paths, fuzzy_matches_on_path_segments, enter_opens_request_tab.
+Read docs/PRD.md REQ-UI-05, crates/command_palette. src/quick_open.rs: a QuickOpen picker (reusing
+the picker) listing requests from the open workspace snapshot as "Collection / Folder / Name" with
+method badge; Enter opens/focuses the tab. Bound by quick_open::Toggle (already in keymaps). Tests
+(quick_open_tests.rs): quick_open_lists_all_requests_with_paths, fuzzy_matches_on_path_segments,
+enter_opens_request_tab.
 ```
 
-**Verify:** `scripts/pustman-v1-test.sh command_palette quick_open` → `PASS 3`.
+**Verify:** `scripts/pustman-v1-test.sh command_palette quick_open::` → `PASS 3`.
 
 ### S47 — Sharing AC: two clones of one Git repository
 **Goal:** the PRD §6.3 sharing AC passes as an automated test using two clones of a local bare repository.
-**Depends on:** S37, S43, S44. **Deploy delta:** none.
-**Edits:** `crates/integration_tests/**`.
+**Depends on:** S37, S43b, S44a. **Deploy delta:** none. **High-stakes (secrets).**
+**Edits:** `crates/integration_tests/tests/sharing.rs`, `crates/integration_tests/Cargo.toml` (append deps).
 
 ```
 Read docs/PRD.md §6.3 AC (sharing), crates/workspace_store (watcher), crates/secrets
@@ -1444,14 +2427,14 @@ pull`; assert within 1 s (GPUI test clock / bounded wait) an ItemAdded for the r
 environment shows api_key with kind Secret and no value; assert preparing a send in B fails with
 UnresolvedSecret{["api_key"]}; assert `git -C A show HEAD` output does not contain the secret
 value. Test name: sharing_ac_two_clones. Mark it skipped (with an explicit message, not silently)
-if `git` is not installed.
+if `git` is not installed. Do not edit tests/redaction.rs.
 ```
 
 **Verify:** `scripts/pustman-v1-test.sh integration_tests sharing_ac_two_clones` → `PASS 1`.
 
 ### S48 — M2 SIGN-OFF (HUMAN)
 **Goal:** the M2 exit criteria are proven by two people (or two clones) on real machines.
-**Depends on:** S42, S43, S45, S46, S47. **Deploy delta:** none. **Edits:** none.
+**Depends on:** S39w, S40c, S41b, S41c, S42b, S42c, S43c, S44w, S45b, S45c, S46, S47. **Deploy delta:** none. **Edits:** none.
 
 ```
 Human validation on Linux + macOS with two clones of one GitHub repo: A adds a request + secret
