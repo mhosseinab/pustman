@@ -126,3 +126,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-19: **S12 passed → `5f1a12d`.** Round-5 M2 (secret in a header name reached Debug) fixed in `8a3dce9`; the driver checked the fix diff and re-ran the full verify (VERIFY OK). M1 header order escalated to #31 (medium) under the scoped re-review policy. Also committed the S11/S17/S21 step records left untracked earlier.
 - 2026-11-19: **S13a passed → `64d0014`.** Rebased onto main with `--onto` past the old S12 merge base. Its MEDIUM-1 was fixed by S12. VERIFY OK.
 - 2026-11-19: **S13b passed → `4bb7e1d`.** Rebased with `--onto` and got VERIFY OK. Round 5 was a no-shell scoped review, so the driver's verify is the run evidence.
+- 2026-11-19: **S14b passed → `1cf147b`.** Rebased onto main past S13a/S13b, with one mod-list conflict resolved by keeping both sides. VERIFY OK. LOW findings were already filed as #26–#29 and #35.
