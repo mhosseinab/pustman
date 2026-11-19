@@ -81,17 +81,17 @@ Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 0 · un
 | S9 | Postman v2.1/v2.0 import, v2.1 export, environment/globals import | passed | 1 | (see git) | [S9](steps/S9.md) | 2 review rounds, 2 fix cycles; R2 PASS_WITH_ISSUES ×2 (both recommend merge); `PASS 8` |
 | S10 | cURL import and export | in_progress | 1 | | | worktree .claude/worktrees/pustman-v1/S10; BUILD phase only |
 | G-DEPS | Install GPUI system libraries, CI push, then promote `release/pustman-v1-1` | pending | – | | | HUMAN gate; 1/3 libraries installed, 2/3 CI green (run 44240566190); 3/3 promote open |
-| S11 | `http_engine` core: transport trait, fake, error taxonomy, send/cancel | pending | 0 | | | after G-DEPS |
-| S12 | `ReqwestTransport`: settings, manual redirects, TLS toggle, timing spike (D2) | pending | 0 | | |  |
+| S11 | `http_engine` core: transport trait, fake, error taxonomy, send/cancel | **passed** | 2 | `f8846db` | [S11](progress/pustman-v1/steps/S11.md) | 3 MEDIUM fixed: fmt false-claim, URL userinfo leak, Debug secret leak |
+| S12 | `ReqwestTransport`: settings, manual redirects, TLS toggle, timing spike (D2) | **in_progress** | 4 | | | 3 chunks built + 2 MEDIUM fixed; post-pin-bump verify + confirm review pending |
 | S13 | Send pipeline: variable resolution, auth (Basic/Bearer/API key), unresolved secrets | pending | 0 | | |  |
 | S14 | Request bodies, file refs, auto headers, large response spill | pending | 0 | | |  |
 | S15 | Cookie jar per workspace | pending | 0 | | |  |
 | S16 | History recording with redaction, 1 MB cap, retention | pending | 0 | | |  |
-| S17 | `settings` crate | pending | 0 | | | after G-DEPS |
-| S18 | `theme` crate with bundled light and dark themes | pending | 0 | | |  |
-| S19 | `ui` design-system crate: tokens and base components | pending | 0 | | |  |
+| S17 | `settings` crate | **passed** | 3 | `47b2dc6` | [S17](progress/pustman-v1/steps/S17.md) | split into 3 chunks after 3 denied dispatches; 2 LOW → #15 #16 |
+| S18 | `theme` crate with bundled light and dark themes | **passed** | 2 | `2fedd34` | [S18](progress/pustman-v1/steps/S18.md) | 1 MEDIUM fixed; 3 LOW → #17 #18 #19 |
+| S19 | `ui` design-system crate: tokens and base components | **in_progress** | 1 | | | split: chunks + icons; uncommitted work on the branch, being resumed on the new pin |
 | S20 | `text_input` crate: single- and multi-line editing | pending | 0 | | |  |
-| S21 | `pustman_actions` + complete default keymaps (D10) | pending | 0 | | | after G-DEPS |
+| S21 | `pustman_actions` + complete default keymaps (D10) | **passed** | 1 | `0ea7e26` | [S21](progress/pustman-v1/steps/S21.md) | 3 LOW → #12 #13 #14; carry-forward to S22 |
 | S22 | `pustman` binary + `workspace` shell (window, docks, panes/tabs, status bar, toasts) | pending | 0 | | |  |
 | S23 | Tab and layout restore | pending | 0 | | |  |
 | S24 | Command palette | pending | 0 | | |  |
@@ -130,6 +130,18 @@ Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 0 · un
 _None._
 
 ## Active CARRY-FORWARD
+
+- **GPUI APIs (UI steps only):** look up `https://gpui.rs/` and `/examples` first, then the pinned
+  source at `~/.cargo/git/checkouts/zed-*/0cc1ffb/crates/gpui`. gpui.rs tracks Zed main, like our
+  pin. **Never use Context7 or docs.rs for GPUI** — they index crates.io `gpui` 0.2.2 (Oct 2025), a
+  year behind our pin (e.g. `Application::new()`; we boot with
+  `gpui_platform::application().run(...)`). On any conflict the **pinned rev `0cc1ffb6` decides and
+  `cargo check` has the final word**. Steps never bump the pin — a worker that thinks it needs a
+  bump stops and reports. A disagreement between docs, skill and pin goes in a `Decision:` line.
+  (skill `rust-gpui-ui-ux` › "Framework docs first", `2a18529` + `fdd8325`)
+- **`SecretValues::refused_count()` has no caller yet.** The step that wires it into History/Console/
+  export must read `refused_count()` and warn the user — otherwise S3's finding 3 stays half closed.
+  (S3 carried this.)
 - **`SecretValues::refused_count()` must be read and surfaced by its first caller (2026-11-18, from the S3 handover).** `insert` now returns `bool` and `refused_count()` reports values the redactor cannot mask (currently: values containing U+2022, plus too-short values; empty is not counted). F3 is only half closed until the step that wires `SecretValues` into History/Console/export reads `refused_count()` and warns the user — AGENTS.md requires errors to reach the user, and a silently dropped secret is a guaranteed leak. No code outside `api_model` calls `SecretValues` yet. Source: S3 handover + review round 3 (`585cac7`/`8623d58`).
 
 Each entry is a fact a later step must know, with its source record linked.
