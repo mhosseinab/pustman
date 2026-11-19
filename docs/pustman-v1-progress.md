@@ -43,7 +43,7 @@ fixers and reviewers never do.
   cycle; the reply is a receipt; empty-reply policy). Validated 2026-11-18 at S10. The single source
   of truth is `docs/pustman-v1-orchestrator-prompt.md` › "THE LOOP" › "DISPATCH PROTOCOL". Do not
   duplicate it here.
-- **UI steps** (crates `ui`, `theme`, `workspace`, `text_input`, any `*_panel`/`*_editor`/`*_viewer`/`*_picker`, `command_palette`, `assets/themes`, `assets/icons`): every worker, reviewer and fixer prompt MUST include the three lines in Active CARRY-FORWARD (load the `rust-gpui-ui-ux` skill + its "Design source" section; read the redesign pack from `/home/geek/workspace/rea-agent/pustman/docs/postman_redesign_pack/` read-only, never copy it or `03_references/screenshots/`/`07_guides/` into the repo; cite screen IDs S01–S24 and requirement IDs R01–R28 in `Decision:` lines — S16–S23 cloud collaboration is out of v1 per `docs/PRD.md`). Send UI steps to `ux-auditor` alongside the usual reviewers. If a step's Verify contradicts the pack, STOP and ask the human.
+- **UI steps** (crates `ui`, `theme`, `workspace`, `text_input`, any `*_panel`/`*_editor`/`*_viewer`/`*_picker`, `command_palette`, `assets/themes`, `assets/icons`): every worker, reviewer and fixer brief MUST paste the block in `.claude/worktrees/pustman-v1/.briefs/UI-SKILL-BLOCK.md` (the `rust-gpui-ui-ux` skill: the 8-line mental model, the 9-step workflow, the design-source precedence table, and the non-negotiables) — a brief that omits it is invalid. It also MUST include the three lines in Active CARRY-FORWARD (load the `rust-gpui-ui-ux` skill + its "Design source" section; read the redesign pack from `/home/geek/workspace/rea-agent/pustman/docs/postman_redesign_pack/` read-only, never copy it or `03_references/screenshots/`/`07_guides/` into the repo; cite screen IDs S01–S24 and requirement IDs R01–R28 in `Decision:` lines — S16–S23 cloud collaboration is out of v1 per `docs/PRD.md`). Send UI steps to `ux-auditor` alongside the usual reviewers. If a step's Verify contradicts the pack, STOP and ask the human.
 
 ## Deferred verification gate
 
@@ -61,7 +61,7 @@ These run at the next human sign-off and are recorded in that sign-off's step re
 
 ## Window
 
-Last tag: _none_ · unpromoted passed steps: 5 (S0, S1, S2, S6, S7) · unapplied deltas: 0 (cap 3 / 16).
+Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 0 · unapplied deltas: 0 (cap 3 / 16). SEGMENT 2 (S11–S24) IN FLIGHT.
 
 ## Status
 
