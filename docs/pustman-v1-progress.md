@@ -77,9 +77,9 @@ Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 0 · un
 | S5 | `workspace_store`: on-disk format, deterministic atomic writes | passed | 2 | `b08d9a8` | [S5](steps/S5.md) | 3 review rounds, 3 fix cycles; R3 PASS / PASS_WITH_ISSUES (1 pre-existing api_model LOW → issue #7); `PASS 30` |
 | S6 | `storage`: SQLite local store with migrations | passed | 3 | `a84c5a3` | [S6](steps/S6.md) | 3 review rounds, 2 fix cycles (2 data-loss MEDIUMs + 2 proof-quality MEDIUMs closed); `PASS 22`; LOWs → issues #5/#6 |
 | S7 | `secrets`: OS keychain behind a trait | passed | 1 | `626aa12` | [S7](steps/S7.md) | 2 reviewers converged on 1 MEDIUM → fixed; re-review PASS; live keyring → S25 gate |
-| S8 | `workspace_store` watcher: external changes and problems | in_progress | 1 | | | worktree .claude/worktrees/pustman-v1/S8 |
+| S8 | `workspace_store` watcher: external changes and problems | passed | 1 | `c10350a` | [S8](steps/S8.md) | row corrected 2026-11-19 (merged before release/pustman-v1-1) |
 | S9 | Postman v2.1/v2.0 import, v2.1 export, environment/globals import | passed | 1 | (see git) | [S9](steps/S9.md) | 2 review rounds, 2 fix cycles; R2 PASS_WITH_ISSUES ×2 (both recommend merge); `PASS 8` |
-| S10 | cURL import and export | in_progress | 1 | | | worktree .claude/worktrees/pustman-v1/S10; BUILD phase only |
+| S10 | cURL import and export | passed | 1 | `55ca3da` | [S10](steps/S10.md) | row corrected 2026-11-19 (merged before release/pustman-v1-1) |
 | G-DEPS | Install GPUI system libraries, CI push, then promote `release/pustman-v1-1` | pending | – | | | HUMAN gate; 1/3 libraries installed, 2/3 CI green (run 44240566190); 3/3 promote open |
 | S11 | `http_engine` core: transport trait, fake, error taxonomy, send/cancel | **passed** | 2 | `f8846db` | [S11](progress/pustman-v1/steps/S11.md) | 3 MEDIUM fixed: fmt false-claim, URL userinfo leak, Debug secret leak |
 | S12 | `ReqwestTransport`: settings, manual redirects, TLS toggle, timing spike (D2) | **passed** | 5 | `5f1a12d` | [S12](progress/pustman-v1/steps/S12.md) | M1 → #31 (medium); LOW #30 #32 #33 #34 #48 #49 |
