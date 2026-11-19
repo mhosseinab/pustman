@@ -1,6 +1,6 @@
 ---
 name: promote
-description: Prepare and run a promotion of pustman-v1/main — one-page brief, doc-truth check, promote-check gate — then, only on my explicit go, tag release/pustman-v1-<n>, build the release and hand off the manual smoke. Desktop app: there is no deploy. Use for "promote", "promote up to S12", "what's promotable?".
+description: "Prepare and run a promotion of pustman-v1/main — one-page brief, doc-truth check, promote-check gate — then, only on my explicit go, tag release/pustman-v1-<n>, build the release and hand off the manual smoke. Desktop app: there is no deploy. Use for \"promote\", \"promote up to S12\", \"what's promotable?\"."
 argument-hint: [sha | S<N> | "check"]
 disable-model-invocation: true
 allowed-tools: Bash(git *) Bash(scripts/promote-check.sh *) Read Grep Glob Edit
