@@ -8,10 +8,12 @@
 
 mod dock;
 mod pane;
+mod panel;
 mod status_bar;
 
 pub use dock::{Dock, DockPosition};
 pub use pane::Pane;
+pub use panel::{Panel, PanelHandle};
 pub use status_bar::StatusBar;
 
 use gpui::{App, Context, Entity, FocusHandle, Focusable, ParentElement, Render, Window};

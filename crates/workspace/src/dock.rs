@@ -1,12 +1,15 @@
 //! The dock: the container a workspace edge's panels live in (PRD §3).
 //!
-//! A dock is pinned to one edge of the workspace, is open or closed, and holds at most
-//! one panel. The panel registration that fills the docks lands in a later step, so an
-//! open dock with no panel renders an empty container of its fixed size — and a closed
-//! dock renders nothing at all, so the shell lays out around it.
+//! A dock is pinned to one edge of the workspace, is open or closed, and holds the
+//! [`PanelHandle`]s feature crates register for its edge: a selector strip of one entry
+//! per panel above the active one. An open dock with no panel renders an empty container
+//! of its fixed size — and a closed dock renders nothing at all, so the shell lays out
+//! around it.
 
 use gpui::{AnyView, Context, IntoElement, ParentElement, Render, Window, div};
 use ui::prelude::*;
+
+use crate::panel::PanelHandle;
 
 /// The left dock's width: the redesign pack's `layout.collectionSidebar`, 248 px.
 const LEFT_DOCK_WIDTH_PX: f32 = 248.;
@@ -35,11 +38,13 @@ impl DockPosition {
     }
 }
 
-/// One edge of the workspace: open or closed, holding at most one panel.
+/// One edge of the workspace: open or closed, holding the panels registered for it and
+/// showing one of them at a time behind the selector strip.
 pub struct Dock {
     position: DockPosition,
     is_open: bool,
-    panel: Option<AnyView>,
+    panels: Vec<Box<dyn PanelHandle>>,
+    active_panel: Option<usize>,
 }
 
 impl Dock {
@@ -48,7 +53,8 @@ impl Dock {
         Self {
             position,
             is_open: true,
-            panel: None,
+            panels: Vec::new(),
+            active_panel: None,
         }
     }
 
@@ -73,15 +79,99 @@ impl Dock {
         self.set_open(!self.is_open, cx);
     }
 
-    /// The panel this dock shows, if one is registered.
-    pub fn panel(&self) -> Option<&AnyView> {
-        self.panel.as_ref()
+    /// The panels this dock holds, in registration order.
+    pub fn panels(&self) -> &[Box<dyn PanelHandle>] {
+        &self.panels
     }
 
-    /// Put a panel in this dock; `None` empties it.
-    pub fn set_panel(&mut self, panel: Option<AnyView>, cx: &mut Context<Self>) {
-        self.panel = panel;
+    /// The active panel's view, if this dock holds one.
+    pub fn panel(&self) -> Option<AnyView> {
+        self.active_panel
+            .and_then(|index| self.panels.get(index))
+            .map(|panel| panel.to_any_view())
+    }
+
+    /// Put a panel in this dock; the first panel added becomes the active one. A panel
+    /// registered under an id this dock already holds replaces that entry in place —
+    /// same slot, same selection — so re-registration can never duplicate an entry.
+    pub fn add_panel(&mut self, panel: Box<dyn PanelHandle>, cx: &mut Context<Self>) {
+        let panel_id = panel.panel_id(cx);
+        match self
+            .panels
+            .iter()
+            .position(|registered| registered.panel_id(cx) == panel_id)
+        {
+            Some(index) => {
+                if let Some(registered) = self.panels.get_mut(index) {
+                    *registered = panel;
+                }
+            }
+            None => {
+                self.panels.push(panel);
+                if self.active_panel.is_none() {
+                    self.active_panel = Some(self.panels.len().saturating_sub(1));
+                }
+            }
+        }
         cx.notify();
+    }
+
+    /// Show the panel registered under `panel_id` and move keyboard focus into it. An
+    /// unknown id is ignored — a stale click must not panic or clear the selection.
+    pub fn activate_panel(&mut self, panel_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(index) = self
+            .panels
+            .iter()
+            .position(|registered| registered.panel_id(cx) == panel_id)
+        else {
+            return;
+        };
+        self.active_panel = Some(index);
+        cx.notify();
+        if let Some(panel) = self.panels.get(index) {
+            let focus_handle = panel.focus_handle(cx);
+            window.focus(&focus_handle, cx);
+        }
+    }
+
+    /// The selector strip above the active panel: one entry per registered panel, the
+    /// active one selected. A dock draws it only while it holds at least one panel.
+    fn selector_strip(&self, cx: &Context<Self>) -> Option<impl IntoElement> {
+        if self.panels.is_empty() {
+            return None;
+        }
+        let colors = cx.theme().colors();
+        let entries: Vec<_> = self
+            .panels
+            .iter()
+            .enumerate()
+            .map(|(index, panel)| {
+                let panel_id = panel.panel_id(cx);
+                selector_entry(
+                    panel_id,
+                    panel.title(cx),
+                    panel.icon(cx),
+                    self.active_panel == Some(index),
+                    // The handler runs when the click is dispatched — never inside
+                    // render — and reaches the dock through `cx.listener`, so no view
+                    // is updated re-entrantly.
+                    cx.listener(move |dock, _: &ClickEvent, window, cx| {
+                        dock.activate_panel(panel_id, window, cx);
+                    }),
+                )
+            })
+            .collect();
+        Some(
+            h_flex()
+                .w_full()
+                .flex_none()
+                .px(DynamicSpacing::Base02.rems(cx))
+                .py(DynamicSpacing::Base02.rems(cx))
+                .gap(DynamicSpacing::Base02.rems(cx))
+                .border_b_1()
+                .border_color(colors.border_variant)
+                .children(entries),
+        )
     }
 }
 
@@ -91,10 +181,11 @@ impl Render for Dock {
             return div().into_any_element();
         }
 
+        let selector = self.selector_strip(cx);
+        let active_panel = self.panel();
         let colors = cx.theme().colors();
         let element_id = self.position.element_id();
-        let panel = self.panel.clone();
-        div()
+        v_flex()
             .id(element_id)
             .debug_selector(|| element_id.to_owned())
             .flex_none()
@@ -111,7 +202,40 @@ impl Render for Dock {
                     .border_t_1()
                     .border_color(colors.border_variant),
             })
-            .children(panel)
+            .children(selector)
+            .children(active_panel.map(|panel| div().flex_1().min_h_0().child(panel)))
             .into_any_element()
     }
+}
+
+/// The debug selector [`selector_entry`] puts on one panel's entry — the one string
+/// tests hand to `VisualTestContext::debug_bounds` — and the entry's element id.
+pub(crate) fn dock_panel_selector(panel_id: &str) -> String {
+    format!("dock-panel-{panel_id}")
+}
+
+/// One selector entry: the panel's icon and title, the active one selected through the
+/// theme's selection tokens. The hitbox is keyed by the panel id — never by an index —
+/// so hover, focus and test hitboxes survive panels being added or replaced.
+fn selector_entry(
+    panel_id: &'static str,
+    title: SharedString,
+    icon: IconName,
+    is_active: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    let style = if is_active {
+        ButtonStyle::Tinted(TintColor::Accent)
+    } else {
+        ButtonStyle::Subtle
+    };
+    h_flex()
+        .id(dock_panel_selector(panel_id))
+        .debug_selector(move || dock_panel_selector(panel_id))
+        .child(
+            Button::new(format!("dock-panel-button-{panel_id}"), title)
+                .start_icon(Icon::new(icon))
+                .style(style)
+                .on_click(on_click),
+        )
 }
