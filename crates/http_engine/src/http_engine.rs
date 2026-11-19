@@ -16,6 +16,7 @@
 
 mod client;
 mod error;
+mod pipeline;
 mod request;
 mod reqwest_transport;
 mod response;
@@ -27,6 +28,7 @@ mod transport;
 
 pub use client::{HttpClient, SendEvent};
 pub use error::TransportError;
+pub use pipeline::{PipelineError, Warning, resolve_request};
 pub use request::{Header, RequestBody, ResolvedRequest, SendSettings};
 pub use reqwest_transport::ReqwestTransport;
 pub use response::{
@@ -43,7 +45,8 @@ pub use transport::Transport;
 /// and its path carry secret values — a webhook token lives in the path (PRD §7) — and
 /// [`crate::error::TransportError`]'s `Debug` redacts all of them (`error.rs`), so this
 /// follows that rule. Used by `Debug` output only; the UI keeps the real URL through
-/// `Display`. [`crate::request::ResolvedRequest`]'s `Debug` deviates deliberately — one
+/// [`crate::error::TransportError::user_message`]. [`crate::request::ResolvedRequest`]'s
+/// `Debug` deviates deliberately — one
 /// read-only test file pins its narrower shape there (see `debug_url` in `request.rs`).
 pub(crate) fn redacted_url(url: &url::Url) -> String {
     format!("{}://<redacted>", url.scheme())

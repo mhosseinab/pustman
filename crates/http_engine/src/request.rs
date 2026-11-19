@@ -122,7 +122,7 @@ impl fmt::Debug for RequestBody {
         // resolved secret (REQ-VAR-01 resolves `{{variables}}` in the body, PRD §7): it
         // is redacted exactly as [`crate::error::TransportError::FileNotFound`] redacts
         // one (`error.rs`). The UI keeps the real path — the body editor holds it and
-        // `FileNotFound`'s `Display` names it.
+        // `FileNotFound`'s `user_message()` names it.
         match self {
             RequestBody::None => f.write_str("None"),
             RequestBody::Bytes(bytes) => write!(f, "Bytes({} bytes)", bytes.len()),

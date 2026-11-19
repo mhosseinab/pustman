@@ -11,21 +11,24 @@ use crate::response::RedirectHop;
 /// Every kind carries the text §8.6 prescribes through [`TransportError::user_message`]
 /// and [`TransportError::suggested_fix`].
 ///
-/// [`Debug`] is hand-written: error logging formats through it (`.log_err()`), and the
-/// resolved URL, host, address and path can carry secret values (PRD §7). The UI still
-/// gets the real text through `Display`.
+/// The log contract: error formatting goes through `Display` (`{error:#}`) and
+/// [`Debug`], so **both** are log-safe — the resolved URL, host, address and path can
+/// carry secret values (PRD §7) and neither trait prints them. [`Debug`] is
+/// hand-written; `Display` is redacted at the `#[error(...)]` attributes. The full
+/// sentences live only in [`TransportError::user_message`], which is for the UI and is
+/// never logged.
 #[derive(Clone, PartialEq, thiserror::Error)]
 pub enum TransportError {
     /// The resolved URL is not a valid URL.
-    #[error("Invalid URL after variable resolution: `{url}`")]
+    #[error("Invalid URL after variable resolution.")]
     InvalidUrl { url: String },
 
     /// The host name did not resolve.
-    #[error("Could not resolve `{host}`.")]
+    #[error("Could not resolve the host.")]
     Dns { host: String },
 
     /// The connection could not be established.
-    #[error("Connection refused at {address}.")]
+    #[error("Connection refused.")]
     Connect { address: String },
 
     /// The TLS handshake or the certificate check failed.
@@ -53,7 +56,7 @@ pub enum TransportError {
     Io { detail: String },
 
     /// A body file does not exist (REQ-HTTP-05).
-    #[error("Body file not found: {path}")]
+    #[error("Body file not found.")]
     FileNotFound { path: String },
 
     /// A secret variable has no local value, so the send was refused rather than putting
@@ -69,7 +72,8 @@ pub enum TransportError {
 impl fmt::Debug for TransportError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // The resolved URL, host, address and path carry resolved text (PRD §7), and
-        // `Debug` is what error logging prints: redact those four, keep the rest.
+        // error logging formats `Debug` alongside `Display`: redact those four, keep
+        // the rest.
         match self {
             TransportError::InvalidUrl { .. } => f
                 .debug_struct("InvalidUrl")
@@ -122,9 +126,21 @@ fn unresolved_secret_message(names: &[String]) -> String {
 }
 
 impl TransportError {
-    /// The message shown to the user (PRD §8.6).
+    /// The message shown to the user (PRD §8.6). This is the only text that carries
+    /// resolved values: show it in the UI, never log it.
     pub fn user_message(&self) -> String {
-        self.to_string()
+        // The four sensitive variants print their full sentence here and only here;
+        // every other kind's sentence lives in its `#[error(...)]` attribute and comes
+        // back through `to_string()` (Display is log-safe, see the enum docs).
+        match self {
+            TransportError::InvalidUrl { url } => {
+                format!("Invalid URL after variable resolution: `{url}`")
+            }
+            TransportError::Dns { host } => format!("Could not resolve `{host}`."),
+            TransportError::Connect { address } => format!("Connection refused at {address}."),
+            TransportError::FileNotFound { path } => format!("Body file not found: {path}"),
+            other => other.to_string(),
+        }
     }
 
     /// What the user can do about it (PRD §8.6).
