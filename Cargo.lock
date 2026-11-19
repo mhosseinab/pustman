@@ -3689,6 +3689,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "theme"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "serde",
+ "serde_json",
+ "settings",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"

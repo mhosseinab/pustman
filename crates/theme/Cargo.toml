@@ -1,0 +1,26 @@
+# crates/theme — the colors the app draws with: one bundled light theme and one bundled
+# dark theme, parsed from `assets/themes/*.json`, selected by the `theme` setting. Values
+# come from `docs/postman_redesign_pack/01_specs/design_tokens.json` where the pack
+# defines a role; the token names are ours (see .agents/skills/rust-gpui-ui-ux).
+
+[package]
+name = "theme"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/theme.rs"
+
+[dependencies]
+gpui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+settings.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
