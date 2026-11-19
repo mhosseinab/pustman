@@ -25,7 +25,7 @@ crate).
   (`tempfile`) that run the real migrations.
 - `sqlx`'s compile-time checked queries are not available; query correctness is proven by tests
   instead (including the migration `down` on a scratch DB: `sqlite3 /tmp/pustman-scratch.db`).
-- `promote-check` refuses a window whose migrations lack a `down` (item 5).
+- `promote-check` item 5 greps each changed migration file for `down|revert|rollback` wording (it does not yet require a companion `*.down.sql` by name).
 - A later step must honor: migrations are additive, each with a `down`; the SQLite file bytes are
   covered by the S37 redaction test.
 

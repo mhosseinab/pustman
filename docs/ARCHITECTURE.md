@@ -22,9 +22,9 @@ the code disagree, the code is right and this file is a bug.
 | `secrets` | OS keychain via `SecretStore` (`KeyringStore`, `MemorySecretStore` for tests) | `gpui`, UI crates | `secrets::SecretStore` |
 | `git` *(S11–S48)* | thin `git` CLI wrapper (`smol::process`): status, diff, commit, pull, push, branch | `gpui` | `git::*` |
 | `console` *(S11–S48)* | console entries, ring buffer, HAR export, redaction | `gpui` | `console::*` |
-| `http_engine` [GPUI] | HTTP/GraphQL/SSE transport (reqwest on `gpui_tokio`), auth helpers, cookies, TLS, redirects, timing | — | `http_engine::Transport` |
+| `http_engine` [GPUI] *(S11–S48)* | HTTP/GraphQL/SSE transport (reqwest on `gpui_tokio`), auth helpers, cookies, TLS, redirects, timing | — | `http_engine::Transport` |
 | `pustman_actions` *(S11–S48)* | every PRD action + default keymaps (D10); feature crates implement handlers | UI implementation crates | `pustman_actions::*` |
-| `theme`, `settings`, `ui`, `workspace`, `text_input` | design system, theming, typed settings, shell (Pane/Dock/ModalLayer), text editing | domain crates never import these | `pub fn init(cx: &mut App)` per crate |
+| `theme`, `settings`, `ui`, `workspace`, `text_input` *(S11–S48)* | design system, theming, typed settings, shell (Pane/Dock/ModalLayer), text editing | domain crates never import these | `pub fn init(cx: &mut App)` per crate |
 | `collections_panel`, `request_editor`, `response_viewer`, `environment_picker`, `command_palette`, `history_panel` *(S11–S48)* | the Postman screens | each other (coordinate through `workspace`) | `init(cx)` |
 | `integration_tests` *(S37, S47)* | end-to-end proofs (redaction test S37, sharing AC S47) | — | `crates/integration_tests/tests/` |
 | later milestones | `websocket_client` (M4), `grpc_client` (M5), `mqtt_client` (M6) — same `SessionEvent` shape (PRD §9) | UI crates | `connect()` per crate |
