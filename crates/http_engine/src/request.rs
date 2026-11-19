@@ -104,7 +104,29 @@ pub(crate) fn headers_from_map(map: &HeaderMap) -> Vec<Header> {
         .collect()
 }
 
-/// The body to send: bytes, or a file the transport reads at send time (REQ-HTTP-04).
+/// One `form-data` field as the transport sends it (REQ-HTTP-04): a text value, or a
+/// file read at send time (REQ-HTTP-05).
+#[derive(Clone, PartialEq, Eq)]
+pub struct MultipartField {
+    /// The field name.
+    pub name: String,
+    /// The content type this field carries, when the request set one.
+    pub content_type: Option<String>,
+    pub value: MultipartValue,
+}
+
+/// What one [`MultipartField`] sends.
+#[derive(Clone, PartialEq, Eq)]
+pub enum MultipartValue {
+    /// This text, exactly as it is.
+    Text(String),
+    /// A file read at send time (REQ-HTTP-05). A missing one fails the send with
+    /// [`TransportError::FileNotFound`].
+    File(PathBuf),
+}
+
+/// The body to send: bytes, a file the transport reads at send time (REQ-HTTP-04), or
+/// the fields of a `form-data` body (REQ-HTTP-04/05).
 #[derive(Clone, PartialEq, Eq)]
 pub enum RequestBody {
     /// No body at all.
@@ -114,6 +136,8 @@ pub enum RequestBody {
     /// A file streamed at send time (REQ-HTTP-05). A missing one fails the send with
     /// [`TransportError::FileNotFound`].
     File(PathBuf),
+    /// `form-data` fields, framed by the transport as a multipart message.
+    Multipart(Vec<MultipartField>),
 }
 
 impl fmt::Debug for RequestBody {
@@ -122,11 +146,17 @@ impl fmt::Debug for RequestBody {
         // resolved secret (REQ-VAR-01 resolves `{{variables}}` in the body, PRD §7): it
         // is redacted exactly as [`crate::error::TransportError::FileNotFound`] redacts
         // one (`error.rs`). The UI keeps the real path — the body editor holds it and
-        // `FileNotFound`'s `user_message()` names it.
+        // `FileNotFound`'s `user_message()` names it. A multipart body shows its field
+        // COUNT and nothing else: a field name is as secret-bearing as a value or a file
+        // path, because variable resolution builds names too (REQ-VAR-01, PRD §7).
         match self {
             RequestBody::None => f.write_str("None"),
             RequestBody::Bytes(bytes) => write!(f, "Bytes({} bytes)", bytes.len()),
             RequestBody::File(_) => f.debug_struct("File").field("path", &"<redacted>").finish(),
+            RequestBody::Multipart(fields) => f
+                .debug_struct("Multipart")
+                .field("fields", &fields.len())
+                .finish(),
         }
     }
 }
@@ -143,6 +173,10 @@ impl fmt::Debug for BodyForDebug<'_> {
         match self.0 {
             RequestBody::None => f.write_str("None"),
             RequestBody::Bytes(bytes) => write!(f, "Bytes({} bytes)", bytes.len()),
+            RequestBody::Multipart(fields) => f
+                .debug_struct("Multipart")
+                .field("fields", &fields.len())
+                .finish(),
             RequestBody::File(path) => match path.file_name() {
                 Some(name) => f
                     .debug_tuple("File")
@@ -207,6 +241,10 @@ pub struct ResolvedRequest {
     pub url: Url,
     /// Headers in order, duplicates kept.
     pub headers: Vec<Header>,
+    /// The headers the request's body mode adds on its own — listed for the UI
+    /// (REQ-HTTP-03), not sent as they are listed: see `body::auto_headers` for the
+    /// rules and `reqwest_transport` for what reaches the wire.
+    pub auto_headers: Vec<Header>,
     pub body: RequestBody,
     pub settings: SendSettings,
 }
@@ -233,6 +271,7 @@ impl ResolvedRequest {
             method,
             url: parsed,
             headers,
+            auto_headers: Vec::new(),
             body,
             settings,
         })
@@ -249,6 +288,7 @@ impl fmt::Debug for ResolvedRequest {
             .field("method", &self.method)
             .field("url", &debug_url(&self.url))
             .field("headers", &self.headers)
+            .field("auto_headers", &self.auto_headers)
             .field("body", &BodyForDebug(&self.body))
             .field("settings", &self.settings)
             .finish()
@@ -279,3 +319,7 @@ fn debug_url(url: &Url) -> String {
 #[cfg(test)]
 #[path = "request_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "multipart_debug_redaction_tests.rs"]
+mod multipart_debug_redaction_tests;

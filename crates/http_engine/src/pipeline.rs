@@ -18,7 +18,9 @@ use url::{Url, form_urlencoded};
 use variables::{DynamicValues, ResolveError, ScopeStack, resolve};
 
 use crate::error::TransportError;
-use crate::request::{Header, RequestBody, ResolvedRequest, SendSettings};
+use crate::request::{
+    Header, MultipartField, MultipartValue, RequestBody, ResolvedRequest, SendSettings,
+};
 
 /// What a send should tell the user before it runs (REQ-VAR-07, REQ-HTTP-10).
 ///
@@ -152,10 +154,10 @@ fn append_params(url: &mut Url, params: Vec<(String, String)>) {
     }
 }
 
-/// The body to send with its text resolved. Only raw and urlencoded carry text this step
-/// resolves. S14a's body encoding owns multipart, and [`RequestBody`] has no shape for
-/// resolved fields yet: until S14a lands, a form-data body sends empty — as do the
-/// unmodelled modes.
+/// The body to send with its text resolved: raw and urlencoded text, and every enabled
+/// `form-data` field's name, value, file reference and content type. A file reference
+/// resolves as text here and becomes a concrete path later (`body::resolve_body_files`,
+/// REQ-HTTP-05); the unmodelled modes send nothing.
 fn resolve_body(
     body: &Body,
     scopes: &ScopeStack,
@@ -176,7 +178,38 @@ fn resolve_body(
             RequestBody::Bytes(form.finish().into_bytes())
         }
         Body::Binary { file, .. } => RequestBody::File(PathBuf::from(file)),
-        Body::FormData { .. } | Body::Unsupported(_) => RequestBody::None,
+        Body::FormData { fields, .. } => {
+            let mut multipart = Vec::new();
+            // A disabled field is not sent, so it resolves to nothing (REQ-HTTP-04).
+            for field in fields.iter().filter(|field| field.enabled) {
+                let name = resolve_text(&field.key, scopes, dynamic, unresolved)?;
+                let content_type = field
+                    .content_type
+                    .as_deref()
+                    .map(|template| resolve_text(template, scopes, dynamic, unresolved))
+                    .transpose()?;
+                // A field with a file sends the file whatever its value says — the file
+                // is the payload (REQ-HTTP-05).
+                let value = match field.file.as_deref().filter(|file| !file.is_empty()) {
+                    Some(file) => MultipartValue::File(PathBuf::from(resolve_text(
+                        file, scopes, dynamic, unresolved,
+                    )?)),
+                    None => MultipartValue::Text(resolve_text(
+                        field.value.as_deref().unwrap_or(""),
+                        scopes,
+                        dynamic,
+                        unresolved,
+                    )?),
+                };
+                multipart.push(MultipartField {
+                    name,
+                    content_type,
+                    value,
+                });
+            }
+            RequestBody::Multipart(multipart)
+        }
+        Body::Unsupported(_) => RequestBody::None,
     };
     Ok(resolved)
 }

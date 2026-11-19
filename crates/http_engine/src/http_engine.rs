@@ -17,6 +17,7 @@
 //! loopback [`TestServer`] where they need a real socket (both behind the
 //! `test-support` feature). What reaches a real server is [`ReqwestTransport`].
 
+mod body;
 mod client;
 mod cookie_persistence;
 mod cookies;
@@ -42,7 +43,9 @@ pub use error::TransportError;
 pub use file_ref::resolve_file_ref;
 pub use pipeline::{PipelineError, Warning, resolve_request};
 pub use prepare::{Prepared, prepare};
-pub use request::{Header, RequestBody, ResolvedRequest, SendSettings};
+pub use request::{
+    Header, MultipartField, MultipartValue, RequestBody, ResolvedRequest, SendSettings,
+};
 pub use request_auth::{AppliedAuth, apply_auth};
 pub use reqwest_transport::ReqwestTransport;
 pub use response::{
@@ -66,6 +69,14 @@ pub use transport::Transport;
 pub(crate) fn redacted_url(url: &url::Url) -> String {
     format!("{}://<redacted>", url.scheme())
 }
+
+#[cfg(test)]
+#[path = "body_encoding_tests.rs"]
+mod body_encoding_tests;
+
+#[cfg(test)]
+#[path = "body_test_support.rs"]
+mod body_test_support;
 
 #[cfg(test)]
 #[path = "debug_redaction_tests.rs"]

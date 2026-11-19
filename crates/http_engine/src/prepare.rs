@@ -22,6 +22,7 @@ use api_model::{
 use secrets::{SecretKey, SecretStore};
 use variables::{Binding, DynamicValues, ScopeKind, ScopeStack, resolve, spans};
 
+use crate::body;
 use crate::error::TransportError;
 use crate::pipeline::{PipelineError, Warning, resolve_request};
 use crate::request::ResolvedRequest;
@@ -94,9 +95,23 @@ pub fn prepare(
                 references.scan(template);
             }
         }
-        // A binary body sends its file path unresolved and form-data is S14a's seam:
-        // neither carries text `resolve_request` substitutes.
-        Body::None | Body::Binary { .. } | Body::FormData { .. } | Body::Unsupported(_) => {}
+        // Every text a form-data field substitutes is scanned like any other, or a
+        // secret in one would reach the wire as its literal placeholder (REQ-VAR-SHARE-02).
+        Body::FormData { fields, .. } => {
+            for field in fields.iter().filter(|field| field.enabled) {
+                for template in [
+                    field.key.as_str(),
+                    field.value.as_deref().unwrap_or(""),
+                    field.file.as_deref().unwrap_or(""),
+                    field.content_type.as_deref().unwrap_or(""),
+                ] {
+                    references.scan(template);
+                }
+            }
+        }
+        // A binary body sends its file path unresolved: it carries no text
+        // `resolve_request` substitutes.
+        Body::None | Body::Binary { .. } | Body::Unsupported(_) => {}
     }
     for template in &auth_templates {
         references.scan(template);
@@ -130,6 +145,14 @@ pub fn prepare(
             // placeholder text in a credential.
             .unwrap_or_default()
     });
+    // The body mode's own headers are listed last: auth has added every header the user
+    // did not type, and a user header of the same name wins over an auto one.
+    resolved.auto_headers = body::auto_headers(
+        &request.body,
+        &resolved.body,
+        &resolved.url,
+        &resolved.headers,
+    );
     let secrets_used =
         SecretValues::from_values(secrets_fetched.into_iter().map(|(_name, value)| value));
     Ok(Prepared {

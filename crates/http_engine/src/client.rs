@@ -1,6 +1,7 @@
 //! The GPUI entity that owns an in-flight send (PRD REQ-HTTP-12).
 
 use std::future::Future;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use api_model::{Auth, HttpRequest, SecretValues};
@@ -9,6 +10,7 @@ use gpui::{AppContext, Context, EventEmitter, Task};
 use secrets::{SecretKey, SecretStore};
 use variables::{DynamicValues, ScopeKind, ScopeStack};
 
+use crate::body::resolve_body_files;
 use crate::error::TransportError;
 use crate::pipeline::{PipelineError, Warning};
 use crate::prepare::prepare;
@@ -84,6 +86,9 @@ pub struct HttpClient {
     /// `send` or `cancel` replaces it; [`HttpClient::is_sending`] reports whether it is
     /// still running.
     pending_send: Option<Task<()>>,
+    /// The root [`send_request`] resolves body file references against (REQ-HTTP-05).
+    /// `None` keeps them as they are, which is what [`HttpClient::send`] does too.
+    workspace_root: Option<PathBuf>,
 }
 
 impl HttpClient {
@@ -92,7 +97,14 @@ impl HttpClient {
         Self {
             transport,
             pending_send: None,
+            workspace_root: None,
         }
+    }
+
+    /// Resolve body file references against `root` from the next send on (REQ-HTTP-05):
+    /// a relative one stays inside it and an absolute one is kept as it is.
+    pub fn set_workspace_root(&mut self, root: PathBuf) {
+        self.workspace_root = Some(root);
     }
 
     /// Whether a send is still in flight.
@@ -129,8 +141,9 @@ impl HttpClient {
     /// secret variable with no local value fails the send as
     /// [`TransportError::UnresolvedSecret`] before the transport is called at all — the
     /// wire never sees an empty string or a literal `{{name}}` for a secret
-    /// (REQ-VAR-SHARE-02). Everything else — warnings, the auth outcome, the secret values
-    /// for redaction — comes back in [`SendOutcome`].
+    /// (REQ-VAR-SHARE-02). The body's file references resolve against the workspace root
+    /// the same way, in the same task (REQ-HTTP-05). Everything else — warnings, the auth
+    /// outcome, the secret values for redaction — comes back in [`SendOutcome`].
     ///
     /// Dropping the returned task does not cancel the send and nothing is retried, exactly
     /// as for [`HttpClient::send`].
@@ -140,6 +153,7 @@ impl HttpClient {
         cx: &mut Context<HttpClient>,
     ) -> Task<Result<SendOutcome, PipelineError>> {
         let transport = self.transport.clone();
+        let workspace_root = self.workspace_root.clone();
         self.drive_send(
             cx,
             move || async move {
@@ -154,7 +168,7 @@ impl HttpClient {
                 // every field and the auth (REQ-VAR-05).
                 let mut dynamic = DynamicValues::new();
                 let ancestors: Vec<&Auth> = ancestors.iter().collect();
-                let prepared = prepare(
+                let mut prepared = prepare(
                     &request,
                     &ancestors,
                     &scopes,
@@ -162,6 +176,9 @@ impl HttpClient {
                     secret_key.as_ref(),
                     &mut dynamic,
                 )?;
+                if let Some(root) = &workspace_root {
+                    prepared.resolved.body = resolve_body_files(prepared.resolved.body, root)?;
+                }
                 let response = transport.send(prepared.resolved).await?;
                 Ok(SendOutcome {
                     response,

@@ -12,6 +12,7 @@
 //! cancels its tokio work.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -20,13 +21,16 @@ use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use reqwest::header::{
-    AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HOST, HeaderName, HeaderValue, LOCATION,
-    PROXY_AUTHORIZATION,
+    ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HOST, HeaderName, HeaderValue,
+    LOCATION, PROXY_AUTHORIZATION, USER_AGENT,
 };
 use url::Url;
 
+use crate::body::user_header_is_set;
 use crate::error::TransportError;
-use crate::request::{self, Header, RequestBody, ResolvedRequest, SendSettings};
+use crate::request::{
+    self, Header, MultipartField, MultipartValue, RequestBody, ResolvedRequest, SendSettings,
+};
 use crate::response::{
     NetworkInfo, RedirectHop, Response, ResponseBody, ResponseVersion, Timings, TlsInfo,
 };
@@ -174,6 +178,7 @@ async fn execute(
     let mut method = request.method;
     let mut url = request.url;
     let mut headers = request.headers;
+    let auto_headers = request.auto_headers;
     let mut body = request.body;
     let mut chain: Vec<RedirectHop> = Vec::new();
 
@@ -184,6 +189,7 @@ async fn execute(
             &method,
             &url,
             &headers,
+            &auto_headers,
             &body,
             &settings,
             spill_limit,
@@ -228,7 +234,8 @@ async fn execute(
             body = RequestBody::None;
             // A content length that survives into the body-less GET announces bytes
             // it never sends, and servers wait for them; the content type named a body
-            // that is gone.
+            // that is gone. The auto `Content-Type` goes with the body too:
+            // [`exchange`] sends one only alongside a body.
             headers.retain(|header| {
                 !header_name_is_one_of(&header.name, &[CONTENT_LENGTH, CONTENT_TYPE])
             });
@@ -278,36 +285,53 @@ fn final_response(hop: Exchange, chain: Vec<RedirectHop>) -> Response {
 /// clock starts when the request is handed to `reqwest` and stops when the body is in
 /// hand. Phases inside that window — DNS, TCP connect, the TLS handshake — `reqwest`
 /// does not report (ADR-0003), so they stay `None`: they are never estimated.
+///
+/// One argument per concern of a hop's request, plus the client and the two send-wide
+/// knobs: bundling them into a struct would only hide which fields a redirect mutates.
+#[allow(clippy::too_many_arguments)]
 async fn exchange(
     client: &reqwest::Client,
     method: &api_model::Method,
     url: &Url,
     headers: &[Header],
+    auto_headers: &[Header],
     body: &RequestBody,
     settings: &SendSettings,
     spill_limit: usize,
 ) -> Result<Exchange, TransportError> {
     let mut builder = client.request(method_of(method)?, url.clone());
+    let mut user_content_type = None;
     for (position, header) in headers.iter().enumerate() {
-        // Neither the name nor the value is echoed: variables resolve into header names
-        // too (PRD §7) and `Io`'s `Debug` prints `detail` as it finds it (`error.rs`), so
-        // the message says which header failed and nothing it held.
-        let name =
-            HeaderName::from_bytes(header.name.as_bytes()).map_err(|error| TransportError::Io {
-                detail: format!("header #{} has an invalid name: {error}", position + 1),
-            })?;
-        let value = HeaderValue::from_str(&header.value).map_err(|error| TransportError::Io {
-            detail: format!("header #{} has an invalid value: {error}", position + 1),
-        })?;
+        let (name, value) = header_of(header, position + 1)?;
+        if name == CONTENT_TYPE {
+            user_content_type = Some(value.clone());
+        }
         builder = builder.header(name, value);
     }
-    if let Some(body) = body_of(body).await? {
-        builder = builder.body(body);
+    for (position, header) in wire_auto_headers(auto_headers, headers, body)
+        .into_iter()
+        .enumerate()
+    {
+        let (name, value) = header_of(header, position + 1)?;
+        builder = builder.header(name, value);
+    }
+    let builder = body_on(builder, body).await?;
+    let mut request = builder
+        .build()
+        .map_err(|error| map_error(error, settings.timeout, url))?;
+    if let Some(value) = user_content_type
+        && matches!(body, RequestBody::Multipart(_))
+    {
+        // `RequestBuilder::multipart` appends its boundary-carrying `Content-Type`, and
+        // a `Content-Type` is a singleton field (RFC 9110 §5.3): the user's own type is
+        // the only one sent — their choice, for their own body.
+        request.headers_mut().remove(CONTENT_TYPE);
+        request.headers_mut().insert(CONTENT_TYPE, value);
     }
 
     let started = Instant::now();
-    let response = builder
-        .send()
+    let response = client
+        .execute(request)
         .await
         .map_err(|error| map_error(error, settings.timeout, url))?;
     let first_byte = started.elapsed();
@@ -420,40 +444,122 @@ fn redirect_target(status: reqwest::StatusCode, headers: &[Header], url: &Url) -
     url.join(location.value.trim()).ok()
 }
 
-/// The bytes to send. A file body is read on tokio's blocking pool — never on the
-/// thread driving the UI — and a missing one is [`TransportError::FileNotFound`]
-/// (REQ-HTTP-05).
-async fn body_of(body: &RequestBody) -> Result<Option<Vec<u8>>, TransportError> {
+/// One header as `reqwest` takes it, `position` its 1-based place in its list. Neither
+/// the name nor the value is echoed: variables resolve into header names too (PRD §7)
+/// and `Io`'s `Debug` prints `detail` as it finds it (`error.rs`), so the message says
+/// which header failed and nothing it held.
+fn header_of(
+    header: &Header,
+    position: usize,
+) -> Result<(HeaderName, HeaderValue), TransportError> {
+    let name =
+        HeaderName::from_bytes(header.name.as_bytes()).map_err(|error| TransportError::Io {
+            detail: format!("header #{position} has an invalid name: {error}"),
+        })?;
+    let value = HeaderValue::from_str(&header.value).map_err(|error| TransportError::Io {
+        detail: format!("header #{position} has an invalid value: {error}"),
+    })?;
+    Ok((name, value))
+}
+
+/// The auto headers that reach the wire, and only these: `Content-Type`, `User-Agent`
+/// and `Accept`. `Host`, `Content-Length` and `Accept-Encoding` are listed for the UI
+/// but left to hyper/reqwest: an explicit `Host` would go stale on a cross-host
+/// redirect, an explicit `Content-Length` would lie for multipart framing, and an
+/// explicit `Accept-Encoding` would override the encodings `reqwest` actually
+/// decompresses. A user header of the same name wins, and a `Content-Type` goes only
+/// with a body it describes — never the static `multipart/form-data`, because a
+/// multipart body carries `RequestBuilder::multipart`'s boundary-carrying one instead.
+fn wire_auto_headers<'a>(
+    auto_headers: &'a [Header],
+    user_headers: &[Header],
+    body: &RequestBody,
+) -> Vec<&'a Header> {
+    auto_headers
+        .iter()
+        .filter(|header| header_name_is_one_of(&header.name, &[CONTENT_TYPE, USER_AGENT, ACCEPT]))
+        .filter(|header| !user_header_is_set(user_headers, &header.name))
+        .filter(|header| {
+            !header_name_is_one_of(&header.name, &[CONTENT_TYPE])
+                || matches!(body, RequestBody::Bytes(_) | RequestBody::File(_))
+        })
+        .collect()
+}
+
+/// Put the body on the request: its bytes as they are, a file read on tokio's blocking
+/// pool (REQ-HTTP-05), or a multipart form built here — `reqwest::multipart::Form` is
+/// not `Clone` and every redirect hop re-sends the body (REQ-NET-03).
+async fn body_on(
+    builder: reqwest::RequestBuilder,
+    body: &RequestBody,
+) -> Result<reqwest::RequestBuilder, TransportError> {
     match body {
-        RequestBody::None => Ok(None),
-        RequestBody::Bytes(bytes) => Ok(Some(bytes.clone())),
-        RequestBody::File(path) => {
-            let path = path.clone();
-            let read = tokio::task::spawn_blocking({
-                let path = path.clone();
-                move || std::fs::read(path)
-            });
-            match read.await {
-                Ok(Ok(bytes)) => Ok(Some(bytes)),
-                Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-                    Err(TransportError::FileNotFound {
-                        path: path.display().to_string(),
-                    })
-                }
-                // The path stays out of the message: `Io` logs its detail and a path can
-                // carry secret values (PRD §7).
-                Ok(Err(error)) => Err(TransportError::Io {
-                    detail: format!("Could not read the body file: {error}"),
-                }),
-                Err(join_error) => Err(TransportError::Io {
-                    detail: interrupted_detail(
-                        "Reading the body file was interrupted",
-                        &join_error,
-                    ),
-                }),
-            }
-        }
+        RequestBody::None => Ok(builder),
+        RequestBody::Bytes(bytes) => Ok(builder.body(bytes.clone())),
+        RequestBody::File(path) => Ok(builder.body(read_file(path).await?)),
+        RequestBody::Multipart(fields) => Ok(builder.multipart(multipart_form(fields).await?)),
     }
+}
+
+/// The bytes of one body file, read on tokio's blocking pool — never on the thread
+/// driving the UI — and a missing one is [`TransportError::FileNotFound`] (REQ-HTTP-05).
+/// The one read a file body and a multipart file field share.
+async fn read_file(path: &Path) -> Result<Vec<u8>, TransportError> {
+    let read = tokio::task::spawn_blocking({
+        let path = path.to_path_buf();
+        move || std::fs::read(path)
+    });
+    match read.await {
+        Ok(Ok(bytes)) => Ok(bytes),
+        Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err(TransportError::FileNotFound {
+                path: path.display().to_string(),
+            })
+        }
+        // The path stays out of the message: `Io` logs its detail and a path can
+        // carry secret values (PRD §7).
+        Ok(Err(error)) => Err(TransportError::Io {
+            detail: format!("Could not read the body file: {error}"),
+        }),
+        Err(join_error) => Err(TransportError::Io {
+            detail: interrupted_detail("Reading the body file was interrupted", &join_error),
+        }),
+    }
+}
+
+/// The multipart form of one hop's `form-data` body (REQ-HTTP-04): text parts as they
+/// are, file parts from bytes [`read_file`] read, carrying the file's own name and the
+/// content type the field set.
+async fn multipart_form(
+    fields: &[MultipartField],
+) -> Result<reqwest::multipart::Form, TransportError> {
+    let mut form = reqwest::multipart::Form::new();
+    for (position, field) in fields.iter().enumerate() {
+        let mut part = match &field.value {
+            MultipartValue::Text(text) => reqwest::multipart::Part::text(text.clone()),
+            MultipartValue::File(path) => {
+                let mut part = reqwest::multipart::Part::bytes(read_file(path).await?);
+                if let Some(name) = path.file_name() {
+                    part = part.file_name(name.to_string_lossy().into_owned());
+                }
+                part
+            }
+        };
+        if let Some(content_type) = &field.content_type {
+            // The position is what finds the row in the UI; the invalid value never
+            // reaches a log line (PRD §7).
+            part = part
+                .mime_str(content_type)
+                .map_err(|_error| TransportError::Io {
+                    detail: format!(
+                        "form-data field #{} has an invalid content type",
+                        position + 1
+                    ),
+                })?;
+        }
+        form = form.part(field.name.clone(), part);
+    }
+    Ok(form)
 }
 
 /// The verb as `reqwest` sends it. A custom token is validated as RFC 7230 by
@@ -662,9 +768,11 @@ fn host_of(url: &Url) -> String {
     url.host_str().unwrap_or_default().to_string()
 }
 
-/// The host and port a failure names (§8.6 `Connect`: "Connection refused at
-/// 127.0.0.1:8080."). The userinfo is left out: it carries credentials.
-fn authority_of(url: &Url) -> String {
+/// The host and port of a URL: the host and port a failure names (§8.6 `Connect`:
+/// "Connection refused at 127.0.0.1:8080.") and what the `Host` auto header lists
+/// (REQ-HTTP-03) — the port only when it is not the scheme's default. The userinfo is
+/// left out: it carries credentials.
+pub(crate) fn authority_of(url: &Url) -> String {
     let host = url.host_str().unwrap_or_default();
     match url.port() {
         Some(port) => format!("{host}:{port}"),
