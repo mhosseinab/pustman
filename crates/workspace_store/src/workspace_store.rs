@@ -920,6 +920,9 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), SaveError> {
     Ok(())
 }
 
+mod watcher;
+pub use watcher::{FsChange, WatchError, WorkspaceWatcher, watch};
+
 #[cfg(test)]
 #[path = "workspace_store_tests.rs"]
 mod tests;

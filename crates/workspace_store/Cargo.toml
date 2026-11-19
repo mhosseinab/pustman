@@ -17,6 +17,7 @@ path = "src/workspace_store.rs"
 
 [dependencies]
 api_model.workspace = true
+notify.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
