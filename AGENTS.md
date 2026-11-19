@@ -197,6 +197,17 @@ These are the mistakes that actually bite in GPUI codebases. Zed enforces most w
 - Spawn processes with `smol::process`, never `std::process::Command::{spawn,output,status}`.
 - Parse JSON with `serde_json::from_slice`, not `from_reader`.
 
+### Reuse — SOLID, KISS, DRY
+- **Never re-implement what already exists.** Before writing a helper, search the workspace crates and
+  root `[workspace.dependencies]`; if either provides it, use it. Hand-rolling a codec, parser, encoder
+  or utility we already depend on (e.g. base64 instead of the `base64` crate) is a review finding, not a
+  scope workaround.
+- Adding `dep.workspace = true` for an existing workspace dependency to the crate you are editing is
+  always in scope, even when a step's Edits line does not name that `Cargo.toml`.
+- DRY applies to meaning: one concept, one implementation; call it, don't copy it. KISS: the simplest
+  code that meets the requirement, no speculative abstraction. SOLID as design pressure: small,
+  single-purpose types and functions; depend on stable boundaries.
+
 ### Style
 - Comments explain non-obvious *why*; never narrate *what*.
 - Full-word names (`request`, not `req`; `response`, not `resp`).
