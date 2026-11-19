@@ -40,8 +40,12 @@ hyper-util = { workspace = true, features = ["client-legacy", "tokio"] }
 reqwest = { workspace = true, features = ["http2"] }
 rustls.workspace = true
 serde_json.workspace = true
+# `tempfile` owns the spill temp file: 0600 in the OS temp dir, removed on drop
+# (REQ-RESP-06, REQ-NFR-03) — never hand-rolled temp naming or removal.
+tempfile.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
+# `fs` is how the spawned tokio task writes the spilled tail of a response body.
+tokio = { workspace = true, features = ["fs"] }
 url.workspace = true
 variables.workspace = true
 

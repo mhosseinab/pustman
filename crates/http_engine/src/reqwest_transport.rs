@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use api_model::HttpVersion;
 use futures::FutureExt;
+use futures::StreamExt;
 use futures::future::BoxFuture;
 use reqwest::header::{
     AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HOST, HeaderName, HeaderValue, LOCATION,
@@ -29,6 +30,7 @@ use crate::request::{self, Header, RequestBody, ResolvedRequest, SendSettings};
 use crate::response::{
     NetworkInfo, RedirectHop, Response, ResponseBody, ResponseVersion, Timings, TlsInfo,
 };
+use crate::spill::{DEFAULT_SPILL_LIMIT, SpillWriter};
 use crate::transport::Transport;
 
 /// A transport that sends through a `reqwest` client on a tokio runtime.
@@ -40,6 +42,9 @@ pub struct ReqwestTransport {
     /// The tokio runtime the sends run on.
     handle: tokio::runtime::Handle,
     clients: Arc<Mutex<HashMap<ClientKey, reqwest::Client>>>,
+    /// How much of a response body stays in memory before the rest spills to a temp
+    /// file (REQ-RESP-06).
+    spill_limit: usize,
 }
 
 impl ReqwestTransport {
@@ -51,7 +56,16 @@ impl ReqwestTransport {
         Self {
             handle,
             clients: Arc::new(Mutex::new(HashMap::new())),
+            spill_limit: DEFAULT_SPILL_LIMIT,
         }
+    }
+
+    /// The same transport, spilling response bodies over `limit` bytes to a temp file
+    /// (REQ-RESP-06). The limit belongs to `RequestSettings` in a later step; until
+    /// then this builder is how a send gets a different one (tests use a tiny limit).
+    pub fn with_spill_limit(mut self, limit: usize) -> Self {
+        self.spill_limit = limit;
+        self
     }
 }
 
@@ -66,10 +80,11 @@ impl Transport for ReqwestTransport {
         let clients = Arc::clone(&self.clients);
         let key = ClientKey::for_settings(&request.settings);
         let handle = self.handle.clone();
+        let spill_limit = self.spill_limit;
         async move {
             let task = handle.spawn(async move {
                 let client = client_for(&clients, key)?;
-                execute(client, request).await
+                execute(client, request, spill_limit).await
             });
             match AbortOnDrop::new(task).join().await {
                 Ok(outcome) => outcome,
@@ -153,6 +168,7 @@ fn build_client(key: ClientKey) -> Result<reqwest::Client, TransportError> {
 async fn execute(
     client: reqwest::Client,
     request: ResolvedRequest,
+    spill_limit: usize,
 ) -> Result<Response, TransportError> {
     let settings = request.settings;
     let mut method = request.method;
@@ -163,7 +179,16 @@ async fn execute(
 
     loop {
         let hop_started = Instant::now();
-        let hop = exchange(&client, &method, &url, &headers, &body, &settings).await?;
+        let hop = exchange(
+            &client,
+            &method,
+            &url,
+            &headers,
+            &body,
+            &settings,
+            spill_limit,
+        )
+        .await?;
         let timing = hop_started.elapsed();
 
         if !settings.follow_redirects {
@@ -221,7 +246,7 @@ struct Exchange {
     status: reqwest::StatusCode,
     http_version: ResponseVersion,
     headers: Vec<Header>,
-    body: Vec<u8>,
+    body: ResponseBody,
     timings: Timings,
     network: Option<NetworkInfo>,
 }
@@ -239,7 +264,7 @@ fn final_response(hop: Exchange, chain: Vec<RedirectHop>) -> Response {
         reason,
         http_version: hop.http_version,
         headers: hop.headers,
-        body: ResponseBody::Bytes(hop.body),
+        body: hop.body,
         timings: hop.timings,
         network: hop.network,
         redirects: chain,
@@ -260,6 +285,7 @@ async fn exchange(
     headers: &[Header],
     body: &RequestBody,
     settings: &SendSettings,
+    spill_limit: usize,
 ) -> Result<Exchange, TransportError> {
     let mut builder = client.request(method_of(method)?, url.clone());
     for (position, header) in headers.iter().enumerate() {
@@ -292,17 +318,14 @@ async fn exchange(
     // are read before the body consumes it.
     let network = network_info(&response, url, settings.verify_tls);
     let download_started = Instant::now();
-    let body = response
-        .bytes()
-        .await
-        .map_err(|error| map_error(error, settings.timeout, url))?;
+    let body = read_body(response, spill_limit, settings.timeout, url).await?;
     let download = download_started.elapsed();
 
     Ok(Exchange {
         status,
         http_version,
         headers,
-        body: body.to_vec(),
+        body,
         timings: Timings {
             first_byte: Some(first_byte),
             download: Some(download),
@@ -311,6 +334,35 @@ async fn exchange(
         },
         network,
     })
+}
+
+/// The body of one hop, streamed as it arrives through a [`SpillWriter`] (REQ-RESP-06):
+/// the first `spill_limit` bytes stay in memory and everything past them goes to a temp
+/// file, so a huge download is never buffered whole (REQ-NFR-03). Every hop of a
+/// redirect chain is read through this same path.
+async fn read_body(
+    response: reqwest::Response,
+    spill_limit: usize,
+    timeout: Duration,
+    url: &Url,
+) -> Result<ResponseBody, TransportError> {
+    let mut writer = SpillWriter::new(spill_limit);
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| map_error(error, timeout, url))?;
+        writer.push(&chunk).await.map_err(spill_error)?;
+    }
+    writer.into_body().await.map_err(spill_error)
+}
+
+/// A spill IO failure as a user-visible error (PRD §8.6 `Io`). The wording names the
+/// operation and the `io::Error`'s own text, and nothing else: an `io::Error` from a
+/// write or a create names no path, and the temp path, the resolved URL and the body
+/// bytes must never reach `Io`'s unredacted `Debug` (PRD §7, `error.rs`).
+fn spill_error(error: std::io::Error) -> TransportError {
+    TransportError::Io {
+        detail: format!("Could not store the response body: {error}"),
+    }
 }
 
 /// The headers a redirect hop may carry over (REQ-HTTP-09). The Host belongs to the

@@ -22,6 +22,7 @@ mod request;
 mod request_auth;
 mod reqwest_transport;
 mod response;
+mod spill;
 #[cfg(any(test, feature = "test-support"))]
 mod test_server;
 #[cfg(any(test, feature = "test-support"))]
@@ -39,6 +40,7 @@ pub use response::{
     Certificate, NetworkInfo, RedirectHop, Response, ResponseBody, ResponseVersion, Timings,
     TlsInfo,
 };
+pub use spill::{DEFAULT_SPILL_LIMIT, SpillWriter, SpilledFile};
 #[cfg(any(test, feature = "test-support"))]
 pub use test_server::{ReceivedRequest, TestServer};
 #[cfg(any(test, feature = "test-support"))]

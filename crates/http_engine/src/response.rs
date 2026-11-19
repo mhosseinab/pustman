@@ -8,6 +8,7 @@ use std::time::Duration;
 use url::Url;
 
 use crate::request::Header;
+use crate::spill::SpilledFile;
 
 /// The HTTP version a response arrived on (REQ-RESP-01).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -121,6 +122,14 @@ pub enum ResponseBody {
     /// A body streamed to `path`, with `prefix` kept in memory for the preview and hex
     /// views.
     File { path: PathBuf, prefix: Vec<u8> },
+    /// A body over the spill limit (REQ-RESP-06): `prefix` kept in memory for the
+    /// preview and hex views, the remainder in the temp file behind `file`, and
+    /// `total_len` the size of the whole body (REQ-NFR-03).
+    Spilled {
+        prefix: Vec<u8>,
+        file: SpilledFile,
+        total_len: u64,
+    },
 }
 
 impl ResponseBody {
@@ -129,6 +138,7 @@ impl ResponseBody {
         match self {
             ResponseBody::Bytes(bytes) => bytes,
             ResponseBody::File { prefix, .. } => prefix,
+            ResponseBody::Spilled { prefix, .. } => prefix,
         }
     }
 }
@@ -144,6 +154,17 @@ impl fmt::Debug for ResponseBody {
                 .debug_struct("File")
                 .field("path", &"<redacted>")
                 .field("prefix_bytes", &prefix.len())
+                .finish(),
+            // `SpilledFile`'s `Debug` redacts the temp path the same way (`spill.rs`).
+            ResponseBody::Spilled {
+                prefix,
+                file,
+                total_len,
+            } => f
+                .debug_struct("Spilled")
+                .field("file", file)
+                .field("prefix_bytes", &prefix.len())
+                .field("total_len", total_len)
                 .finish(),
         }
     }
