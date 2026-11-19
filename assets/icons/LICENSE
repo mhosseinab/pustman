@@ -1,0 +1,32 @@
+Icon license — Pustman `assets/icons/`
+
+Every SVG in this directory is derived from the Lucide icon set
+(https://lucide.dev), which is released under the ISC license below. Lucide's
+24x24 stroke art is mapped into Pustman's icon geometry (16x16 viewBox, 1.2px
+stroke, content in a 12x12 inner box; `.agents/skills/rust-gpui-ui-ux/references/
+design-system.md` §6) by `translate(0.8 0.8) scale(0.6)` on the original paths —
+no paths are hand-drawn. The mapping and the trimmed per-file license comment
+were produced mechanically from `lucide-static` v0.552.0; the artwork itself is
+Lucide's.
+
+These files are shape references for rendering only. Nothing here is Postman
+artwork, branding or layout, and `docs/postman_redesign_pack/` is never copied
+into this repository.
+
+ISC License
+
+Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of
+Feather (MIT). All other copyright (c) for Lucide is held by Lucide Contributors
+2022.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.

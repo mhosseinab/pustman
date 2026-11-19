@@ -1,0 +1,189 @@
+//! The row of tabs across the top of a pane.
+//!
+//! The bar owns the selection and the focus handle, and answers Left/Right to cycle and
+//! Enter/Space to activate — a tab bar is one control with a row of labels, not a row of
+//! independent buttons (REQ-UI-02, REQ-UI-07).
+
+use gpui::{
+    App, ClickEvent, Context, ElementId, EventEmitter, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled, Window,
+};
+use theme::ActiveTheme;
+
+use crate::actions::{Activate, SelectNext, SelectPrevious};
+use crate::components::behavior::Toggleable;
+use crate::components::tab::Tab;
+use crate::h_flex;
+use crate::typography::StyledTypography;
+use crate::units::px_to_rems;
+
+/// The key context the tab bar answers the keyboard in; [`crate::init`] binds the arrows.
+pub(crate) const TAB_BAR_CONTEXT: &str = "TabBar";
+
+/// The height of the request tab row: the redesign pack's `layout.requestTabs`, 40 px.
+const TAB_BAR_HEIGHT_PX: f32 = 40.;
+
+/// What a [`TabBar`] tells its owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabBarEvent {
+    /// The selection moved — with the arrows, that also switches to the tab. Clicking a
+    /// tab moves the selection too, but announces [`TabBarEvent::Activated`] instead.
+    Selected { index: usize },
+    /// The tab was activated: clicked with the mouse, or confirmed with Enter or Space.
+    /// Both run the same [`TabBar`] path (`components/behavior.rs`), so they can never
+    /// disagree — one event per activation, never two.
+    Activated { index: usize },
+}
+
+impl EventEmitter<TabBarEvent> for TabBar {}
+
+/// A row of [`Tab`]s with one selection and one focus target.
+pub struct TabBar {
+    focus_handle: FocusHandle,
+    tabs: Vec<Tab>,
+    selected: usize,
+}
+
+impl TabBar {
+    /// An empty bar. Fill it with [`Self::with_tabs`] or [`Self::set_tabs`].
+    pub fn new(cx: &mut Context<Self>) -> Self {
+        Self {
+            // The bar is one control, so it must be a tab stop — `FocusHandle::new`
+            // defaults `tab_stop` to false, and Tab would never land on the bar.
+            focus_handle: cx.focus_handle().tab_stop(true),
+            tabs: Vec::new(),
+            selected: 0,
+        }
+    }
+
+    /// The tabs this bar shows, before it is put on screen.
+    pub fn with_tabs(mut self, tabs: Vec<Tab>) -> Self {
+        self.selected = self.selected.min(tabs.len().saturating_sub(1));
+        self.tabs = tabs;
+        self
+    }
+
+    /// Replace the tabs and keep the selection in range.
+    pub fn set_tabs(&mut self, tabs: Vec<Tab>, cx: &mut Context<Self>) {
+        self.tabs = tabs;
+        self.selected = self.selected.min(self.tabs.len().saturating_sub(1));
+        cx.notify();
+    }
+
+    /// The index of the selected tab.
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
+
+    /// How many tabs the bar has.
+    pub fn len(&self) -> usize {
+        self.tabs.len()
+    }
+
+    /// Whether the bar has no tabs at all.
+    pub fn is_empty(&self) -> bool {
+        self.tabs.is_empty()
+    }
+
+    /// Select `index`, clamped to the tabs the bar has.
+    pub fn set_selected(&mut self, index: usize, cx: &mut Context<Self>) {
+        if self.tabs.is_empty() {
+            self.selected = 0;
+        } else {
+            self.selected = index.min(self.tabs.len() - 1);
+        }
+        cx.emit(TabBarEvent::Selected {
+            index: self.selected,
+        });
+        cx.notify();
+    }
+
+    /// Move keyboard focus to the bar.
+    pub fn focus(&self, window: &mut Window, cx: &mut App) {
+        self.focus_handle.focus(window, cx);
+    }
+
+    fn select_next(&mut self, _: &SelectNext, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.tabs.is_empty() {
+            return;
+        }
+        self.set_selected((self.selected + 1) % self.tabs.len(), cx);
+    }
+
+    fn select_previous(
+        &mut self,
+        _: &SelectPrevious,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.tabs.is_empty() {
+            return;
+        }
+        self.set_selected((self.selected + self.tabs.len() - 1) % self.tabs.len(), cx);
+    }
+
+    fn activate(&mut self, _: &Activate, window: &mut Window, cx: &mut Context<Self>) {
+        // Enter and Space also match when a descendant control (a tab's close button) has
+        // focus, because the bar's key context stays on the stack. Those keys belong to
+        // the focused control — GPUI synthesizes a click on it — so pass them on instead of
+        // confirming the selection from underneath it.
+        if !self.focus_handle.is_focused(window) {
+            cx.propagate();
+            return;
+        }
+        self.activate_tab(self.selected, cx);
+    }
+
+    /// Activate the tab at `index`: the single path a tab is activated by, shared by the
+    /// mouse (each tab's click) and the keyboard ([`Self::activate`]), so the two can
+    /// never disagree about what activation does (`components/behavior.rs`). A disabled
+    /// tab is never activated.
+    fn activate_tab(&mut self, index: usize, cx: &mut Context<Self>) {
+        if self.tabs.get(index).is_none_or(Tab::is_disabled) {
+            return;
+        }
+        // The activated tab is the bar's selection from here on; the owner hears about it
+        // through `Activated`, which carries the index, so `Selected` stays the arrows'
+        // event.
+        self.selected = index;
+        cx.emit(TabBarEvent::Activated { index });
+        cx.notify();
+    }
+}
+
+impl Focusable for TabBar {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Render for TabBar {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let selected = self.selected;
+        let focus_handle = self.focus_handle.clone();
+        h_flex()
+            .id(ElementId::from(&focus_handle))
+            .font_ui(cx)
+            .key_context(TAB_BAR_CONTEXT)
+            .role(gpui::Role::TabList)
+            .h(px_to_rems(TAB_BAR_HEIGHT_PX))
+            .bg(cx.theme().colors().tab_bar_background)
+            .items_stretch()
+            .track_focus(&focus_handle)
+            .focus_visible(|style| style.border_color(cx.theme().colors().border_focused))
+            .on_action(cx.listener(Self::select_next))
+            .on_action(cx.listener(Self::select_previous))
+            .on_action(cx.listener(Self::activate))
+            .children(self.tabs.iter().enumerate().map(|(index, tab)| {
+                tab.clone()
+                    .toggle_state(index == selected)
+                    .on_activated(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                        this.activate_tab(index, cx);
+                    }))
+            }))
+    }
+}
+
+#[cfg(test)]
+#[path = "tab_bar_tests.rs"]
+mod tests;

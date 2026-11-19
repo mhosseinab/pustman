@@ -1,0 +1,31 @@
+# crates/ui — our design system: the semantic styles (Color, TextSize, DynamicSpacing,
+# elevation, icons) and the components every screen is composed from (Button, Label, Tab,
+# Table, Toast, …). Zed's `ui` crate is GPL: these are our own implementations of the
+# shapes in .agents/skills/rust-gpui-ui-ux/references/{design-system,components}.md, and
+# every color comes from `cx.theme()` so light and dark stay correct.
+
+[package]
+name = "ui"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/ui.rs"
+
+[features]
+# Exposes `init_test` to other crates' tests; compiled into this crate's own tests
+# through `cfg(test)`.
+test-support = ["gpui/test-support"]
+
+[dependencies]
+gpui.workspace = true
+settings.workspace = true
+theme.workspace = true
+
+[dev-dependencies]
+futures.workspace = true
+gpui = { workspace = true, features = ["test-support"] }
