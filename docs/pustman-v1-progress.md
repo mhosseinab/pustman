@@ -83,7 +83,7 @@ Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 0 · un
 | G-DEPS | Install GPUI system libraries, CI push, then promote `release/pustman-v1-1` | pending | – | | | HUMAN gate; 1/3 libraries installed, 2/3 CI green (run 44240566190); 3/3 promote open |
 | S11 | `http_engine` core: transport trait, fake, error taxonomy, send/cancel | **passed** | 2 | `f8846db` | [S11](progress/pustman-v1/steps/S11.md) | 3 MEDIUM fixed: fmt false-claim, URL userinfo leak, Debug secret leak |
 | S12 | `ReqwestTransport`: settings, manual redirects, TLS toggle, timing spike (D2) | **passed** | 5 | `5f1a12d` | [S12](progress/pustman-v1/steps/S12.md) | M1 → #31 (medium); LOW #30 #32 #33 #34 #48 #49 |
-| S13 | Send pipeline: variable resolution, auth (Basic/Bearer/API key), unresolved secrets | pending | 0 | | |  |
+| S13 | Send pipeline: variable resolution, auth (Basic/Bearer/API key), unresolved secrets | **in_progress** | | | S13a [passed](64d0014 → progress/pustman-v1/steps/S13a.md) · S13b · S13c | S13a passed `64d0014`; LOW #46 #47 |
 | S14 | Request bodies, file refs, auto headers, large response spill | pending | 0 | | |  |
 | S15 | Cookie jar per workspace | pending | 0 | | |  |
 | S16 | History recording with redaction, 1 MB cap, retention | pending | 0 | | |  |
