@@ -6,6 +6,8 @@ disable-model-invocation: true
 allowed-tools: Bash(git *) Bash(scripts/promote-check.sh *) Read Grep Glob Edit
 ---
 
+`$ARGUMENTS` is what follows the skill command (`/promote …` in Claude Code, `/skill:promote …` in pi, where it arrives as a request after these instructions).
+
 Promotion window: from the last `release/pustman-v1-*` tag to `$ARGUMENTS` (default: `pustman-v1/main` HEAD).
 This is a desktop app: there is no staging and no deploy — "staging" means the build host, and a
 promotion is a tag plus a human manual smoke on Linux + macOS. You never release the window cap by
@@ -14,7 +16,7 @@ orchestrator is running — you write the progress files, and only one writer ma
 time. Before step 1: `git status` must be clean and the log's last entry must not be an unfinished
 `MERGING` or dispatch; otherwise stop and ask me whether a run is still in flight.
 
-1. **Prepare, in parallel (fresh subagents):**
+1. **Prepare, in parallel (fresh subagents** — Claude Code: the Agent tool; pi: one `subagent` call in `tasks` mode**):**
    - `promotion-brief-writer` → `docs/briefs/release-pustman-v1-<n>.md` (one page; flag rate stated;
      "Not verified" section).
    - `doc-truth-checker` → PASS/FAIL with 5 confirmed/refuted claims.

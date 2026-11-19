@@ -8,6 +8,11 @@ agent: code-explainer
 
 Explain `$ARGUMENTS` for a maintainer who did not write this code.
 
+`$ARGUMENTS` is what follows the skill command. Claude Code runs this skill forked into the
+`code-explainer` agent. A harness without forking (pi) must not explain inline: dispatch the
+`code-explainer` agent (pi: the `subagent` tool) with these instructions and the target, then relay
+its answer.
+
 Resolve the target: a path or module → read it and its callers two levels out; `S<N>` → find the
 squash commit `S<N>:` on `pustman-v1/main` (`git log --oneline --grep '^S<N>:'`) and explain the diff
 plus its step record (`docs/progress/pustman-v1/steps/S<N>.md`); a question → find the entry point and follow the code.

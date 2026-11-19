@@ -32,11 +32,40 @@ to structure something, find the equivalent in Zed and follow its shape — but 
 globs match it** — harnesses that don't auto-load path-scoped rules must do this by hand. Agent roles in
 `.agents/agents/` are prompts: run one as a subagent if your harness has them, or adopt it yourself.
 Harness adapters point into `.agents/` and hold no content of their own: `.claude/skills/*` and
-`.claude/skills/*` and `.claude/rules/*` are relative symlinks into `.agents/`; the two loop
-skills S0 added (`.claude/skills/explain`, `.claude/skills/promote`) are real directories. Roles
-are split: the five repo-native roles live in `.agents/agents/`, and `.claude/agents/` holds the loop
-roles S0 copied in as full prompts, plus Claude-frontmatter variants of the five repo-native roles. Edit `.agents/` for the
-shared content; edit `.claude/agents/` only for Claude-specific frontmatter.
+`.claude/rules/*` are relative symlinks into `.agents/`. Roles are split: the five repo-native roles
+live in `.agents/agents/`, and `.claude/agents/` holds the loop roles S0 copied in as full prompts, plus
+Claude-frontmatter variants of the five repo-native roles. Edit `.agents/` for the shared content; edit
+`.claude/agents/` only for Claude-specific frontmatter. `.pi/agents/` is generated from `.claude/agents/`
+(see [Pi specifics](#pi-specifics)); never edit it by hand.
+
+- For any UI work, load the `rust-gpui-ui-ux` skill before writing code, and follow its "Design source"
+  section for `docs/postman_redesign_pack/`.
+- Before claiming a UI change works, run the relevant GPUI test and say which checklist items
+  (`.agents/skills/rust-gpui-ui-ux/references/ux-checklist.md`) you verified and which you could not.
+
+### Pi specifics
+
+[pi](https://pi.dev/) reads this file (not CLAUDE.md) and discovers `.agents/skills/` itself. The
+Claude-only pieces have pi adapters under `.pi/`:
+
+| Claude Code | pi |
+| --- | --- |
+| `.claude/agents/*.md` | `.pi/agents/*.md`, generated: `bun scripts/pi-sync-agents.ts` (`--check` fails on drift) |
+| Agent tool | `subagent` tool, `.pi/extensions/subagent/` (vendored MIT example; defaults to project agents; `cwd` per task) |
+| `PreToolUse` protect hook | `.pi/extensions/pustman-guards/` runs the same `.claude/hooks/protect-steps-and-tests.sh` |
+| `.claude/rules/` auto-load | the same extension lists `.agents/rules/` and blocks edit/write until the matching rule is read |
+| `SessionStart(compact)` reminder | the same extension steers to the progress files after a compaction |
+| `/explain`, `/promote` | `/skill:explain`, `/skill:promote` |
+
+- Project extensions and skills load only in a trusted folder: run `/trust` once at the repo root (it
+  covers the worktrees under `.claude/worktrees/`). Print mode cannot prompt; untrusted means the guards
+  and skills are silently skipped.
+- The extensions guard only the edit/write tools, like the Claude hook; pi has no permission prompts or
+  sandbox, so `bash` is unguarded.
+- Helper tests: `bun test ./.pi/extensions/pustman-guards/rules.test.ts ./scripts/pi-sync-agents.test.ts` (16 tests; a bare `.pi/extensions` filter is skipped as a hidden dir).
+- Both harnesses stay supported side by side. The v1 driver has a Claude prompt
+  (`docs/pustman-v1-orchestrator-prompt.md`) and a pi prompt (`docs/pustman-v1-orchestrator-prompt-pi.md`,
+  which has a "Switching harnesses" section). Never run both drivers at once.
 
 ## Toolchain & dependencies
 
