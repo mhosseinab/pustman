@@ -142,6 +142,34 @@ joined by an edge or sharing a file. HOTSPOTS (crates/pustman/src/main.rs, crate
 Cargo.lock): steps that list a hotspot in Edits are dispatched AND merged strictly one at a time.
 An Edits entry ending in `/**` claims the whole directory.
 
+DISPATCH PROTOCOL — SINGLE-PHASE RUNS (validated 2026-11-18 at S10; read this before 1):
+   A dispatched worker returned `state: completed` with an empty reply and no work done about twenty
+   times. Controlled probes ruled out concurrency, work size, tool count, reply size, content theme
+   and tool-output volume. What the failing runs shared and the probes did not: they asked ONE
+   subagent to run the WHOLE LOOP (read docs -> write -> build -> fix -> rebuild -> test -> verify xN).
+   Every phase boundary lived inside one run, and the run died in the middle. So:
+   - ONE SUBAGENT RUN = ONE PHASE. YOU own the cycle, the retries and the budget. A run never fixes
+     its own findings and never re-verifies in a loop. Steps 1/2/3 below are PHASES, not a loop you
+     hand to one subagent.
+   - BUILD: read the step's doc section, write the code, make it compile, run the Verify ONCE,
+     commit. It never fixes findings, never re-verifies, never reviews.
+   - REVIEW: read the diff, re-run Verify ONCE, probe, write findings. It never fixes anything.
+   - FIX: address exactly the numbered findings, make Verify green ONCE, commit. No refactoring, no
+     added scope, no re-review.
+   - Sequence per step: BUILD -> REVIEW -> FIX -> REVIEW -> merge. Budget 4 review cycles per step.
+   - Each run is SMALL AND BOUNDED: one phase, at most ~6 findings, every cargo command piped through
+     `tail`/`grep` (never run cargo unpiped), commit as soon as it compiles and Verify is green
+     (never hold the commit for the report).
+   - THE REPLY IS A RECEIPT, NOT THE RECORD. The run writes its full report to
+     /tmp/opencode/pustman-v1-reports/<step>-<phase>.md and replies with exactly one line
+     `BRIEF-TOKEN: <token> -- <verdict|sha>, report at <path>`. The file is the record of record, so
+     an empty reply costs only the receipt.
+   - ON AN EMPTY REPLY: (a) `git log pustman-v1/main..pustman-v1/S<N>` looking for a commit;
+     (b) re-send once, alone; (c) still empty -> shrink the brief (fewer findings / one file) and
+     retry. An empty reply never means the work failed -- it means the run produced no record.
+   - PROOF IT WORKS: S10 (same shape as S9, whose implement had failed 3x under the old whole-loop
+     protocol) passed BUILD and REVIEW both first-try.
+
 1) DISPATCH WORKER (a FRESH subagent every time):
    - Own worktree (isolation: worktree). Mark the row in_progress, attempts+1; log the dispatch.
    - Worker prompt:

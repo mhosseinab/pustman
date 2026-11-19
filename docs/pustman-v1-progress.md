@@ -39,6 +39,10 @@ fixers and reviewers never do.
   - TLS: S12, S28
   - import: S9, S45
 - **Severity:** MEDIUM and HIGH findings stop the step. LOW findings become `gh issue create --label "pustman-v1,low"`.
+- **Dispatch protocol — single-phase runs** (one subagent run = one phase; the driver owns the
+  cycle; the reply is a receipt; empty-reply policy). Validated 2026-11-18 at S10. The single source
+  of truth is `docs/pustman-v1-orchestrator-prompt.md` › "THE LOOP" › "DISPATCH PROTOCOL". Do not
+  duplicate it here.
 - **UI steps** (crates `ui`, `theme`, `workspace`, `text_input`, any `*_panel`/`*_editor`/`*_viewer`/`*_picker`, `command_palette`, `assets/themes`, `assets/icons`): every worker, reviewer and fixer prompt MUST include the three lines in Active CARRY-FORWARD (load the `rust-gpui-ui-ux` skill + its "Design source" section; read the redesign pack from `/home/geek/workspace/rea-agent/pustman/docs/postman_redesign_pack/` read-only, never copy it or `03_references/screenshots/`/`07_guides/` into the repo; cite screen IDs S01–S24 and requirement IDs R01–R28 in `Decision:` lines — S16–S23 cloud collaboration is out of v1 per `docs/PRD.md`). Send UI steps to `ux-auditor` alongside the usual reviewers. If a step's Verify contradicts the pack, STOP and ask the human.
 
 ## Deferred verification gate
