@@ -187,3 +187,7 @@ impl Render for TabBar {
 #[cfg(test)]
 #[path = "tab_bar_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tab_bar_keyboard_tests.rs"]
+mod keyboard_tests;

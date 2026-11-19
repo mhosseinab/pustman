@@ -253,3 +253,7 @@ impl Render for Toasts {
             .children(self.entries.iter().map(|entry| entry.toast.clone()))
     }
 }
+
+#[cfg(test)]
+#[path = "toast_tests.rs"]
+mod tests;
