@@ -92,7 +92,7 @@ Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 0 · un
 | S19 | `ui` design-system crate: tokens and base components | **in_progress** | | | [S19a](progress/pustman-v1/steps/S19a.md) `dab4417` · S19b/S19c pending | LOW #54–#58 |
 | S20 | `text_input` crate: single- and multi-line editing | pending | 0 | | |  |
 | S21 | `pustman_actions` + complete default keymaps (D10) | **passed** | 1 | `0ea7e26` | [S21](progress/pustman-v1/steps/S21.md) | 3 LOW → #12 #13 #14; carry-forward to S22 |
-| S22 | `pustman` binary + `workspace` shell (window, docks, panes/tabs, status bar, toasts) | pending | 0 | | |  |
+| S22 | `pustman` binary + `workspace` shell (window, docks, panes/tabs, status bar, toasts) | **in_progress** | | | [S22a](progress/pustman-v1/steps/S22a.md) `78e77d2` |  |
 | S23 | Tab and layout restore | pending | 0 | | |  |
 | S24 | Command palette | pending | 0 | | |  |
 | S25 | M0 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off |
