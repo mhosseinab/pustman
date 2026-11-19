@@ -1,0 +1,34 @@
+# crates/pustman — the app: the library holding the init order (`src/pustman.rs`) and the
+# thin window opener (`src/main.rs`). Every UI crate plugs into `pustman::init`; later wire
+# steps append one line per crate there (docs/pustman-v1-implementation-steps.md, S22e).
+
+[package]
+name = "pustman"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/pustman.rs"
+
+[[bin]]
+name = "pustman"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+gpui.workspace = true
+gpui_platform.workspace = true
+pustman_actions.workspace = true
+settings.workspace = true
+storage.workspace = true
+theme.workspace = true
+ui.workspace = true
+workspace.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+ui = { workspace = true, features = ["test-support"] }
