@@ -13,8 +13,10 @@ const STATUS_BAR_ID: &str = "status-bar";
 pub(crate) const LEFT_ITEMS_SELECTOR: &str = "status-bar-left";
 pub(crate) const RIGHT_ITEMS_SELECTOR: &str = "status-bar-right";
 
-/// The status bar's height: the redesign pack's `layout.statusBar`, 28 px.
-const STATUS_BAR_HEIGHT_PX: f32 = 28.;
+/// The status bar's height: the redesign pack's `layout.statusBar`, 28 px. The toast
+/// layer anchors its stack to it (`toast_layer.rs`), so the height lives here — the one
+/// place that knows it.
+pub(crate) const STATUS_BAR_HEIGHT_PX: f32 = 28.;
 
 /// The strip along the bottom edge: items anchored left, items anchored right.
 pub struct StatusBar {

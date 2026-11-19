@@ -8,17 +8,21 @@
 
 mod dock;
 mod item;
+mod modal_layer;
 mod pane;
 mod pane_tabs;
 mod panel;
 mod status_bar;
+mod toast_layer;
 mod welcome;
 
 pub use dock::{Dock, DockPosition};
 pub use item::{AnyViewItem, Item, ItemHandle};
+pub use modal_layer::{ModalLayer, ModalView};
 pub use pane::Pane;
 pub use panel::{Panel, PanelHandle};
 pub use status_bar::StatusBar;
+pub use toast_layer::{TOAST_DURATION, ToastAction, ToastHandler};
 pub use welcome::Welcome;
 
 use gpui::{App, Context, Entity, FocusHandle, Focusable, ParentElement, Render, Window};
@@ -39,6 +43,8 @@ pub struct Workspace {
     bottom_dock: Entity<Dock>,
     center_pane: Entity<Pane>,
     status_bar: Entity<StatusBar>,
+    toasts: Entity<ui::Toasts>,
+    modal_layer: ModalLayer,
 }
 
 impl Workspace {
@@ -56,6 +62,8 @@ impl Workspace {
             bottom_dock: cx.new(|cx| Dock::new(DockPosition::Bottom, cx)),
             center_pane: cx.new(Pane::new),
             status_bar: cx.new(StatusBar::new),
+            toasts: cx.new(Toasts::new),
+            modal_layer: ModalLayer::default(),
         }
     }
 
@@ -126,6 +134,8 @@ impl Render for Workspace {
         v_flex()
             .id("workspace")
             .size_full()
+            // The two overlays at the end position themselves against the root.
+            .relative()
             .key_context(WORKSPACE_CONTEXT)
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::toggle_sidebar))
@@ -155,6 +165,9 @@ impl Render for Workspace {
                     .then(|| self.bottom_dock.clone()),
             )
             .child(self.status_bar.clone())
+            // Toasts float bottom-right above the status bar; the modal layer covers all.
+            .child(self.toasts_overlay(cx))
+            .child(self.modal_overlay(cx))
     }
 }
 

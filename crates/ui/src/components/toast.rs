@@ -10,7 +10,7 @@ use std::time::Duration;
 use gpui::{
     App, ClickEvent, Context, ElementId, EventEmitter, InteractiveElement, IntoElement,
     ParentElement, Render, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Task,
-    Window, prelude::FluentBuilder,
+    Window, div, prelude::FluentBuilder,
 };
 
 use crate::color::{Color, Severity};
@@ -107,6 +107,10 @@ impl RenderOnce for Toast {
             on_dismiss,
         } = self;
         let full_message = message.clone();
+        // Test hooks: `VisualTestContext::debug_bounds` finds the message and the action
+        // button under the keys the two selector functions in this module hand out.
+        let message_selector = toast_message_selector(&message);
+        let action_selector = toast_action_selector(&message);
 
         let mut toast = h_flex()
             .id(id.clone())
@@ -119,7 +123,12 @@ impl RenderOnce for Toast {
             .min_w_0()
             .tooltip(Tooltip::text(full_message).builder())
             .child(Icon::new(icon_name).size(IconSize::Small))
-            .child(Label::new(message).size(LabelSize::Small).truncate())
+            .child(
+                div()
+                    .min_w_0()
+                    .debug_selector(move || message_selector)
+                    .child(Label::new(message).size(LabelSize::Small).truncate()),
+            )
             .map(|this| match severity {
                 Some(severity) => this
                     .bg(severity.background(cx))
@@ -130,14 +139,16 @@ impl RenderOnce for Toast {
 
         if let Some(action_label) = action_label {
             toast = toast.child(
-                Button::new((id.clone(), "action"), action_label)
-                    .style(ButtonStyle::Subtle)
-                    .size(ButtonSize::Compact)
-                    .on_click(move |event, window, cx| {
-                        if let Some(on_action) = &on_action {
-                            on_action(event, window, cx);
-                        }
-                    }),
+                div().debug_selector(move || action_selector).child(
+                    Button::new((id.clone(), "action"), action_label)
+                        .style(ButtonStyle::Subtle)
+                        .size(ButtonSize::Compact)
+                        .on_click(move |event, window, cx| {
+                            if let Some(on_action) = &on_action {
+                                on_action(event, window, cx);
+                            }
+                        }),
+                ),
             );
         }
 
@@ -152,6 +163,19 @@ impl RenderOnce for Toast {
 
         toast
     }
+}
+
+/// The debug key a [`Toast`]'s message renders under — the test hook that lets
+/// `VisualTestContext::debug_bounds` prove one exact message is on screen (the `tab.rs`
+/// pattern). It is anchored to the message so a caller and its test share one string
+/// without knowing the handle [`Toasts::push`] re-keys the toast to.
+pub fn toast_message_selector(message: &str) -> String {
+    format!("toast-message-{message}")
+}
+
+/// The debug key a [`Toast`]'s action button renders under (see [`toast_message_selector`]).
+pub fn toast_action_selector(message: &str) -> String {
+    format!("toast-action-{message}")
 }
 
 /// What a [`Toasts`] stack tells its owner.
