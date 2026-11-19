@@ -25,6 +25,9 @@ test-support = [
 ]
 
 [dependencies]
+# `cookie_persistence` returns `anyhow::Result`: its failures span `storage` and
+# serialization, which no error type in this crate names.
+anyhow.workspace = true
 api_model.workspace = true
 base64.workspace = true
 # The RFC 6265 cookie store behind the per-workspace cookie jar (REQ-HTTP-08).
@@ -46,6 +49,9 @@ reqwest = { workspace = true, features = ["http2"] }
 rustls.workspace = true
 secrets.workspace = true
 serde_json.workspace = true
+# Cookies are local state (REQ-WSP-06): `cookie_persistence` loads and saves the jar
+# through `storage`'s `cookies` table, on a background task.
+storage.workspace = true
 # `tempfile` owns the spill temp file: 0600 in the OS temp dir, removed on drop
 # (REQ-RESP-06, REQ-NFR-03) — never hand-rolled temp naming or removal.
 tempfile.workspace = true
@@ -71,3 +77,7 @@ gpui = { workspace = true, features = ["test-support"] }
 http_engine = { path = ".", features = ["test-support"] }
 # `MemorySecretStore` for the secret-lookup tests of `prepare`.
 secrets = { workspace = true, features = ["test-support"] }
+# The tampered-row cookie tests write a row `storage`'s API cannot express — an
+# `attributes_json` that is not JSON at all — as raw SQL over a second connection to the
+# same database file (`storage` exposes no raw-SQL handle).
+rusqlite.workspace = true

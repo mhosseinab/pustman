@@ -1872,6 +1872,7 @@ dependencies = [
 name = "http_engine"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "api_model",
  "base64 0.23.1",
  "bytes",
@@ -1886,9 +1887,11 @@ dependencies = [
  "publicsuffix",
  "rcgen",
  "reqwest",
+ "rusqlite",
  "rustls",
  "secrets",
  "serde_json",
+ "storage",
  "tempfile",
  "thiserror 2.0.21",
  "time",

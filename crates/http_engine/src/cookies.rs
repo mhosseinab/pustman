@@ -88,7 +88,9 @@ pub enum CookieError {
 const PUBLIC_SUFFIX_LIST_DATA: &str = include_str!("../assets/public_suffix_list.dat");
 
 /// The parsed list, once for the process; every jar clones from it ([`Default`]).
-static PUBLIC_SUFFIX_LIST: LazyLock<PublicSuffixList> = LazyLock::new(|| {
+/// `pub(crate)` for [`crate::cookie_persistence`], which re-checks reloaded rows against
+/// it (a tampered table must not smuggle a public-suffix cookie past the jar).
+pub(crate) static PUBLIC_SUFFIX_LIST: LazyLock<PublicSuffixList> = LazyLock::new(|| {
     // The data is compile-time constant, so a parse failure is a build defect. It fails
     // loudly here rather than silently handing out jars without public-suffix
     // rejection; `test_bundled_public_suffix_list_parses` pins the parse in tests.
@@ -229,6 +231,24 @@ impl CookieJar {
         match self.store.remove(domain, path, name) {
             Some(_removed) => Ok(()),
             None => Err(unknown_cookie(domain, path, name)),
+        }
+    }
+
+    /// The jar's unexpired cookies, for [`crate::cookie_persistence`]'s snapshot into
+    /// `storage` rows (REQ-WSP-06). The stored cookie is exposed, not [`CookieEntry`],
+    /// because it keeps the host-only and domain flags a reload must restore.
+    pub(crate) fn cookies(&self) -> impl Iterator<Item = &StoreCookie<'static>> {
+        self.store.iter_unexpired()
+    }
+
+    /// A jar around cookies [`crate::cookie_persistence`] reloaded from `storage`
+    /// (REQ-WSP-06). cookie_store's own store, not [`CookieJar::add`]: re-adding a
+    /// `Domain=` cookie would narrow it to a host-only one. `from_cookies` builds its
+    /// store without a public suffix list, so the vendored list is attached here and
+    /// every constructor path carries it.
+    pub(crate) fn from_store(store: CookieStore) -> Self {
+        Self {
+            store: store.with_suffix_list(PUBLIC_SUFFIX_LIST.clone()),
         }
     }
 

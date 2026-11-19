@@ -18,6 +18,7 @@
 //! `test-support` feature). What reaches a real server is [`ReqwestTransport`].
 
 mod client;
+mod cookie_persistence;
 mod cookies;
 mod error;
 mod file_ref;
@@ -35,6 +36,7 @@ mod test_support;
 mod transport;
 
 pub use client::{HttpClient, SecretKeyLookup, SendEvent, SendInput, SendOutcome};
+pub use cookie_persistence::{load_jar, save_jar};
 pub use cookies::{CookieEntry, CookieError, CookieJar};
 pub use error::TransportError;
 pub use file_ref::resolve_file_ref;
