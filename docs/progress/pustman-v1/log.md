@@ -128,3 +128,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-19: **S13b passed → `4bb7e1d`.** Rebased with `--onto` and got VERIFY OK. Round 5 was a no-shell scoped review, so the driver's verify is the run evidence.
 - 2026-11-19: **S14b passed → `1cf147b`.** Rebased onto main past S13a/S13b, with one mod-list conflict resolved by keeping both sides. VERIFY OK. LOW findings were already filed as #26–#29 and #35.
 - 2026-11-19: **S14c passed → `96dc3e8`.** Cycle 1 PASS_WITH_ISSUES; rebased onto main past S14b (Cargo.toml dep conflict kept both); PASS 70, VERIFY OK. LOW → #50.
+- 2026-11-19: **S19a passed → `dab4417`.** 3 review rounds (cycle 2 fixed the typography panic, the GPL-shaped units.rs and the split tab activation; cycle 3 scoped → PASS_WITH_ISSUES). Squash merged cleanly; VERIFY OK. LOW → #54–#58. S19c carry-forward: tab_bar_tests.rs is now read-only, so a new test file is needed.
