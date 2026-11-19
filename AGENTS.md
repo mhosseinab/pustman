@@ -32,8 +32,11 @@ to structure something, find the equivalent in Zed and follow its shape — but 
 globs match it** — harnesses that don't auto-load path-scoped rules must do this by hand. Agent roles in
 `.agents/agents/` are prompts: run one as a subagent if your harness has them, or adopt it yourself.
 Harness adapters point into `.agents/` and hold no content of their own: `.claude/skills/*` and
-`.claude/rules/*` are relative symlinks; `.claude/agents/*.md` are thin wrappers with Claude-only
-frontmatter (tools, model, preloaded skills). Edit `.agents/`, never the adapters.
+`.claude/rules/*` and `.claude/skills/*` are relative symlinks into `.agents/`; the two loop
+skills S0 added (`.claude/skills/explain`, `.claude/skills/promote`) are real directories. Roles
+are split: the five repo-native roles live in `.agents/agents/`, and `.claude/agents/` holds the
+loop roles S0 copied in as full prompts (with Claude-only frontmatter). Edit `.agents/` for the
+shared content; edit `.claude/agents/` only for Claude-specific frontmatter.
 
 ## Toolchain & dependencies
 
