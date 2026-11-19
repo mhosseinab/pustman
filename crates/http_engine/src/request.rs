@@ -4,6 +4,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use reqwest::header::HeaderMap;
 use url::Url;
 
 use crate::error::TransportError;
@@ -30,12 +31,77 @@ impl Header {
 
 impl fmt::Debug for Header {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Values carry cookies, tokens and resolved secrets: never print them.
+        // Values carry cookies, tokens and resolved secrets: never print them. Names can
+        // too — variables resolve into header names as well (PRD §7) — so only a
+        // well-known header name prints as-is; any other name is redacted like a value.
+        let name = if is_well_known_header_name(&self.name) {
+            self.name.as_str()
+        } else {
+            "<redacted>"
+        };
         f.debug_struct("Header")
-            .field("name", &self.name)
+            .field("name", &name)
             .field("value", &"<redacted>")
             .finish()
     }
+}
+
+/// The standard wire names [`fmt::Debug for Header`](Header) prints as-is. Anything
+/// else may be a name `{{variable}}` resolution built from a secret (PRD §7), so the
+/// names come from the `http::header` constants the wire format standardises and are
+/// matched ASCII-case-insensitively, as header names are.
+fn is_well_known_header_name(name: &str) -> bool {
+    use reqwest::header::{
+        ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, AUTHORIZATION, CACHE_CONTROL, CONNECTION,
+        CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, DATE, ETAG, HOST,
+        IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, LOCATION, ORIGIN, PROXY_AUTHORIZATION,
+        REFERER, SERVER, SET_COOKIE, TRANSFER_ENCODING, USER_AGENT, VARY, WWW_AUTHENTICATE,
+    };
+
+    [
+        AUTHORIZATION,
+        CONTENT_TYPE,
+        CONTENT_LENGTH,
+        CONTENT_ENCODING,
+        ACCEPT,
+        ACCEPT_ENCODING,
+        ACCEPT_LANGUAGE,
+        USER_AGENT,
+        HOST,
+        COOKIE,
+        SET_COOKIE,
+        LOCATION,
+        CACHE_CONTROL,
+        CONNECTION,
+        DATE,
+        ETAG,
+        IF_NONE_MATCH,
+        IF_MODIFIED_SINCE,
+        LAST_MODIFIED,
+        ORIGIN,
+        REFERER,
+        TRANSFER_ENCODING,
+        WWW_AUTHENTICATE,
+        PROXY_AUTHORIZATION,
+        SERVER,
+        VARY,
+    ]
+    .iter()
+    .any(|known| name.eq_ignore_ascii_case(known.as_str()))
+}
+
+/// The header fields of `map`, duplicates kept (REQ-RESP-05): `http::HeaderMap` yields
+/// a name once per value. Duplicates of one name keep their relative order; the order
+/// across different names is not guaranteed (see issue #31).
+pub(crate) fn headers_from_map(map: &HeaderMap) -> Vec<Header> {
+    map.iter()
+        .map(|(name, value)| {
+            Header::new(
+                name.as_str().to_string(),
+                String::from_utf8_lossy(value.as_bytes()).into_owned(),
+            )
+        })
+        .collect()
 }
 
 /// The body to send: bytes, or a file the transport reads at send time (REQ-HTTP-04).
@@ -52,11 +118,38 @@ pub enum RequestBody {
 
 impl fmt::Debug for RequestBody {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Bodies never reach logs (AGENTS.md › Security).
+        // Bodies never reach logs (AGENTS.md › Security) and a file's path can carry a
+        // resolved secret (REQ-VAR-01 resolves `{{variables}}` in the body, PRD §7): it
+        // is redacted exactly as [`crate::error::TransportError::FileNotFound`] redacts
+        // one (`error.rs`). The UI keeps the real path — the body editor holds it and
+        // `FileNotFound`'s `Display` names it.
         match self {
             RequestBody::None => f.write_str("None"),
             RequestBody::Bytes(bytes) => write!(f, "Bytes({} bytes)", bytes.len()),
-            RequestBody::File(path) => f.debug_tuple("File").field(path).finish(),
+            RequestBody::File(_) => f.debug_struct("File").field("path", &"<redacted>").finish(),
+        }
+    }
+}
+
+/// [`RequestBody`] as [`ResolvedRequest`]'s `Debug` prints it. [`RequestBody`]'s own
+/// `Debug` is stricter — the path fully redacted — but the file NAME survives here,
+/// and only here, because `request_tests.rs` (`debug_output_describes_a_file_body_by_path`)
+/// pins it visible and that test file is read-only on the integration branch. The
+/// directory, where a resolved variable puts its secret (PRD §7), never appears.
+struct BodyForDebug<'a>(&'a RequestBody);
+
+impl fmt::Debug for BodyForDebug<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            RequestBody::None => f.write_str("None"),
+            RequestBody::Bytes(bytes) => write!(f, "Bytes({} bytes)", bytes.len()),
+            RequestBody::File(path) => match path.file_name() {
+                Some(name) => f
+                    .debug_tuple("File")
+                    .field(&name.to_string_lossy())
+                    .finish(),
+                None => f.debug_tuple("File").field(&"<redacted>").finish(),
+            },
         }
     }
 }
@@ -148,15 +241,39 @@ impl ResolvedRequest {
 
 impl fmt::Debug for ResolvedRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // The resolved text carries secret values (PRD §7): print no values at all.
+        // The resolved text carries secret values (PRD §7): print no values at all. The
+        // URL keeps its scheme, host and path and a body file keeps its NAME here, and
+        // only here: `request_tests.rs` pins exactly that visible and is read-only on
+        // the integration branch (see [`debug_url`] and [`BodyForDebug`]).
         f.debug_struct("ResolvedRequest")
             .field("method", &self.method)
-            .field("url", &crate::redacted_url(&self.url))
+            .field("url", &debug_url(&self.url))
             .field("headers", &self.headers)
-            .field("body", &self.body)
+            .field("body", &BodyForDebug(&self.body))
             .field("settings", &self.settings)
             .finish()
     }
+}
+
+/// The URL as [`ResolvedRequest`]'s `Debug` prints it: scheme, host and path, with the
+/// userinfo, query and fragment dropped. This is the crate's one deviation from
+/// [`crate::redacted_url`] — which drops the host and path as well — and it exists only
+/// because `request_tests.rs` (`debug_output_hides_bodies_headers_and_query_values`,
+/// `debug_output_hides_url_userinfo_credentials`) pins host and path visible in a test
+/// file that is read-only on the integration branch.
+fn debug_url(url: &Url) -> String {
+    let mut shown = url.clone();
+    shown.set_query(None);
+    shown.set_fragment(None);
+    // Userinfo carries credentials exactly as the query does. `set_username` and
+    // `set_password` refuse a URL with no host (or a `file:` one), which is exactly the
+    // set of URLs that carry no userinfo to clear, so a refusal is already redacted.
+    let userinfo_cleared = shown.set_username("").and(shown.set_password(None));
+    debug_assert!(
+        userinfo_cleared.is_ok() || !shown.has_host() || shown.scheme() == "file",
+        "a URL with a host accepts an empty userinfo"
+    );
+    shown.to_string()
 }
 
 #[cfg(test)]

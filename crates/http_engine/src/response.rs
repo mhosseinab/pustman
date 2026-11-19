@@ -46,23 +46,25 @@ pub struct NetworkInfo {
     pub remote_ip: Option<String>,
     /// The remote port.
     pub remote_port: Option<u16>,
-    /// The local address the request went out from.
+    /// The local socket address (`ip:port`) the request went out from.
     pub local_address: Option<String>,
-    /// The protocol ALPN negotiated, when there is TLS.
+    /// The protocol ALPN negotiated, when there is TLS and the transport can report it.
     pub alpn: Option<String>,
     /// The TLS facts, when the send used TLS.
     pub tls: Option<TlsInfo>,
 }
 
-/// The TLS facts of a send (REQ-NET-02).
+/// The TLS facts of a send (REQ-NET-02). A fact the transport cannot observe is `None`,
+/// never guessed (ADR-0003): `reqwest` reports the protocol version and nothing else of
+/// these, so the cipher suite and the chain stay `None` until a transport can read them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TlsInfo {
-    /// The TLS protocol version.
-    pub protocol: String,
-    /// The cipher suite.
-    pub cipher: String,
-    /// The peer certificate chain, leaf first.
-    pub certificates: Vec<Certificate>,
+    /// The TLS protocol version, when the transport can report it.
+    pub protocol: Option<String>,
+    /// The cipher suite, when the transport can report it.
+    pub cipher: Option<String>,
+    /// The peer certificate chain, leaf first, when the transport can report it.
+    pub certificates: Option<Vec<Certificate>>,
     /// Whether certificate verification was on for this send (REQ-HTTP-10).
     pub verification_enabled: bool,
 }
@@ -91,7 +93,8 @@ pub struct RedirectHop {
     pub status: u16,
     /// The hop's response headers, in order.
     pub headers: Vec<Header>,
-    /// The `Location` that was followed to the next hop.
+    /// The `Location` this hop answered with: followed to the next hop, or the one the
+    /// chain stopped at.
     pub location: Option<Url>,
     /// How long the hop took, when the transport measured it.
     pub timing: Option<Duration>,
@@ -132,12 +135,14 @@ impl ResponseBody {
 
 impl fmt::Debug for ResponseBody {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Bodies never reach logs (AGENTS.md › Security).
+        // Bodies never reach logs (AGENTS.md › Security) and a body file's path can
+        // carry a resolved secret (PRD §7): it is redacted exactly as
+        // [`crate::error::TransportError::FileNotFound`] redacts one (`error.rs`).
         match self {
             ResponseBody::Bytes(bytes) => write!(f, "Bytes({} bytes)", bytes.len()),
-            ResponseBody::File { path, prefix } => f
+            ResponseBody::File { prefix, .. } => f
                 .debug_struct("File")
-                .field("path", path)
+                .field("path", &"<redacted>")
                 .field("prefix_bytes", &prefix.len())
                 .finish(),
         }

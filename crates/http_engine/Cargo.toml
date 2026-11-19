@@ -1,6 +1,6 @@
 # `http_engine` — sending requests through a Transport, the PRD §8.6 error taxonomy and
 # send/cancel (PRD §5.1, REQ-HTTP-12). The GPUI entity that owns an in-flight send lives
-# here; `ReqwestTransport` (the tokio-backed one) lands in a later step.
+# here; `ReqwestTransport` is the tokio-backed transport that reaches a real server.
 
 [package]
 name = "http_engine"
@@ -15,18 +15,43 @@ workspace = true
 path = "src/http_engine.rs"
 
 [features]
-# Exposes `FakeTransport` to other crates' tests; compiled into this crate's own tests
-# through `cfg(test)`.
-test-support = []
+# Exposes `FakeTransport` and `TestServer` to other crates' tests; compiled into this
+# crate's own tests through `cfg(test)`.
+test-support = [
+    "dep:bytes",
+    "dep:http-body-util",
+    "dep:rcgen",
+    "dep:tokio-rustls",
+]
 
 [dependencies]
 api_model.workspace = true
 futures.workspace = true
 gpui.workspace = true
 gpui_tokio.workspace = true
+# `http2` so the request's HTTP version setting can force HTTP/2; `hyper` and `rustls`
+# name the errors the transport classifies (reqwest has no `is_tls()` of its own).
+# `hyper-util`'s `HttpInfo` is what `Response::remote_addr` is read from, and the only
+# place a local socket address is reported (REQ-NET-02); `tokio` gives the test server
+# its `TokioIo` adapter.
+hyper.workspace = true
+hyper-util = { workspace = true, features = ["client-legacy", "tokio"] }
+reqwest = { workspace = true, features = ["http2"] }
+rustls.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 url.workspace = true
 variables.workspace = true
 
+# The loopback test server: tokio + hyper over `hyper-util`'s IO adapter, plus `rcgen`
+# for its self-signed TLS variant. Only compiled behind `test-support`.
+bytes = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
+rcgen = { workspace = true, optional = true }
+tokio-rustls = { workspace = true, optional = true }
+
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+# Enabling our own `test-support` feature is what makes `TestServer` visible to this
+# crate's integration tests: dev-dependencies unify features with the test build.
+http_engine = { path = ".", features = ["test-support"] }

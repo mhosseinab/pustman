@@ -10,13 +10,17 @@
 //! connection and emits [`SendEvent::Cancelled`] for the Console (REQ-HTTP-12). A send is
 //! never retried.
 //!
-//! Tests script a `FakeTransport` (behind the `test-support` feature) instead of
-//! touching the network; the production transport lands separately.
+//! Tests script a `FakeTransport` instead of touching the network, and run against a
+//! loopback [`TestServer`] where they need a real socket (both behind the
+//! `test-support` feature). What reaches a real server is [`ReqwestTransport`].
 
 mod client;
 mod error;
 mod request;
+mod reqwest_transport;
 mod response;
+#[cfg(any(test, feature = "test-support"))]
+mod test_server;
 #[cfg(any(test, feature = "test-support"))]
 mod test_support;
 mod transport;
@@ -24,28 +28,27 @@ mod transport;
 pub use client::{HttpClient, SendEvent};
 pub use error::TransportError;
 pub use request::{Header, RequestBody, ResolvedRequest, SendSettings};
+pub use reqwest_transport::ReqwestTransport;
 pub use response::{
     Certificate, NetworkInfo, RedirectHop, Response, ResponseBody, ResponseVersion, Timings,
     TlsInfo,
 };
 #[cfg(any(test, feature = "test-support"))]
+pub use test_server::{ReceivedRequest, TestServer};
+#[cfg(any(test, feature = "test-support"))]
 pub use test_support::FakeTransport;
 pub use transport::Transport;
 
-/// A URL as it may be printed: query, fragment and userinfo dropped, because they can
-/// carry secret values. Used by `Debug` output only; error reports go through redaction
-/// separately.
+/// A URL as it may be printed: the scheme and nothing else. The resolved URL, its host
+/// and its path carry secret values — a webhook token lives in the path (PRD §7) — and
+/// [`crate::error::TransportError`]'s `Debug` redacts all of them (`error.rs`), so this
+/// follows that rule. Used by `Debug` output only; the UI keeps the real URL through
+/// `Display`. [`crate::request::ResolvedRequest`]'s `Debug` deviates deliberately — one
+/// read-only test file pins its narrower shape there (see `debug_url` in `request.rs`).
 pub(crate) fn redacted_url(url: &url::Url) -> String {
-    let mut redacted = url.clone();
-    redacted.set_query(None);
-    redacted.set_fragment(None);
-    // Userinfo carries credentials exactly as the query does. `set_username` and
-    // `set_password` refuse a URL with no host (or a `file:` one), which is exactly the
-    // set of URLs that carry no userinfo to clear, so a refusal is already redacted.
-    let userinfo_cleared = redacted.set_username("").and(redacted.set_password(None));
-    debug_assert!(
-        userinfo_cleared.is_ok() || !redacted.has_host() || redacted.scheme() == "file",
-        "a URL with a host accepts an empty userinfo"
-    );
-    redacted.to_string()
+    format!("{}://<redacted>", url.scheme())
 }
+
+#[cfg(test)]
+#[path = "debug_redaction_tests.rs"]
+mod debug_redaction_tests;
