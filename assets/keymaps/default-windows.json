@@ -1,0 +1,30 @@
+[
+  {
+    "context": "RequestEditor",
+    "bindings": {
+      "ctrl-enter": "request::Send",
+      "escape": "request::Cancel",
+      "ctrl-l": "request::FocusUrlBar"
+    }
+  },
+  {
+    "context": "ResponseViewer",
+    "bindings": {
+      "ctrl-f": "response::Find"
+    }
+  },
+  {
+    "context": "Workspace",
+    "bindings": {
+      "ctrl-s": "workspace::Save",
+      "ctrl-t": "workspace::NewTab",
+      "ctrl-w": "workspace::CloseTab",
+      "ctrl-tab": "workspace::NextTab",
+      "ctrl-shift-tab": "workspace::PreviousTab",
+      "ctrl-alt-c": "workspace::ToggleConsole",
+      "ctrl-\\": "workspace::ToggleSidebar",
+      "ctrl-shift-p": "palette::Toggle",
+      "ctrl-p": "quick_open::Toggle"
+    }
+  }
+]

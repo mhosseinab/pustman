@@ -1,0 +1,23 @@
+# crates/pustman_actions/Cargo.toml
+# Every PRD action declared once (plan D10), plus the complete default keymaps.
+# Feature crates implement the handlers; this crate only declares and binds.
+
+[package]
+name = "pustman_actions"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/pustman_actions.rs"
+
+[dependencies]
+gpui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

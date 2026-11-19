@@ -2767,6 +2767,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pustman_actions"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "pxfm"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
