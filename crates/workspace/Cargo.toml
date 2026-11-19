@@ -1,0 +1,27 @@
+# crates/workspace — the window shell every Pustman screen lives in (PRD §3): the
+# Workspace entity with its left dock (collections, environments, history), the center
+# Pane of request items, the bottom dock (console) and the status bar. Zed's `workspace`
+# crate is GPL: these are our own implementations of the shapes in
+# .agents/skills/rust-gpui-ui-ux/references/{gpui-fundamentals,postman-screens}.md, and
+# every color comes from `cx.theme()` so light and dark stay correct.
+
+[package]
+name = "workspace"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/workspace.rs"
+
+[dependencies]
+gpui.workspace = true
+pustman_actions.workspace = true
+ui.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+ui = { workspace = true, features = ["test-support"] }
