@@ -7,17 +7,24 @@
 //! from `cx.theme()` so light and dark stay correct.
 
 mod dock;
+mod item;
 mod pane;
+mod pane_tabs;
 mod panel;
 mod status_bar;
+mod welcome;
 
 pub use dock::{Dock, DockPosition};
+pub use item::{AnyViewItem, Item, ItemHandle};
 pub use pane::Pane;
 pub use panel::{Panel, PanelHandle};
 pub use status_bar::StatusBar;
+pub use welcome::Welcome;
 
 use gpui::{App, Context, Entity, FocusHandle, Focusable, ParentElement, Render, Window};
-use pustman_actions::workspace::{ToggleConsole, ToggleSidebar};
+use pustman_actions::workspace::{
+    CloseTab, NewTab, NextTab, PreviousTab, ToggleConsole, ToggleSidebar,
+};
 use ui::prelude::*;
 
 /// The key context the workspace answers the keyboard in; `assets/keymaps/` binds the
@@ -83,6 +90,29 @@ impl Workspace {
         self.bottom_dock.update(cx, |dock, cx| dock.toggle(cx));
         cx.notify();
     }
+
+    /// Open a new tab in the center pane (REQ-UI-02).
+    fn new_tab(&mut self, _: &NewTab, _window: &mut Window, cx: &mut Context<Self>) {
+        self.center_pane.update(cx, |pane, cx| pane.new_tab(cx));
+    }
+
+    /// Close the active tab in the center pane (REQ-UI-02).
+    fn close_tab(&mut self, _: &CloseTab, _window: &mut Window, cx: &mut Context<Self>) {
+        self.center_pane
+            .update(cx, |pane, cx| pane.close_active_tab(cx));
+    }
+
+    /// Activate the next tab in the center pane (REQ-UI-02).
+    fn next_tab(&mut self, _: &NextTab, _window: &mut Window, cx: &mut Context<Self>) {
+        self.center_pane
+            .update(cx, |pane, cx| pane.activate_next_tab(cx));
+    }
+
+    /// Activate the previous tab in the center pane (REQ-UI-02).
+    fn previous_tab(&mut self, _: &PreviousTab, _window: &mut Window, cx: &mut Context<Self>) {
+        self.center_pane
+            .update(cx, |pane, cx| pane.activate_previous_tab(cx));
+    }
 }
 
 impl Focusable for Workspace {
@@ -100,6 +130,10 @@ impl Render for Workspace {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::toggle_sidebar))
             .on_action(cx.listener(Self::toggle_console))
+            .on_action(cx.listener(Self::new_tab))
+            .on_action(cx.listener(Self::close_tab))
+            .on_action(cx.listener(Self::next_tab))
+            .on_action(cx.listener(Self::previous_tab))
             .bg(cx.theme().colors().background)
             // The docks and the pane share the rows above the console.
             .child(
@@ -129,9 +163,11 @@ impl Render for Workspace {
 /// Decision: [`ToggleSidebar`] and [`ToggleConsole`] are answered by element-level
 /// `.on_action` listeners on the [`Workspace`] root ([`WORKSPACE_CONTEXT`]), which is
 /// where GPUI delivers actions — there is no global action registry to register into and
-/// no keys to bind here (`pustman_actions` owns the keymaps). The hook stays because the
-/// init order calls every UI crate's `init`, and panel registration (a later step) grows
-/// it.
+/// no keys to bind here (`pustman_actions` owns the keymaps). The tab actions
+/// (`NewTab`/`CloseTab`/`NextTab`/`PreviousTab`) dispatch the same way: the listeners on
+/// the root delegate one line each to the `Pane` methods in `pane_tabs`. The hook stays
+/// because the init order calls every UI crate's `init`, and panel registration (a later
+/// step) grows it.
 pub fn init(_cx: &mut App) {}
 
 #[cfg(test)]
