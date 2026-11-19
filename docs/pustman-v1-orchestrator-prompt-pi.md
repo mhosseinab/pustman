@@ -272,6 +272,17 @@ DISPATCH PROTOCOL — SINGLE-PHASE RUNS (validated 2026-11-18 at S10):
      block: "Address every numbered finding, re-run Verify once, commit, write REPORTS/S<N>-fix-<cycle>.md,
      reply with the BRIEF-TOKEN line." Back to (2). Budget 4 cycles; cycles 3–4 with measurable
      progress may extend by ≤ 2 (log each). No progress = STUCK.
+   - RE-REVIEW SCOPE (cycle 2 onward): the reviewer (a) marks each earlier MEDIUM/HIGH finding FIXED
+     or NOT FIXED with file:line evidence and (b) reviews only the fix diff `<prev-head>..HEAD`. A new
+     HIGH/MEDIUM blocks only if the fix introduced it or it is a security leak or a crash; anything
+     else it finds is filed as an issue, not a new cycle. Full-step depth belongs to cycle 1.
+   - FRONT-LOAD QUALITY (cheap-model workers trade speed for tokens; rounds are the cost): every
+     BUILD brief carries a "Known traps" list — the Active CARRY-FORWARD for its crates plus the
+     MEDIUM/HIGH findings earlier steps in the same crates drew (secrets in Display/Debug/logs,
+     errors that never reach the user, reinvented workspace deps, missing keyboard/disabled-state
+     tests) — and the worker must state how each is handled. Cycle-1 reviews stay full-depth.
+   - MERGE PROMPTLY: a step that is review-clean (no open MEDIUM/HIGH) and re-verified by you goes to
+     the INTEGRATOR in the same turn, prerequisites first; never park a clean step behind new work.
    - STUCK, a worker blocker, a red starting state outside the step's files, or a step needing a
      product/architecture decision → write the trade-off into Open work, write the STOP log entry,
      and give me:
