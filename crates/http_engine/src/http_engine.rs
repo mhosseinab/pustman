@@ -18,6 +18,7 @@ mod client;
 mod error;
 mod pipeline;
 mod request;
+mod request_auth;
 mod reqwest_transport;
 mod response;
 #[cfg(any(test, feature = "test-support"))]
@@ -30,6 +31,7 @@ pub use client::{HttpClient, SendEvent};
 pub use error::TransportError;
 pub use pipeline::{PipelineError, Warning, resolve_request};
 pub use request::{Header, RequestBody, ResolvedRequest, SendSettings};
+pub use request_auth::{AppliedAuth, apply_auth};
 pub use reqwest_transport::ReqwestTransport;
 pub use response::{
     Certificate, NetworkInfo, RedirectHop, Response, ResponseBody, ResponseVersion, Timings,
