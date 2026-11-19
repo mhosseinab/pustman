@@ -25,6 +25,8 @@ pub mod icons;
 pub mod prelude;
 pub mod spacing;
 #[cfg(any(test, feature = "test-support"))]
+pub mod story;
+#[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 pub mod typography;
 pub mod units;
@@ -36,9 +38,11 @@ pub use components::behavior::{Clickable, Disableable, FixedWidth, Toggleable, V
 pub use components::button::{
     Button, ButtonSize, ButtonStyle, ClickHandler, IconButton, IconButtonShape, TintColor,
 };
+pub use components::context_menu::ContextMenu;
 pub use components::divider::{Divider, DividerColor};
 pub use components::key_binding::KeyBinding;
 pub use components::label::{Headline, Label, LabelSize};
+pub use components::list::VirtualList;
 pub use components::modal::Modal;
 pub use components::tab::Tab;
 pub use components::tab_bar::{TabBar, TabBarEvent};
@@ -57,6 +61,7 @@ pub use units::{PIXELS_PER_REM, px_to_rems};
 use gpui::{App, Div, Styled, div};
 use settings::Setting;
 
+use crate::components::context_menu::MENU_CONTEXT;
 use crate::components::tab_bar::TAB_BAR_CONTEXT;
 use crate::typography::FontSizesSetting;
 
@@ -82,8 +87,9 @@ pub fn assets() -> IconAssets {
 /// Set the design system up. Called once from the app's init order, after `settings` and
 /// `theme`: it registers the [`FontSizesSetting`] view [`TextSize::Ui`] and
 /// [`TextSize::Editor`] resolve against, installs the app-wide [`UiDensityStore`] every
-/// [`DynamicSpacing`] resolves against, and binds the [`TabBar`] keys — the arrows move
-/// along the bar, Enter and Space confirm the selected tab. Buttons and toggles bind
+/// [`DynamicSpacing`] resolves against, and binds the [`TabBar`] and [`ContextMenu`] keys
+/// — the arrows move along the bar or through the menu, Enter and Space confirm, Escape
+/// closes a menu. Buttons and toggles bind
 /// nothing: GPUI synthesizes one click on the focused control per Enter/Space
 /// press-and-release, which cannot fire on key auto-repeat.
 pub fn init(cx: &mut App) {
@@ -94,5 +100,9 @@ pub fn init(cx: &mut App) {
         gpui::KeyBinding::new("right", SelectNext, Some(TAB_BAR_CONTEXT)),
         gpui::KeyBinding::new("enter", Activate, Some(TAB_BAR_CONTEXT)),
         gpui::KeyBinding::new("space", Activate, Some(TAB_BAR_CONTEXT)),
+        gpui::KeyBinding::new("up", SelectPrevious, Some(MENU_CONTEXT)),
+        gpui::KeyBinding::new("down", SelectNext, Some(MENU_CONTEXT)),
+        gpui::KeyBinding::new("enter", Activate, Some(MENU_CONTEXT)),
+        gpui::KeyBinding::new("escape", Cancel, Some(MENU_CONTEXT)),
     ]);
 }

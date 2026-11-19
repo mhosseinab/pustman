@@ -17,15 +17,18 @@ pub use theme::ActiveTheme;
 
 pub use crate::actions::{Activate, Cancel, SelectNext, SelectPrevious};
 pub use crate::color::{Color, Severity};
+pub use crate::components::badge::Badge;
 pub use crate::components::behavior::{
     Clickable, Disableable, FixedWidth, Toggleable, VisibleOnHover,
 };
 pub use crate::components::button::{
     Button, ButtonSize, ButtonStyle, ClickHandler, IconButton, IconButtonShape, TintColor,
 };
+pub use crate::components::context_menu::ContextMenu;
 pub use crate::components::divider::{Divider, DividerColor};
 pub use crate::components::key_binding::KeyBinding;
 pub use crate::components::label::{Headline, Label, LabelSize};
+pub use crate::components::list::VirtualList;
 pub use crate::components::modal::Modal;
 pub use crate::components::tab::Tab;
 pub use crate::components::tab_bar::{TabBar, TabBarEvent};
