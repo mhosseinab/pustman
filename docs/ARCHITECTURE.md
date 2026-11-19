@@ -51,8 +51,10 @@ Init order in `main.rs`: `settings → theme → ui → workspace → feature cr
 - No `.unwrap()`/`.expect(`/`std::process::Command`/`serde_json::from_reader`/`let _ =`/
   `smol::Timer`/`std::thread::sleep`/inline `mod tests {` in non-test `crates/*/src` —
   `scripts/pustman-v1-tripwire.sh`, baseline 0, also run inside `scripts/pustman-v1-verify.sh`.
-- Workspace files contain no secrets and no local state (REQ-WSP-06) — `secrets` + the S37 redaction
-  test (`scripts/pustman-v1-test.sh integration_tests redaction`).
+- Workspace files contain no secrets and no local state (REQ-WSP-06) — enforced at the WRITE PATH
+  by `workspace_store`'s `sanitize_secret_variables` (covered by `workspace_store` tests);
+  `secrets` is where the values live (OS keychain), and the S37 redaction test
+  (`scripts/pustman-v1-test.sh integration_tests redaction`) is the future end-to-end proof.
 - Deterministic JSON and atomic writes (REQ-WSP-02) — `workspace_store` tests.
 - Test placement (D9): `#[cfg(test)] #[path = "<file>_tests.rs"] mod tests;`, integration tests in
   `crates/<c>/tests/` — enforced by the tripwire and `.claude/hooks/protect-steps-and-tests.sh`.
@@ -66,7 +68,8 @@ Init order in `main.rs`: `settings → theme → ui → workspace → feature cr
 ## Risk areas (where a change needs a flagged review)
 
 - Secret handling and redaction (`api_model/redact`, `secrets`, `console`, history) — `security-reviewer`;
-  the S37 redaction test is the proof.
+  `workspace_store`'s write-path stripping covers workspace files today, and the S37 redaction test
+  is the end-to-end proof once it lands.
 - SQLite schema (`crates/storage/migrations`) — every migration ships a `down` and runs on a scratch
   DB (`sqlite3 /tmp/pustman-scratch.db`); `migration-reviewer`.
 - Hotspots (`crates/pustman/src/main.rs`, `crates/pustman/Cargo.toml`, `Cargo.lock`) — serialized by
