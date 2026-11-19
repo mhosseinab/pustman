@@ -18,6 +18,6 @@ Process:
    - unbounded `.children(...)` over user data; index-derived element IDs
    - missing `key_context`, `track_focus`, `on_action`, `tab_index`, accessible labels
    - errors that never reach the user
-   - GPUI API use that contradicts gpui.rs / Context7 `/websites/rs_gpui` or the pinned source (see the skill's "Framework docs first"); look the API up rather than judging from memory
+   - GPUI API use that contradicts gpui.rs or the pinned source (never Context7/docs.rs, which hold an old crates.io gpui) (see the skill's "Framework docs first"); look the API up rather than judging from memory
    - GPL Zed code pasted in (compare suspicious blocks against the Zed crate named in `.agents/skills/rust-gpui-ui-ux/references/zed-map.md`)
 4. Report each finding as: `file:line` — problem — concrete failure scenario — suggested fix. Order by severity. Say "no findings" if none survive scrutiny; never pad.

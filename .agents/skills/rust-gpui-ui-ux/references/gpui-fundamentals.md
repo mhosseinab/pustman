@@ -1,6 +1,6 @@
 # GPUI fundamentals
 
-Verified against Zed `58849026`. All snippets are original Pustman-style examples; they are shape
+Verified against Zed `0cc1ffb6`. All snippets are original Pustman-style examples; they are shape
 references and were not compiled in isolation — adapt imports to our `ui::prelude::*`.
 
 ## Contexts

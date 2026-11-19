@@ -5,7 +5,7 @@ description: Define GPUI actions, register handlers, bind keys via per-platform 
 
 # Actions & keymaps
 
-Verified against Zed `58849026`. Every user-facing command is an action. Buttons, menus, keybindings
+Verified against Zed `0cc1ffb6`. Every user-facing command is an action. Buttons, menus, keybindings
 and the command palette all dispatch the same action.
 
 ## 1. Declare

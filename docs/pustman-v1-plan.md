@@ -22,8 +22,9 @@ being installed, gives a verified foundation before any UI exists.
 **What does NOT change:**
 - `AGENTS.md` rules (correctness, GPUI, async, style, security, licensing). Steps restate them and
   never relax them.
-- The pinned Zed rev `58849026ec30fb225dc5d07cccf37e8408b85555` for `gpui`, `gpui_platform` and `gpui_tokio`. Bumping it is
-  out of scope.
+- The pinned Zed rev for `gpui`, `gpui_platform` and `gpui_tokio` (`Cargo.toml`). It moved from `58849026` to Zed
+  main `0cc1ffb6b324165ec173a016c5548520c1eeb7ec` (2026-11-19) by human decision, in its own commit. Steps never
+  bump it; S1's Verify still greps the old rev and is historical.
 - The PRD's non-goals (PRD §2): no scripting runtime, no cloud sync, no mock servers, no runner.
 - No Zed GPL code is copied into the repo. We study its patterns only.
 

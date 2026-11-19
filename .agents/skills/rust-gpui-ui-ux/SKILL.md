@@ -7,20 +7,21 @@ description: Build Pustman's native Rust UI with GPUI using Zed's architecture a
 
 GPUI is a GPU-rendered, immediate-mode-*rendering*, retained-*state* UI framework. Views (`Entity<T>`
 that `impl Render`) own state; every frame they rebuild a cheap element tree styled with Tailwind-like
-methods. Zed (commit `58849026`) is our reference app. Copy its *shapes*, write our own code.
+methods. Zed (commit `0cc1ffb6`) is our reference app. Copy its *shapes*, write our own code.
 
 ## Framework docs first
 
 Before writing or reviewing UI code, look up the GPUI API you are about to use. Don't work from memory:
 
 1. **<https://gpui.rs/>** and its examples (<https://gpui.rs/examples>) for patterns: layout, styling, events, focus.
-2. **Context7 `/websites/rs_gpui`** (call `query-docs` with that id, one concept per query) for the exact trait or method.
+   gpui.rs tracks Zed `main`, which is what we pin (Zed `0cc1ffb6`). The app boots with
+   `gpui_platform::application().run(...)`.
+2. **The pinned source** for exact signatures: `~/.cargo/git/checkouts/zed-*/0cc1ffb/crates/gpui` after a build,
+   or the clone recipe in AGENTS.md. `cargo check` has the final word.
 
-Both document the **latest crates.io `gpui`**, not our pinned Zed rev, and they differ in places. For example, the
-docs boot the app with `Application::new()`; on our pin it is `gpui_platform::application()`. For an exact signature, the
-pinned source decides: `~/.cargo/git/checkouts/zed-*/5884902/crates/gpui` after a build, or the clone recipe in
-AGENTS.md. `cargo check` has the final word. When the docs and this skill disagree, check the pin, then report a
-`Decision:` line so the stale one gets fixed.
+**Do not use Context7 or docs.rs for GPUI.** They index the crates.io `gpui` 0.2.2 from October 2025. Its API is
+a year behind ours (for example `Application::new()` instead of `gpui_platform::application()`). When gpui.rs and
+this skill disagree, check the pinned source, then report a `Decision:` line so the stale one gets fixed.
 
 ## Mental model in 8 lines
 

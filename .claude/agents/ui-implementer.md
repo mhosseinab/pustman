@@ -22,7 +22,7 @@ You are a **WORKER** in the implementation-orchestration loop for `pustman-v1`. 
 - The repo has no flag mechanism (`none` — every step is additive): a step that would need one stops and reports instead of inventing one.
 - Prove user-visible behavior end to end (`cargo run -p pustman` — needs a display; without one the proof goes to the deferred gate) and paste what was observed; unit tests alone are not proof.
 - Follow the design system / component library the repo already uses; no new dependency without the step saying so.
-- Before using a GPUI API, look it up in <https://gpui.rs/> and Context7 `/websites/rs_gpui`. Those document the latest crates.io `gpui`; the pinned source decides on conflicts (`rust-gpui-ui-ux` skill, "Framework docs first").
+- Before using a GPUI API, look it up in <https://gpui.rs/> (tracks Zed main, like our pin) and the pinned source; `cargo check` decides. Never use Context7/docs.rs for GPUI: they hold crates.io 0.2.2 from Oct 2025 (`rust-gpui-ui-ux` skill, "Framework docs first").
 - Keyboard and screen-reader paths for anything interactive you add; no color-only state.
 - i18n catalogs are hotspots: add keys only where the step declares them.
 

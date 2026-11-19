@@ -5,9 +5,9 @@ description: Write deterministic GPUI tests for Pustman views, actions, async ta
 
 # GPUI testing
 
-Verified against Zed `58849026` (`crates/gpui/src/app/test_context.rs`, `src/executor.rs`,
-`examples/testing.rs`). Write the failing test first. Look up APIs in gpui.rs / Context7 `/websites/rs_gpui`
-first, with the pinned-rev caveat in `rust-gpui-ui-ux` "Framework docs first".
+Verified against Zed `0cc1ffb6` (`crates/gpui/src/app/test_context.rs`, `src/executor.rs`,
+`examples/testing.rs`). Write the failing test first. Look up APIs in gpui.rs and the pinned source
+first; never Context7/docs.rs for GPUI (see `rust-gpui-ui-ux` "Framework docs first").
 
 ## Basics
 

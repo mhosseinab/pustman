@@ -42,21 +42,21 @@ shared content; edit `.claude/agents/` only for Claude-specific frontmatter.
 
 - Rust **1.98.1**, `edition = "2024"`, rustfmt `style_edition = "2024"` (toolchain pinned in `rust-toolchain.toml`; `style_edition` in `rustfmt.toml`).
 - GPUI is consumed as a **git dependency pinned to one Zed revision**. All patterns and snippets in this
-  repo were verified against Zed commit `58849026ec30fb225dc5d07cccf37e8408b85555` (2026-11-17).
+  repo were verified against Zed commit `0cc1ffb6b324165ec173a016c5548520c1eeb7ec` (Zed main, 2026-11-19).
   `gpui` 0.2.2 is on crates.io, but `gpui_platform` and `gpui_tokio` are not, so pin all three together:
 
   ```toml
   [workspace.dependencies]
-  gpui          = { git = "https://github.com/zed-industries/zed", rev = "58849026ec30fb225dc5d07cccf37e8408b85555" }
-  gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "58849026ec30fb225dc5d07cccf37e8408b85555", features = ["font-kit", "wayland", "x11"] }
-  gpui_tokio    = { git = "https://github.com/zed-industries/zed", rev = "58849026ec30fb225dc5d07cccf37e8408b85555" }
+  gpui          = { git = "https://github.com/zed-industries/zed", rev = "0cc1ffb6b324165ec173a016c5548520c1eeb7ec" }
+  gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "0cc1ffb6b324165ec173a016c5548520c1eeb7ec", features = ["font-kit", "wayland", "x11"] }
+  gpui_tokio    = { git = "https://github.com/zed-industries/zed", rev = "0cc1ffb6b324165ec173a016c5548520c1eeb7ec" }
   ```
 
   Bump the rev deliberately, in its own commit, and re-check the skills' API notes when you do.
 - Linux build needs system packages for `xkbcommon`, `xkbcommon-x11`, `wayland-client`, `x11-xcb`,
   `vulkan`, `fontconfig`, `freetype2` (see Zed's `script/linux` for the canonical list).
 - Reference source: `git clone --depth 1 https://github.com/zed-industries/zed` then
-  `git -C zed fetch --depth 1 origin 58849026ec30fb225dc5d07cccf37e8408b85555 && git -C zed checkout FETCH_HEAD`.
+  `git -C zed fetch --depth 1 origin 0cc1ffb6b324165ec173a016c5548520c1eeb7ec && git -C zed checkout FETCH_HEAD`.
 
 ## Commands
 

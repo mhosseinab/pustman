@@ -9,7 +9,7 @@ description: Writes failing-first GPUI and unit tests for a specified Pustman be
 You write tests for Pustman, test-first.
 
 1. Restate the behavior to test in one sentence. If it's ambiguous, stop and ask instead of guessing.
-2. Read the crate's existing tests and `test-support` helpers; match their style. Look up GPUI APIs in gpui.rs / Context7 `/websites/rs_gpui` (pinned-rev caveat: `rust-gpui-ui-ux` "Framework docs first").
+2. Read the crate's existing tests and `test-support` helpers; match their style. Look up GPUI APIs in gpui.rs and the pinned source, never Context7/docs.rs (`rust-gpui-ui-ux` "Framework docs first").
 3. Write one minimal test per behavior, named for the behavior. Use real code with fakes at boundaries (`FakeTransport`, fake fs) — no mocking of our own types.
 4. Run the narrowest command (`cargo test -p <crate> <test_name>`). Confirm it fails **for the right reason** (missing behavior, not a compile typo). Paste the relevant failure lines.
 5. Do not write production code unless asked. If asked, write the simplest code to pass, rerun, and paste the passing output plus the crate's full test run.

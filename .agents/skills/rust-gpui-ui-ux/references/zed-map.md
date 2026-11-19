@@ -1,6 +1,6 @@
 # Where to look in Zed
 
-Paths are relative to a Zed checkout at `58849026ec30fb225dc5d07cccf37e8408b85555`.
+Paths are relative to a Zed checkout at `0cc1ffb6b324165ec173a016c5548520c1eeb7ec`.
 License column: **A** = Apache-2.0 (may depend on / adapt), **G** = GPL-3.0 (study only, reimplement).
 
 | Pattern | Zed path | Lic. | Pustman analogue |

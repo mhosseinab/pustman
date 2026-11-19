@@ -1,7 +1,7 @@
 # Tailwind (Figma reference) → GPUI
 
 Method names verified against `crates/gpui/src/styled.rs` and `crates/gpui_macros/src/styles.rs` at Zed
-`58849026`. Tailwind fractions/decimals become `_` and `p`: `w-1/2` → `w_1_2()`, `gap-1.5` → `gap_1p5()`.
+`0cc1ffb6`. Tailwind fractions/decimals become `_` and `p`: `w-1/2` → `w_1_2()`, `gap-1.5` → `gap_1p5()`.
 Generated suffixes on spacing/size methods: `0 0p5 1 1p5 2 2p5 3 3p5 4 5 6 7 8 9 10 11 12 16 20 24 32 40 48 56 64 72 80 96 112 128`,
 pixel forms (`1px`…`32px`), fractions, `full`, `auto` (where allowed). Anything else: `.w(px(…))`, `.p(rems(…))`.
 

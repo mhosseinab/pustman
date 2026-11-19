@@ -41,9 +41,9 @@ git = { path = "crates/git" }
 # two gpuis and fail with confusing type mismatches.
 #
 
-gpui = { git = "https://github.com/zed-industries/zed", rev = "58849026ec30fb225dc5d07cccf37e8408b85555" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "58849026ec30fb225dc5d07cccf37e8408b85555", features = ["font-kit", "wayland", "x11"] }
-gpui_tokio = { git = "https://github.com/zed-industries/zed", rev = "58849026ec30fb225dc5d07cccf37e8408b85555" }
+gpui = { git = "https://github.com/zed-industries/zed", rev = "0cc1ffb6b324165ec173a016c5548520c1eeb7ec" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "0cc1ffb6b324165ec173a016c5548520c1eeb7ec", features = ["font-kit", "wayland", "x11"] }
+gpui_tokio = { git = "https://github.com/zed-industries/zed", rev = "0cc1ffb6b324165ec173a016c5548520c1eeb7ec" }
 
 #
 # Third-party
