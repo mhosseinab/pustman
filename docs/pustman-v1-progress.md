@@ -85,7 +85,7 @@ Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 0 · un
 | S12 | `ReqwestTransport`: settings, manual redirects, TLS toggle, timing spike (D2) | **passed** | 5 | `5f1a12d` | [S12](progress/pustman-v1/steps/S12.md) | M1 → #31 (medium); LOW #30 #32 #33 #34 #48 #49 |
 | S13 | Send pipeline: variable resolution, auth (Basic/Bearer/API key), unresolved secrets | **in_progress** | | | [S13a](progress/pustman-v1/steps/S13a.md) `64d0014` · [S13b](progress/pustman-v1/steps/S13b.md) `4bb7e1d` · [S13c](progress/pustman-v1/steps/S13c.md) `6535a70` | LOW #43–#47 #59 #60 |
 | S14 | Request bodies, file refs, auto headers, large response spill | **in_progress** | | | [S14b](progress/pustman-v1/steps/S14b.md) `1cf147b` · [S14c](progress/pustman-v1/steps/S14c.md) `96dc3e8` · S14a pending | LOW #26–#29 #35 #50 |
-| S15 | Cookie jar per workspace | **in_progress** | | | [S15a](progress/pustman-v1/steps/S15a.md) `a560082` · S15b in review | LOW #51–#53 |
+| S15 | Cookie jar per workspace | **in_progress** | | | [S15a](progress/pustman-v1/steps/S15a.md) `a560082` · [S15b](progress/pustman-v1/steps/S15b.md) `dd5d48f` | LOW #51–#53 #61 |
 | S16 | History recording with redaction, 1 MB cap, retention | pending | 0 | | |  |
 | S17 | `settings` crate | **passed** | 3 | `47b2dc6` | [S17](progress/pustman-v1/steps/S17.md) | split into 3 chunks after 3 denied dispatches; 2 LOW → #15 #16 |
 | S18 | `theme` crate with bundled light and dark themes | **passed** | 2 | `2fedd34` | [S18](progress/pustman-v1/steps/S18.md) | 1 MEDIUM fixed; 3 LOW → #17 #18 #19 |
