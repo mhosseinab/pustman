@@ -90,7 +90,7 @@ Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 0 · un
 | S17 | `settings` crate | **passed** | 3 | `47b2dc6` | [S17](progress/pustman-v1/steps/S17.md) | split into 3 chunks after 3 denied dispatches; 2 LOW → #15 #16 |
 | S18 | `theme` crate with bundled light and dark themes | **passed** | 2 | `2fedd34` | [S18](progress/pustman-v1/steps/S18.md) | 1 MEDIUM fixed; 3 LOW → #17 #18 #19 |
 | S19 | `ui` design-system crate: tokens and base components | **passed** | | | [S19a](progress/pustman-v1/steps/S19a.md) `dab4417` · [S19b](progress/pustman-v1/steps/S19b.md) `61a6209` · [S19c](progress/pustman-v1/steps/S19c.md) `c37855a` | LOW #54–#58, #62–#65 |
-| S20 | `text_input` crate: single- and multi-line editing | pending | 0 | | |  |
+| S20 | `text_input` crate: single- and multi-line editing | in_progress | 1 | S20a `4944955` ([S20a](progress/pustman-v1/steps/S20a.md)) | #69 #70 |  |
 | S21 | `pustman_actions` + complete default keymaps (D10) | **passed** | 1 | `0ea7e26` | [S21](progress/pustman-v1/steps/S21.md) | 3 LOW → #12 #13 #14; carry-forward to S22 |
 | S22 | `pustman` binary + `workspace` shell (window, docks, panes/tabs, status bar, toasts) | **in_progress** | | | [S22a](progress/pustman-v1/steps/S22a.md) `78e77d2` · [S22c](progress/pustman-v1/steps/S22c.md) `6db973a` |  |
 | S23 | Tab and layout restore | pending | 0 | | |  |
