@@ -1,0 +1,14 @@
+{
+  "theme": "system",
+  "ui_font_size": 16,
+  "buffer_font_size": 14,
+  "request": {
+    "timeout_ms": 30000,
+    "follow_redirects": true,
+    "max_redirects": 10,
+    "verify_tls": true,
+    "response_pretty_limit_mb": 10
+  },
+  "history_retention_days": 30,
+  "console_max_entries": 5000
+}
