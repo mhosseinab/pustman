@@ -16,6 +16,7 @@
 
 mod client;
 mod error;
+mod file_ref;
 mod pipeline;
 mod request;
 mod request_auth;
@@ -29,6 +30,7 @@ mod transport;
 
 pub use client::{HttpClient, SendEvent};
 pub use error::TransportError;
+pub use file_ref::resolve_file_ref;
 pub use pipeline::{PipelineError, Warning, resolve_request};
 pub use request::{Header, RequestBody, ResolvedRequest, SendSettings};
 pub use request_auth::{AppliedAuth, apply_auth};
