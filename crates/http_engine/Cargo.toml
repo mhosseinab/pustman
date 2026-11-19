@@ -44,6 +44,7 @@ hyper-util = { workspace = true, features = ["client-legacy", "tokio"] }
 publicsuffix.workspace = true
 reqwest = { workspace = true, features = ["http2"] }
 rustls.workspace = true
+secrets.workspace = true
 serde_json.workspace = true
 # `tempfile` owns the spill temp file: 0600 in the OS temp dir, removed on drop
 # (REQ-RESP-06, REQ-NFR-03) — never hand-rolled temp naming or removal.
@@ -68,3 +69,5 @@ gpui = { workspace = true, features = ["test-support"] }
 # Enabling our own `test-support` feature is what makes `TestServer` visible to this
 # crate's integration tests: dev-dependencies unify features with the test build.
 http_engine = { path = ".", features = ["test-support"] }
+# `MemorySecretStore` for the secret-lookup tests of `prepare`.
+secrets = { workspace = true, features = ["test-support"] }

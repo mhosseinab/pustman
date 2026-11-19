@@ -4,6 +4,9 @@
 //! A request reaches the wire as a [`ResolvedRequest`] (PRD §7 resolves `{{variables}}`
 //! before this crate sees it) and comes back as a [`Response`] or a [`TransportError`].
 //! 4xx and 5xx are responses, not errors: they render normally (§8.6).
+//! [`HttpClient::send_request`] takes the unresolved request instead and runs [`prepare`]
+//! first: the secrets it references are read from the keychain and an unset one fails the
+//! send before the transport is called (REQ-VAR-SHARE-02).
 //!
 //! [`HttpClient`] is the GPUI entity that owns an in-flight send. It holds the task, so
 //! dropping it is a deliberate act: [`HttpClient::cancel`] drops it, which aborts the
@@ -19,6 +22,7 @@ mod cookies;
 mod error;
 mod file_ref;
 mod pipeline;
+mod prepare;
 mod request;
 mod request_auth;
 mod reqwest_transport;
@@ -30,11 +34,12 @@ mod test_server;
 mod test_support;
 mod transport;
 
-pub use client::{HttpClient, SendEvent};
+pub use client::{HttpClient, SecretKeyLookup, SendEvent, SendInput, SendOutcome};
 pub use cookies::{CookieEntry, CookieError, CookieJar};
 pub use error::TransportError;
 pub use file_ref::resolve_file_ref;
 pub use pipeline::{PipelineError, Warning, resolve_request};
+pub use prepare::{Prepared, prepare};
 pub use request::{Header, RequestBody, ResolvedRequest, SendSettings};
 pub use request_auth::{AppliedAuth, apply_auth};
 pub use reqwest_transport::ReqwestTransport;
