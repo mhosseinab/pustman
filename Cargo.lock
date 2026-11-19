@@ -4480,6 +4480,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "text_input"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "gpui",
+ "log",
+ "ui",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "theme"
 version = "0.1.0"
 dependencies = [
