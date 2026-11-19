@@ -40,7 +40,7 @@ shared content; edit `.claude/agents/` only for Claude-specific frontmatter.
 
 ## Toolchain & dependencies
 
-- Rust **1.98.1**, `edition = "2024"`, rustfmt `style_edition = "2024"` (pin in `rust-toolchain.toml`).
+- Rust **1.98.1**, `edition = "2024"`, rustfmt `style_edition = "2024"` (toolchain pinned in `rust-toolchain.toml`; `style_edition` in `rustfmt.toml`).
 - GPUI is consumed as a **git dependency pinned to one Zed revision**. All patterns and snippets in this
   repo were verified against Zed commit `58849026ec30fb225dc5d07cccf37e8408b85555` (2026-11-17).
   `gpui` 0.2.2 is on crates.io, but `gpui_platform` and `gpui_tokio` are not, so pin all three together:

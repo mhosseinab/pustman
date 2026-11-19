@@ -15,7 +15,7 @@ the code disagree, the code is right and this file is a bug.
 | Module | Owns | Must not import | Entry points |
 | --- | --- | --- | --- |
 | `pustman` *(S11–S48)* | binary: `main.rs`, init order, window setup, app menus | — (top) | `crates/pustman/src/main.rs` |
-| `api_model` | Request/Collection/Folder/Environment/Variable/Auth types; Postman v2.1 import/export; the one `redact()` (D8) | IO, `gpui` | `api_model::redact` |
+| `api_model` | Request/Collection/Folder/Environment/Variable/Auth types; Postman v2.1 import/export; the shared `redact_*` helpers (D8) | IO, `gpui` | `api_model::{redact_text, redact_headers, redact_url}` |
 | `variables` | `{{var}}` resolution, scopes (narrowest wins), dynamic vars, cycle detection | `gpui` | `variables::resolve` |
 | `workspace_store` | on-disk workspace format (PRD §6.1), deterministic atomic writes, file watcher, conflict detection, item ↔ file mapping | `gpui`, UI crates | `workspace_store::{open, save_item, watch}` |
 | `storage` | SQLite local store (rusqlite, D6): history, tabs, layout, local values, cookies, kv | `gpui`, UI crates | `storage::LocalStore` |
@@ -34,14 +34,14 @@ Init order in `main.rs`: `settings → theme → ui → workspace → feature cr
 ## Data flow (the flows that matter)
 
 1. **Send:** URL bar → `variables::resolve` → `http_engine::Transport::send` → response →
-   `response_viewer` + a `console` entry via `api_model::redact`. Failure: typed `TransportError`
+   `response_viewer` + a `console` entry via `api_model::{redact_text, redact_headers, redact_url}`. Failure: typed `TransportError`
    (plan §5) → toast + Console row. Idempotency: one `pending_send` Task per tab; replacing it
    cancels the previous request.
 2. **Save:** edit → `workspace_store::save_item` (temp file + fsync + rename; deterministic JSON)
    → `git diff` shows exactly one changed file (REQ-WSP-02).
 3. **External change:** `workspace_store::watch` → tree/tab update within 1 s; unsaved edits kept
    and a "Changed on disk" bar appears (REQ-COLLAB-01).
-4. **History:** response → `redact()` → `storage::LocalStore` (SQLite); secret values live only in
+4. **History:** response → `redact_text`/`redact_headers` → `storage::LocalStore` (SQLite); secret values live only in
    `secrets` (keychain) and never in workspace files (REQ-WSP-06).
 5. **Import/export:** Postman v2.1 JSON → `api_model` → workspace files; scripts preserved verbatim,
    never run (REQ-IO-06). v2.1 is the import/export format only — the on-disk format is PRD §6.1.
