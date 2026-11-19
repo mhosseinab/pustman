@@ -27,6 +27,8 @@ test-support = [
 [dependencies]
 api_model.workspace = true
 base64.workspace = true
+# The RFC 6265 cookie store behind the per-workspace cookie jar (REQ-HTTP-08).
+cookie_store.workspace = true
 futures.workspace = true
 gpui.workspace = true
 gpui_tokio.workspace = true
@@ -37,6 +39,9 @@ gpui_tokio.workspace = true
 # its `TokioIo` adapter.
 hyper.workspace = true
 hyper-util = { workspace = true, features = ["client-legacy", "tokio"] }
+# The Mozilla Public Suffix List parser behind the cookie jar's public-suffix rejection
+# (RFC 6265 §5.3 step 5); the same `publicsuffix::List` type cookie_store takes.
+publicsuffix.workspace = true
 reqwest = { workspace = true, features = ["http2"] }
 rustls.workspace = true
 serde_json.workspace = true
@@ -44,6 +49,8 @@ serde_json.workspace = true
 # (REQ-RESP-06, REQ-NFR-03) — never hand-rolled temp naming or removal.
 tempfile.workspace = true
 thiserror.workspace = true
+# Cookie expiry is a wall-clock time (REQ-HTTP-08), as in `storage`.
+time.workspace = true
 # `fs` is how the spawned tokio task writes the spilled tail of a response body.
 tokio = { workspace = true, features = ["fs"] }
 url.workspace = true

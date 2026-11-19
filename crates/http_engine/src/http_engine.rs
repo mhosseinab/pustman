@@ -15,6 +15,7 @@
 //! `test-support` feature). What reaches a real server is [`ReqwestTransport`].
 
 mod client;
+mod cookies;
 mod error;
 mod file_ref;
 mod pipeline;
@@ -30,6 +31,7 @@ mod test_support;
 mod transport;
 
 pub use client::{HttpClient, SendEvent};
+pub use cookies::{CookieEntry, CookieError, CookieJar};
 pub use error::TransportError;
 pub use file_ref::resolve_file_ref;
 pub use pipeline::{PipelineError, Warning, resolve_request};
