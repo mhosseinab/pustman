@@ -84,7 +84,7 @@ Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 0 · un
 | S11 | `http_engine` core: transport trait, fake, error taxonomy, send/cancel | **passed** | 2 | `f8846db` | [S11](progress/pustman-v1/steps/S11.md) | 3 MEDIUM fixed: fmt false-claim, URL userinfo leak, Debug secret leak |
 | S12 | `ReqwestTransport`: settings, manual redirects, TLS toggle, timing spike (D2) | **passed** | 5 | `5f1a12d` | [S12](progress/pustman-v1/steps/S12.md) | M1 → #31 (medium); LOW #30 #32 #33 #34 #48 #49 |
 | S13 | Send pipeline: variable resolution, auth (Basic/Bearer/API key), unresolved secrets | **in_progress** | | | [S13a](progress/pustman-v1/steps/S13a.md) `64d0014` · [S13b](progress/pustman-v1/steps/S13b.md) `4bb7e1d` · S13c pending | LOW #43–#47 |
-| S14 | Request bodies, file refs, auto headers, large response spill | **in_progress** | | | [S14b](progress/pustman-v1/steps/S14b.md) `1cf147b` · S14a pending · S14c in review | LOW #26–#29 #35 |
+| S14 | Request bodies, file refs, auto headers, large response spill | **in_progress** | | | [S14b](progress/pustman-v1/steps/S14b.md) `1cf147b` · [S14c](progress/pustman-v1/steps/S14c.md) `96dc3e8` · S14a pending | LOW #26–#29 #35 #50 |
 | S15 | Cookie jar per workspace | pending | 0 | | |  |
 | S16 | History recording with redaction, 1 MB cap, retention | pending | 0 | | |  |
 | S17 | `settings` crate | **passed** | 3 | `47b2dc6` | [S17](progress/pustman-v1/steps/S17.md) | split into 3 chunks after 3 denied dispatches; 2 LOW → #15 #16 |

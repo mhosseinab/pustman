@@ -127,3 +127,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-19: **S13a passed → `64d0014`.** Rebased onto main with `--onto` past the old S12 merge base. Its MEDIUM-1 was fixed by S12. VERIFY OK.
 - 2026-11-19: **S13b passed → `4bb7e1d`.** Rebased with `--onto` and got VERIFY OK. Round 5 was a no-shell scoped review, so the driver's verify is the run evidence.
 - 2026-11-19: **S14b passed → `1cf147b`.** Rebased onto main past S13a/S13b, with one mod-list conflict resolved by keeping both sides. VERIFY OK. LOW findings were already filed as #26–#29 and #35.
+- 2026-11-19: **S14c passed → `96dc3e8`.** Cycle 1 PASS_WITH_ISSUES; rebased onto main past S14b (Cargo.toml dep conflict kept both); PASS 70, VERIFY OK. LOW → #50.
