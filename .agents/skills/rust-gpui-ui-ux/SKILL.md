@@ -9,6 +9,19 @@ GPUI is a GPU-rendered, immediate-mode-*rendering*, retained-*state* UI framewor
 that `impl Render`) own state; every frame they rebuild a cheap element tree styled with Tailwind-like
 methods. Zed (commit `58849026`) is our reference app. Copy its *shapes*, write our own code.
 
+## Framework docs first
+
+Before writing or reviewing UI code, look up the GPUI API you are about to use. Don't work from memory:
+
+1. **<https://gpui.rs/>** and its examples (<https://gpui.rs/examples>) for patterns: layout, styling, events, focus.
+2. **Context7 `/websites/rs_gpui`** (call `query-docs` with that id, one concept per query) for the exact trait or method.
+
+Both document the **latest crates.io `gpui`**, not our pinned Zed rev, and they differ in places. For example, the
+docs boot the app with `Application::new()`; on our pin it is `gpui_platform::application()`. For an exact signature, the
+pinned source decides: `~/.cargo/git/checkouts/zed-*/5884902/crates/gpui` after a build, or the clone recipe in
+AGENTS.md. `cargo check` has the final word. When the docs and this skill disagree, check the pin, then report a
+`Decision:` line so the stale one gets fixed.
+
 ## Mental model in 8 lines
 
 1. **State lives in entities.** `cx.new(|cx| View::new(cx))` → `Entity<View>`. Hold `WeakEntity` for back-references.
