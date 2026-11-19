@@ -10,14 +10,15 @@ use std::cell::{Cell, RefCell};
 use std::ops::Range;
 
 use gpui::{
-    Bounds, CursorStyle, Element, ElementId, ElementInputHandler, Entity, EntityInputHandler,
-    EventEmitter, Focusable, GlobalElementId, LayoutId, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, PaintQuad, Point, Role, ShapedLine, Style, TextAlign, TextRun,
-    UTF16Selection, UnderlineStyle, actions, fill, point, relative, size,
+    Bounds, ClipboardItem, CursorStyle, Element, ElementId, ElementInputHandler, Entity,
+    EntityInputHandler, EventEmitter, Focusable, GlobalElementId, LayoutId, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Point, Role, ShapedLine, Style,
+    TextAlign, TextRun, UTF16Selection, UnderlineStyle, actions, fill, point, relative, size,
 };
 use ui::prelude::*;
 
 use crate::buffer::Buffer;
+use crate::editing::{Record, Selection, Transaction, UndoStack};
 
 /// The key context the widget's editing keys bind to (`crate::init`). This is the
 /// widget's own context — like Zed's `Editor` — not a PRD action context.
@@ -45,6 +46,16 @@ actions!(
         SelectToHome,
         SelectToEnd,
         Enter,
+        /// Copies the selection to the clipboard.
+        Copy,
+        /// Cuts the selection to the clipboard.
+        Cut,
+        /// Pastes the clipboard over the selection.
+        Paste,
+        /// Undoes the last edit.
+        Undo,
+        /// Redoes the last undone edit.
+        Redo,
     ]
 );
 
@@ -65,6 +76,7 @@ pub struct TextInput {
     selected_range: Range<usize>,
     selection_reversed: bool,
     marked_range: Option<Range<usize>>,
+    undo_stack: UndoStack,
     placeholder: SharedString,
     read_only: bool,
     focus_handle: FocusHandle,
@@ -85,6 +97,7 @@ impl TextInput {
             selected_range: 0..0,
             selection_reversed: false,
             marked_range: None,
+            undo_stack: UndoStack::new(),
             placeholder: SharedString::default(),
             read_only: false,
             focus_handle: cx.focus_handle(),
@@ -118,6 +131,9 @@ impl TextInput {
     /// subscriber that only cares about user input (validation, dirty state) should not
     /// have to know which path changed the text, and a subscriber that set the text
     /// itself can ignore its own event.
+    ///
+    /// `Decision:` it also clears the undo history — a programmatic replacement is not
+    /// a user edit, so there is nothing to undo into.
     pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
         let text = single_line(text);
         self.buffer.replace(0..self.buffer.len(), &text);
@@ -125,6 +141,7 @@ impl TextInput {
         self.selected_range = end..end;
         self.selection_reversed = false;
         self.marked_range = None;
+        self.undo_stack.clear();
         cx.emit(TextInputEvent::Changed);
         cx.notify();
     }
@@ -142,10 +159,28 @@ impl TextInput {
         }
     }
 
+    /// The selection as an undo-model snapshot.
+    fn selection(&self) -> Selection {
+        Selection {
+            range: self.selected_range.clone(),
+            reversed: self.selection_reversed,
+        }
+    }
+
+    /// Put the selection at `selection`, clamped to the text so a stale offset from an
+    /// undo transaction can never point past the buffer.
+    fn set_selection(&mut self, selection: Selection) {
+        let end = self.buffer.len();
+        let start = selection.range.start.min(end);
+        self.selected_range = start..selection.range.end.clamp(start, end);
+        self.selection_reversed = selection.reversed;
+    }
+
     fn move_to(&mut self, offset: usize, window: &Window, cx: &mut Context<Self>) {
         let offset = offset.min(self.buffer.len());
         self.selected_range = offset..offset;
         self.selection_reversed = false;
+        self.undo_stack.break_coalescing();
         window.notify_text_selection_changed(&self.focus_handle);
         cx.notify();
     }
@@ -161,6 +196,7 @@ impl TextInput {
             self.selection_reversed = !self.selection_reversed;
             self.selected_range = self.selected_range.end..self.selected_range.start;
         }
+        self.undo_stack.break_coalescing();
         window.notify_text_selection_changed(&self.focus_handle);
         cx.notify();
     }
@@ -188,19 +224,9 @@ impl TextInput {
         line.closest_index_for_x(position.x - bounds.left())
     }
 
-    /// A UTF-16 offset from the platform, as the buffer's UTF-8 byte offset. The walk
-    /// stops at the text end, so an out-of-range offset clamps instead of panicking.
+    /// A UTF-16 offset from the platform, as the buffer's UTF-8 byte offset.
     fn offset_from_utf16(&self, utf16_offset: usize) -> usize {
-        let mut utf8_offset = 0;
-        let mut utf16_count = 0;
-        for character in self.buffer.chars() {
-            if utf16_count >= utf16_offset {
-                break;
-            }
-            utf16_count += character.len_utf16();
-            utf8_offset += character.len_utf8();
-        }
-        utf8_offset
+        utf8_offset_for_utf16(self.buffer.chars(), utf16_offset)
     }
 
     /// A buffer byte offset as the UTF-16 offset the platform speaks.
@@ -304,34 +330,148 @@ impl TextInput {
         self.select_to(self.buffer.len(), window, cx);
     }
 
+    /// The one path every text mutation takes: replace `range` with `text`, put the
+    /// selection where `selection_after` says — a caret right after the inserted text
+    /// when it is `None` — and record the edit in the [`UndoStack`] the way `record`
+    /// says. Typing coalesces, paste and cut stand alone, an IME's composition becomes
+    /// one transaction, and undo/redo move transactions instead of recording.
+    fn edit(
+        &mut self,
+        range: Range<usize>,
+        text: &str,
+        selection_after: Option<Selection>,
+        record: Record,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let selection_before = self.selection();
+        let old_text = self.buffer.slice(range.clone());
+        let text = single_line(text);
+        self.buffer.replace(range.clone(), &text);
+        self.marked_range = None;
+        let selection_after =
+            selection_after.unwrap_or_else(|| Selection::caret(range.start + text.len()));
+        self.set_selection(selection_after);
+        window.notify_text_input_changed(&self.focus_handle);
+        cx.emit(TextInputEvent::Changed);
+        cx.notify();
+        self.undo_stack.record(
+            Transaction {
+                replaced_range: range,
+                old_text,
+                new_text: text.into_owned(),
+                selection_before,
+                selection_after: self.selection(),
+            },
+            record,
+        );
+    }
+
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         if self.read_only {
             return;
         }
-        if self.selected_range.is_empty() {
+        let range = if self.selected_range.is_empty() {
             let previous = self.buffer.previous_boundary(self.cursor_offset());
             if self.cursor_offset() == previous {
                 window.play_system_bell();
                 return;
             }
-            self.select_to(previous, window, cx);
-        }
-        self.replace_text_in_range(None, "", window, cx);
+            previous..self.cursor_offset()
+        } else {
+            self.selected_range.clone()
+        };
+        self.edit(range, "", None, Record::Atomic, window, cx);
     }
 
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
         if self.read_only {
             return;
         }
-        if self.selected_range.is_empty() {
+        let range = if self.selected_range.is_empty() {
             let next = self.buffer.next_boundary(self.cursor_offset());
             if self.cursor_offset() == next {
                 window.play_system_bell();
                 return;
             }
-            self.select_to(next, window, cx);
+            self.cursor_offset()..next
+        } else {
+            self.selected_range.clone()
+        };
+        self.edit(range, "", None, Record::Atomic, window, cx);
+    }
+
+    /// `Decision:` copy with no selection is a no-op — it must not clobber a clipboard
+    /// holding something else — and copy works in read-only mode.
+    fn copy(&mut self, _: &Copy, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.selected_range.is_empty() {
+            return;
         }
-        self.replace_text_in_range(None, "", window, cx);
+        let text = self.buffer.slice(self.selected_range.clone());
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+    }
+
+    /// `Decision:` cut with no selection is a no-op too, like copy; cut and paste are
+    /// no-ops in read-only mode.
+    fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only || self.selected_range.is_empty() {
+            return;
+        }
+        let text = self.buffer.slice(self.selected_range.clone());
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        let range = self.selected_range.clone();
+        self.edit(range, "", None, Record::Atomic, window, cx);
+    }
+
+    /// `Decision:` paste replaces the selection and leaves the caret after the pasted
+    /// text; `single_line` turns pasted line breaks into spaces.
+    fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return;
+        };
+        let range = self.selected_range.clone();
+        self.edit(range, &text, None, Record::Atomic, window, cx);
+    }
+
+    /// `Decision:` undo and redo are no-ops in read-only mode — the text must never
+    /// change there — and undoing into an empty stack rings the bell instead.
+    fn undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
+        let Some(transaction) = self.undo_stack.undo() else {
+            window.play_system_bell();
+            return;
+        };
+        self.edit(
+            transaction.new_text_range(),
+            &transaction.old_text,
+            Some(transaction.selection_before.clone()),
+            Record::None,
+            window,
+            cx,
+        );
+    }
+
+    fn redo(&mut self, _: &Redo, window: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
+        let Some(transaction) = self.undo_stack.redo() else {
+            window.play_system_bell();
+            return;
+        };
+        self.edit(
+            transaction.replaced_range.clone(),
+            &transaction.new_text,
+            Some(transaction.selection_after.clone()),
+            Record::None,
+            window,
+            cx,
+        );
     }
 
     /// `Decision:` Enter submits and never inserts a newline — this is the single-line
@@ -410,8 +550,11 @@ impl EntityInputHandler for TextInput {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.selected_range = self.range_from_utf16(&range_utf16);
-        self.selection_reversed = false;
+        self.set_selection(Selection {
+            range: self.range_from_utf16(&range_utf16),
+            reversed: false,
+        });
+        self.undo_stack.break_coalescing();
         window.notify_text_selection_changed(&self.focus_handle);
         cx.notify();
     }
@@ -441,6 +584,9 @@ impl EntityInputHandler for TextInput {
 
     fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
+        // The composition ended without a commit: its updates still deserve one undo
+        // step.
+        self.undo_stack.finish_composition();
         window.notify_text_input_changed(&self.focus_handle);
         cx.notify();
     }
@@ -460,15 +606,16 @@ impl EntityInputHandler for TextInput {
             .map(|range_utf16| self.range_from_utf16(range_utf16))
             .or_else(|| self.marked_range.clone())
             .unwrap_or_else(|| self.selected_range.clone());
-        let new_text = single_line(new_text);
-        self.buffer.replace(range.clone(), &new_text);
-        let cursor = range.start + new_text.len();
-        self.selected_range = cursor..cursor;
-        self.selection_reversed = false;
-        self.marked_range = None;
-        window.notify_text_input_changed(&self.focus_handle);
-        cx.emit(TextInputEvent::Changed);
-        cx.notify();
+        // An IME's commit is the last update of its composition: it merges into the
+        // composition's transaction and closes it, so a composition undoes as one
+        // edit. Plain input is typing.
+        let record = if self.undo_stack.has_composition() {
+            Record::Composition
+        } else {
+            Record::Typing
+        };
+        self.edit(range, new_text, None, record, window, cx);
+        self.undo_stack.finish_composition();
     }
 
     fn replace_and_mark_text_in_range(
@@ -488,30 +635,35 @@ impl EntityInputHandler for TextInput {
             .or_else(|| self.marked_range.clone())
             .unwrap_or_else(|| self.selected_range.clone());
         let new_text = single_line(new_text);
-        self.buffer.replace(range.clone(), &new_text);
+        // The platform's selection is relative to the text it just inserted, so it maps
+        // through that text — not through the buffer it is about to land in.
+        let selection_after = new_selected_range_utf16.as_ref().map(|selected| {
+            let inserted_length_utf16 = new_text.encode_utf16().count();
+            let start =
+                utf8_offset_for_utf16(new_text.chars(), selected.start.min(inserted_length_utf16));
+            let end =
+                utf8_offset_for_utf16(new_text.chars(), selected.end.min(inserted_length_utf16));
+            Selection {
+                range: range.start + start..range.start + end,
+                reversed: false,
+            }
+        });
+        // A composition update is not an edit of its own: it merges into the
+        // composition's transaction, which is recorded once when the composition
+        // commits (see `replace_text_in_range`).
+        self.edit(
+            range.clone(),
+            &new_text,
+            selection_after,
+            Record::Composition,
+            window,
+            cx,
+        );
         self.marked_range = if new_text.is_empty() {
             None
         } else {
             Some(range.start..range.start + new_text.len())
         };
-        // The platform's selection is relative to the text it just inserted.
-        let insertion_start_utf16 = self.offset_to_utf16(range.start);
-        let inserted_length_utf16 = new_text.encode_utf16().count();
-        self.selected_range = new_selected_range_utf16
-            .map(|selected| {
-                self.range_from_utf16(
-                    &(insertion_start_utf16 + selected.start.min(inserted_length_utf16)
-                        ..insertion_start_utf16 + selected.end.min(inserted_length_utf16)),
-                )
-            })
-            .unwrap_or_else(|| {
-                let cursor = range.start + new_text.len();
-                cursor..cursor
-            });
-        self.selection_reversed = false;
-        window.notify_text_input_changed(&self.focus_handle);
-        cx.emit(TextInputEvent::Changed);
-        cx.notify();
     }
 
     fn bounds_for_range(
@@ -775,6 +927,11 @@ impl Render for TextInput {
             .on_action(cx.listener(Self::select_to_home))
             .on_action(cx.listener(Self::select_to_end))
             .on_action(cx.listener(Self::enter))
+            .on_action(cx.listener(Self::copy))
+            .on_action(cx.listener(Self::cut))
+            .on_action(cx.listener(Self::paste))
+            .on_action(cx.listener(Self::undo))
+            .on_action(cx.listener(Self::redo))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
@@ -802,14 +959,44 @@ impl Render for TextInput {
     }
 }
 
-/// A single-line input never stores line breaks: CR and LF in pasted or IME text become
-/// spaces (Enter submits; a multi-line field is S20c's `TextArea`).
+/// A single-line input never stores line breaks: CRLF, CR and LF in pasted or IME text
+/// become one space each (Enter submits; a multi-line field is S20c's `TextArea`).
 fn single_line(text: &str) -> Cow<'_, str> {
     if text.contains(['\r', '\n']) {
-        Cow::Owned(text.replace(['\r', '\n'], " "))
+        let mut single = String::with_capacity(text.len());
+        let mut characters = text.chars().peekable();
+        while let Some(character) = characters.next() {
+            match character {
+                '\r' => {
+                    if characters.peek() == Some(&'\n') {
+                        characters.next();
+                    }
+                    single.push(' ');
+                }
+                '\n' => single.push(' '),
+                _ => single.push(character),
+            }
+        }
+        Cow::Owned(single)
     } else {
         Cow::Borrowed(text)
     }
+}
+
+/// A UTF-16 offset from the platform, as a UTF-8 byte offset into `characters`' text.
+/// The walk stops at the text end, so an out-of-range offset clamps instead of
+/// panicking.
+fn utf8_offset_for_utf16(characters: impl Iterator<Item = char>, utf16_offset: usize) -> usize {
+    let mut utf8_offset = 0;
+    let mut utf16_count = 0;
+    for character in characters {
+        if utf16_count >= utf16_offset {
+            break;
+        }
+        utf16_count += character.len_utf16();
+        utf8_offset += character.len_utf8();
+    }
+    utf8_offset
 }
 
 #[cfg(test)]

@@ -8,10 +8,13 @@
 //!   answers to under the widget's own [`input::TEXT_INPUT_CONTEXT`].
 //!
 //! The buffer under it ([`buffer`]) is a gap buffer, so typing at the cursor never
-//! copies the whole text; see the module docs there for the decision. Clipboard and undo
-//! are S20b; a multi-line `TextArea` and text highlights are S20c.
+//! copies the whole text; see the module docs there for the decision. Undo and redo run
+//! on the transaction model in [`editing`]; copy, cut and paste go through the same
+//! edit path and the platform clipboard. A multi-line `TextArea` and text highlights
+//! are S20c.
 
 pub mod buffer;
+pub mod editing;
 pub mod input;
 
 pub use input::{TextInput, TextInputEvent};
@@ -19,9 +22,9 @@ pub use input::{TextInput, TextInputEvent};
 use gpui::{App, KeyBinding};
 
 use input::{
-    Backspace, Delete, End, Enter, Home, Left, Right, SelectAll, SelectLeft, SelectRight,
-    SelectToEnd, SelectToHome, SelectWordLeft, SelectWordRight, TEXT_INPUT_CONTEXT, WordLeft,
-    WordRight,
+    Backspace, Copy, Cut, Delete, End, Enter, Home, Left, Paste, Redo, Right, SelectAll,
+    SelectLeft, SelectRight, SelectToEnd, SelectToHome, SelectWordLeft, SelectWordRight,
+    TEXT_INPUT_CONTEXT, Undo, WordLeft, WordRight,
 };
 
 /// Set the widget up: bind the editing keys every [`TextInput`] answers to.
@@ -46,8 +49,13 @@ pub fn init(cx: &mut App) {
     } else {
         "ctrl-a"
     };
+    let (copy, cut, paste, undo, redo) = if cfg!(target_os = "macos") {
+        ("cmd-c", "cmd-x", "cmd-v", "cmd-z", "cmd-shift-z")
+    } else {
+        ("ctrl-c", "ctrl-x", "ctrl-v", "ctrl-z", "ctrl-shift-z")
+    };
 
-    cx.bind_keys([
+    let mut bindings = vec![
         KeyBinding::new("backspace", Backspace, Some(TEXT_INPUT_CONTEXT)),
         KeyBinding::new("delete", Delete, Some(TEXT_INPUT_CONTEXT)),
         KeyBinding::new("left", Left, Some(TEXT_INPUT_CONTEXT)),
@@ -64,5 +72,15 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("shift-home", SelectToHome, Some(TEXT_INPUT_CONTEXT)),
         KeyBinding::new("shift-end", SelectToEnd, Some(TEXT_INPUT_CONTEXT)),
         KeyBinding::new("enter", Enter, Some(TEXT_INPUT_CONTEXT)),
-    ]);
+        KeyBinding::new(copy, Copy, Some(TEXT_INPUT_CONTEXT)),
+        KeyBinding::new(cut, Cut, Some(TEXT_INPUT_CONTEXT)),
+        KeyBinding::new(paste, Paste, Some(TEXT_INPUT_CONTEXT)),
+        KeyBinding::new(undo, Undo, Some(TEXT_INPUT_CONTEXT)),
+        KeyBinding::new(redo, Redo, Some(TEXT_INPUT_CONTEXT)),
+    ];
+    // `ctrl-y` is the Windows/Linux redo twin of `ctrl-shift-z`.
+    if !cfg!(target_os = "macos") {
+        bindings.push(KeyBinding::new("ctrl-y", Redo, Some(TEXT_INPUT_CONTEXT)));
+    }
+    cx.bind_keys(bindings);
 }

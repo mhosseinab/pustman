@@ -1,8 +1,10 @@
 # crates/text_input — the single-line text field every screen edits through: a gap
 # buffer (src/buffer.rs) under a GPUI entity (src/input.rs) that speaks IME through
 # `EntityInputHandler`, moves the cursor by grapheme and word, selects with shift and
-# reports `Changed`/`Submitted`. Written from the Apache-licensed pattern in GPUI's
-# `examples/input.rs` — Zed's `editor`/`ui_input` are GPL and are never copied.
+# reports `Changed`/`Submitted`. Every mutation runs through one edit path that records
+# an undo transaction (src/editing.rs); copy, cut and paste use the platform clipboard.
+# Written from the Apache-licensed pattern in GPUI's `examples/input.rs` — Zed's
+# `editor`/`ui_input` are GPL and are never copied.
 
 [package]
 name = "text_input"
