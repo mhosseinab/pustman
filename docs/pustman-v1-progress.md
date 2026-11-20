@@ -101,7 +101,7 @@ Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending)
 | S26 | `request_editor`: URL bar, method, send/cancel, response status line | in_progress | | | [S26a](progress/pustman-v1/steps/S26a.md) | S26a passed (`ed1e69d`); S26b next |
 | S27 | Params, path variables, headers tables; cURL paste/copy | pending | 0 | | |  |
 | S28 | Body, auth and settings tabs (TLS badge) | pending | 0 | | |  |
-| S29 | `response_viewer`: Pretty/Raw body, headers, error panel | in_progress | | | [S29a](progress/pustman-v1/steps/S29a.md) | S29a passed (`771ce60`); S29c building; S29b next |
+| S29 | `response_viewer`: Pretty/Raw body, headers, error panel | in_progress | | | [S29a](progress/pustman-v1/steps/S29a.md), [S29c](progress/pustman-v1/steps/S29c.md) | S29a, S29c passed; S29b building |
 | S30 | Response: Hex, Preview, Find, save/copy, large bodies, Cookies tab | pending | 0 | | |  |
 | S31 | Timeline tab: phases, network info, redirect chain, resolved request as sent | pending | 0 | | |  |
 | S32 | `console` crate (bottom dock) | in_progress | | | [S32a](progress/pustman-v1/steps/S32a.md), [S32b](progress/pustman-v1/steps/S32b.md), [S32c](progress/pustman-v1/steps/S32c.md) | S32a, S32b, S32c passed; S32d building |
