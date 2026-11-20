@@ -5407,6 +5407,7 @@ dependencies = [
  "gpui",
  "http_engine",
  "pustman_actions",
+ "secrets",
  "serde_json",
  "text_input",
  "ui",
