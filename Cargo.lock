@@ -4881,6 +4881,7 @@ dependencies = [
  "pustman_actions",
  "settings",
  "storage",
+ "text_input",
  "theme",
  "ui",
  "workspace",

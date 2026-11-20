@@ -26,6 +26,7 @@ gpui_platform.workspace = true
 pustman_actions.workspace = true
 settings.workspace = true
 storage.workspace = true
+text_input.workspace = true
 theme.workspace = true
 ui.workspace = true
 workspace.workspace = true

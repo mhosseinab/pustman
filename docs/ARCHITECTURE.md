@@ -25,13 +25,13 @@ the code disagree, the code is right and this file is a bug.
 | `console` *(S26–S48)* | console entries, ring buffer, HAR export, redaction | `gpui` | `console::*` |
 | `http_engine` [GPUI] | HTTP/GraphQL/SSE transport (reqwest on `gpui_tokio`), auth helpers, cookies, TLS, redirects, timing | — | `http_engine::Transport` |
 | `pustman_actions` | every PRD action + default keymaps (D10); feature crates implement handlers | UI implementation crates | `pustman_actions::*` |
-| `theme`, `settings`, `ui`, `workspace`, `text_input` | design system, theming, typed settings, shell (Pane/Dock/ModalLayer, status bar, toasts, client-side title bar and resize frame, restore/autosave), text editing | domain crates never import these | `pub fn init(cx: &mut App)` per crate |
+| `theme`, `settings`, `ui`, `workspace`, `text_input` | design system, theming, typed settings, shell (Pane/Dock/ModalLayer, status bar, toasts, client-side title bar and resize frame, restore/autosave), text editing | domain crates never import these | `pub fn init(cx: &mut App)` (`ui`, `workspace`, `text_input`); `theme::init(cx) -> Result`; `settings::SettingsStore::init(cx, user_json) -> Result` |
 | `collections_panel`, `request_editor`, `response_viewer`, `environment_picker`, `history_panel` *(S26–S48)* | the Postman screens | each other (coordinate through `workspace`) | `init(cx)` |
 | `command_palette` | the reusable modal picker (`Picker<D: PickerDelegate>`) and the fuzzy scorer (`fuzzy::score`/`fuzzy::rank`) that S34a, S41b and S46 build their pickers on; the command palette modal (`palette.rs`, S24b) | the feature crates that depend on it (it imports `workspace` only for `ModalView`/`toggle_modal`) | `command_palette::init` |
 | `integration_tests` *(S37, S47)* | end-to-end proofs (redaction test S37, sharing AC S47) | — | `crates/integration_tests/tests/` |
 | later milestones | `websocket_client` (M4), `grpc_client` (M5), `mqtt_client` (M6) — same `SessionEvent` shape (PRD §9) | UI crates | `connect()` per crate |
 
-Init order in `pustman::init_with_store` (`crates/pustman/src/pustman.rs`): `settings → theme → ui → keymap → local store → workspace → feature crates (command_palette) → restore wiring`.
+Init order in `pustman::init_with_store` (`crates/pustman/src/pustman.rs`): `settings → theme → ui → text_input → keymap → local store → workspace → feature crates (command_palette) → restore wiring`.
 
 ## Data flow (the flows that matter)
 
