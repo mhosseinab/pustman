@@ -20,6 +20,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+command_palette.workspace = true
 gpui.workspace = true
 gpui_platform.workspace = true
 pustman_actions.workspace = true

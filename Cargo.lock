@@ -4875,6 +4875,7 @@ name = "pustman"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "command_palette",
  "gpui",
  "gpui_platform",
  "pustman_actions",

@@ -76,8 +76,9 @@ impl StartupProblems {
 }
 
 /// The app's init order (AGENTS.md): `settings → theme → ui → pustman_actions keymap →
-/// storage → workspace`, one line per crate so later wire steps append their own. This is
-/// the binary's entry point: its local store is the one in the platform config dir.
+/// storage → workspace → command_palette`, one line per crate so later wire steps append
+/// their own. This is the binary's entry point: its local store is the one in the platform
+/// config dir.
 pub fn init(cx: &mut App) {
     init_with_store(cx, StoreLocation::ConfigDir);
 }
@@ -91,6 +92,7 @@ pub fn init_with_store(cx: &mut App, store: StoreLocation) {
     init_keymap(cx);
     open_local_store(cx, store);
     workspace::init(cx);
+    command_palette::init(cx);
 }
 
 /// `settings`: the bundled defaults, then the user's `settings.json` watched by a
