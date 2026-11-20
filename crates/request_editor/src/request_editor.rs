@@ -1,13 +1,16 @@
 //! `request_editor` — the request tab (PRD REQ-HTTP-01..04): a [`RequestEditor`] item
 //! holding the [`HttpRequest`] draft, with the URL bar's method picker and URL field on
-//! top, and the send/status area (`send`) under it.
+//! top, the send/status area (`send`) under it, and the request tab strip (Params now;
+//! later steps append) over the tab content (`params`).
 //!
 //! `Decision:` the step's scope stops at the URL bar: `pending_send`, `inline_error` and
 //! the status line are declared here and filled by S26b's send work, so the send task
 //! has exactly one home to live in (replacing it cancels the in-flight request).
 
+mod key_value_table;
 mod method;
 mod new_request;
+mod params;
 pub mod send;
 pub mod url_bar;
 
@@ -19,6 +22,7 @@ use gpui::{
 use ui::prelude::*;
 use workspace::Item;
 
+use params::{Params, ParamsEvent};
 use send::{InlineError, StatusLine};
 use url_bar::{UrlBar, UrlBarEvent};
 
@@ -36,6 +40,10 @@ pub struct RequestEditor {
     /// and then its undo leave the tab clean.
     saved: HttpRequest,
     url_bar: Entity<UrlBar>,
+    /// The request tab strip (Params now; S27b+ append the other tabs).
+    tab_bar: Entity<TabBar>,
+    /// The Params tab: the query and path-variable tables (S27a).
+    params: Entity<Params>,
     /// The send task (S26b): replacing it cancels the request in flight, because
     /// dropping a `Task` cancels it.
     pending_send: Option<Task<()>>,
@@ -44,6 +52,7 @@ pub struct RequestEditor {
     /// What the status line shows for the last response.
     status_line: Option<StatusLine>,
     _url_bar_subscription: Subscription,
+    _params_subscription: Subscription,
 }
 
 impl RequestEditor {
@@ -53,15 +62,33 @@ impl RequestEditor {
         let url_bar =
             cx.new(|cx| UrlBar::new(request.method.clone(), request.url.clone(), window, cx));
         let url_bar_subscription = cx.subscribe_in(&url_bar, window, Self::on_url_bar_event);
+        let params = cx.new(|cx| Params::new(&request, url_bar.clone(), window, cx));
+        let params_subscription = cx.subscribe_in(&params, window, Self::on_params_event);
+        let tab_bar = cx.new(TabBar::new);
+        tab_bar.update(cx, |bar, cx| {
+            bar.set_tabs(
+                vec![
+                    Tab::new(
+                        SharedString::new_static("request-tab-params"),
+                        SharedString::new_static("Params"),
+                    )
+                    .toggle_state(true),
+                ],
+                cx,
+            )
+        });
         Self {
             focus_handle: cx.focus_handle().tab_stop(true),
             saved: request.clone(),
             draft: request,
             url_bar,
+            tab_bar,
+            params,
             pending_send: None,
             inline_error: None,
             status_line: None,
             _url_bar_subscription: url_bar_subscription,
+            _params_subscription: params_subscription,
         }
     }
 
@@ -75,22 +102,52 @@ impl RequestEditor {
         &self.url_bar
     }
 
+    /// The Params tab.
+    pub fn params(&self) -> &Entity<Params> {
+        &self.params
+    }
+
     /// Move focus to the URL field — `request::FocusUrlBar` (Ctrl-L / Cmd-L).
     pub fn focus_url_bar(&self, window: &mut Window, cx: &mut App) {
         self.url_bar.update(cx, |bar, cx| bar.focus_url(window, cx));
     }
 
     /// The bar applied an edit, so the draft follows it and the tab may turn dirty.
+    /// The URL change is handed to the Params tab, which keeps its query table in step
+    /// (S27a) — the one handler for the bar's events, never a second subscription.
     fn on_url_bar_event(
         &mut self,
         _url_bar: &Entity<UrlBar>,
         event: &UrlBarEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            UrlBarEvent::UrlChanged => {
+                let url = self.url_bar.read(cx).url(cx);
+                self.params.update(cx, |params, cx| {
+                    params.url_changed(&url, window, cx);
+                });
+                self.draft.url = url;
+            }
+            UrlBarEvent::MethodChanged(method) => self.draft.method = method.clone(),
+        }
+        cx.notify();
+    }
+
+    /// A table in the Params tab changed: the draft's key/value rows follow it.
+    fn on_params_event(
+        &mut self,
+        _params: &Entity<Params>,
+        event: &ParamsEvent,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event {
-            UrlBarEvent::UrlChanged => self.draft.url = self.url_bar.read(cx).url(cx),
-            UrlBarEvent::MethodChanged(method) => self.draft.method = method.clone(),
+            ParamsEvent::RowsChanged => {
+                self.draft.params = self.params.read(cx).query_rows(cx);
+                self.draft.path_variables = self.params.read(cx).path_rows(cx);
+            }
         }
         cx.notify();
     }
@@ -126,6 +183,10 @@ impl Render for RequestEditor {
             // Under the URL bar, where the send happened: the inline failure and then
             // the status line with the Send/Cancel button.
             .child(self.render_send_area(cx))
+            // The request tab strip over the tab content. Params is the only tab for
+            // now; S27b+ append tabs and switch the content below on the selection.
+            .child(self.tab_bar.clone())
+            .child(self.params.clone())
     }
 }
 
