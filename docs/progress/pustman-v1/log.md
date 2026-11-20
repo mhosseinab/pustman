@@ -191,3 +191,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - S30a (Hex/Preview) is stacked on `pustman-v1/S29b`, which is in review.
 - In flight: S27a, S37, S30d, S35b, S26w and S30a building; S32d in a fix round; S29b in review 1.
 - 2026-11-20: S32d passed (`29b3fe1`; review 1 CHANGES_REQUESTED, review 2 PASS_WITH_ISSUES; LOW #134–#135).
+- 2026-11-20: S26w passed (`21ebcb1`; driver review, pi slots full; LOW #136). S29b fix round 1 done (`989e10d`); review 2 dispatched.

@@ -98,7 +98,7 @@ Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending)
 | S23w | Wire restore and autosave (driver-added, S25 prereq) | passed | 1 | 4a8e46c | [S23w](progress/pustman-v1/steps/S23w.md) | LOW #102 #103 |
 | S24 | Command palette | **passed** | | | [S24a](progress/pustman-v1/steps/S24a.md) `6cd85c6` · [S24b](progress/pustman-v1/steps/S24b.md) `092ae5e` · [S24w](progress/pustman-v1/steps/S24w.md) `7f5fa60` | LOW #81–#84 |
 | S25 | M0 SIGN-OFF (HUMAN) | passed | 1 | e999232 | [S25](progress/pustman-v1/steps/S25.md) | human "M0 GO" after S22f re-smoke |
-| S26 | `request_editor`: URL bar, method, send/cancel, response status line | in_progress | | | [S26a](progress/pustman-v1/steps/S26a.md), [S26b](progress/pustman-v1/steps/S26b.md) | S26a (`ed1e69d`), S26b (`0fde41b`) passed; S26w next |
+| S26 | `request_editor`: URL bar, method, send/cancel, response status line | in_progress | | | [S26a](progress/pustman-v1/steps/S26a.md), [S26b](progress/pustman-v1/steps/S26b.md), [S26w](progress/pustman-v1/steps/S26w.md) | S26a, S26b, S26w (`21ebcb1`) passed; S27a building |
 | S27 | Params, path variables, headers tables; cURL paste/copy | pending | 0 | | |  |
 | S28 | Body, auth and settings tabs (TLS badge) | pending | 0 | | |  |
 | S29 | `response_viewer`: Pretty/Raw body, headers, error panel | in_progress | | | [S29a](progress/pustman-v1/steps/S29a.md), [S29c](progress/pustman-v1/steps/S29c.md) | S29a, S29c passed; S29b building |
