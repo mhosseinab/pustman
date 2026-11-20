@@ -9,8 +9,10 @@ use std::collections::BTreeSet;
 use std::fmt;
 
 /// Every redacted occurrence becomes this. A fixed shape hides how long the secret was, and
-/// the bullet reads as "something was here" in any font.
-const MASK: &str = "••••••";
+/// the bullet reads as "something was here" in any font. Public because surfaces that must
+/// mask exactly like redaction (the environment quick-look's secret rows) reuse this one
+/// glyph instead of inventing a second mask.
+pub const MASK: &str = "••••••";
 
 /// The one character [`MASK`] is built from. The invariant is that no secret contains this
 /// character at all — not merely that no secret is made only of it. A secret holding even

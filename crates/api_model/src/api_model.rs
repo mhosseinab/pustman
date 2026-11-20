@@ -25,7 +25,7 @@ pub use postman::{
     ExportReport, ImportError, ImportLimits, ImportProblem, ImportReport, SecretValuesToStore,
     export_collection, import_collection, import_environment, import_globals,
 };
-pub use redact::{SecretValues, redact_headers, redact_text, redact_url};
+pub use redact::{MASK, SecretValues, redact_headers, redact_text, redact_url};
 pub use request::{
     Body, FormField, HttpRequest, KeyValue, Method, MethodError, RawLanguage, Request,
 };

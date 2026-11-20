@@ -1768,6 +1768,7 @@ dependencies = [
  "command_palette",
  "gpui",
  "pustman_actions",
+ "secrets",
  "storage",
  "tempfile",
  "text_input",
