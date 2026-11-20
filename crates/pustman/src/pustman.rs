@@ -9,7 +9,8 @@ pub mod restore_wiring;
 use std::sync::{Arc, Mutex};
 
 use environment_picker::{quick_look, selector};
-use gpui::{App, AppContext, Entity, Global, WeakEntity};
+use gpui::{App, AppContext, Entity, EntityId, Global, Subscription, WeakEntity};
+use history_panel::HistoryList;
 use secrets::{KeyringStore, SecretStore};
 use storage::LocalStore;
 use ui::Severity;
@@ -85,8 +86,8 @@ impl StartupProblems {
 
 /// The app's init order (AGENTS.md): `settings → theme → ui → text_input → pustman_actions keymap →
 /// storage → workspace → command_palette → http client → request editor → environment picker →
-/// restore wiring`, one line per crate or wire step so later ones append their own. This is the
-/// binary's entry point: its local store is the one in the platform config dir.
+/// history panel → restore wiring`, one line per crate or wire step so later ones append their own.
+/// This is the binary's entry point: its local store is the one in the platform config dir.
 pub fn init(cx: &mut App) {
     init_with_store(cx, StoreLocation::ConfigDir);
 }
@@ -105,6 +106,8 @@ pub fn init_with_store(cx: &mut App, store: StoreLocation) {
     init_http_client(cx);
     request_editor::init(cx);
     environment_picker::init(cx);
+    history_panel::init(cx);
+    init_history_panel_wiring(cx);
     restore_wiring::init(cx);
 }
 
@@ -158,6 +161,93 @@ fn install_environment_picker_inputs(cx: &mut App, store: &Arc<Mutex<LocalStore>
             secret_store,
         },
     );
+}
+
+/// The app-wide history-panel wiring (S35w): the windows waiting for the local store the
+/// panel reads through, and the windows that already got their panel.
+#[derive(Default)]
+struct HistoryPanelWiring {
+    started: bool,
+    pending: Vec<WeakEntity<Workspace>>,
+    registered: Vec<EntityId>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl Global for HistoryPanelWiring {}
+
+/// `history_panel` (S35w): every [`Workspace`] window gets the History panel in its left
+/// dock once the local store it reads through exists. `history_panel::init` only registers
+/// the `history::Focus` action; building the panel needs the store, which lands on a
+/// background task before or after the window — the ordering `restore_wiring` solves, in
+/// the same shape: both watchers, one registration per workspace, deferred while the
+/// window is on the update stack. `Decision:` `restore_wiring`'s pending list is
+/// module-private and this step may not edit that file, so this wire keeps its own small
+/// pending list rather than extending its global.
+fn init_history_panel_wiring(cx: &mut App) {
+    if cx.default_global::<HistoryPanelWiring>().started {
+        return;
+    }
+    cx.default_global::<HistoryPanelWiring>().started = true;
+    let subscriptions = vec![
+        // "Both exist" is watched from both sides, so neither order loses a window: this
+        // observer fires when the store lands after the window, and the deferred store
+        // check covers the store that landed first.
+        cx.observe_global::<AppStore>(register_pending_history_panels),
+        cx.observe_new::<Workspace>(|_workspace, _window, cx| {
+            let workspace = cx.entity();
+            cx.default_global::<HistoryPanelWiring>()
+                .pending
+                .push(workspace.downgrade());
+            // Deferred: the window is on the update stack while its workspace is being
+            // created, and registration needs it free to reach into the window.
+            cx.defer(register_pending_history_panels);
+        }),
+    ];
+    cx.default_global::<HistoryPanelWiring>()
+        ._subscriptions
+        .extend(subscriptions);
+}
+
+/// Give every workspace waiting for a store its History panel (REQ-HIST-01), at most one
+/// per workspace whichever watcher gets there first. A run with no store at all
+/// (`StoreStartup::Unavailable`) never gets here: no panel, and the user already has the
+/// store's toast.
+fn register_pending_history_panels(cx: &mut App) {
+    let Some(store) = cx
+        .try_global::<AppStore>()
+        .map(|store| Arc::clone(&store.0))
+    else {
+        // No store yet to read the history through — keep the pending windows waiting.
+        return;
+    };
+    let workspaces = std::mem::take(&mut cx.default_global::<HistoryPanelWiring>().pending);
+    for workspace in workspaces {
+        let Some(workspace) = workspace.upgrade() else {
+            // Gone with its window before the store landed.
+            continue;
+        };
+        let workspace_id = workspace.entity_id();
+        if cx
+            .default_global::<HistoryPanelWiring>()
+            .registered
+            .contains(&workspace_id)
+        {
+            continue;
+        }
+        let registered = cx.with_window(workspace_id, |window, cx| {
+            let panel = cx.new(|cx| HistoryList::new(Arc::clone(&store), WORKSPACE_ID, window, cx));
+            workspace.update(cx, |workspace, cx| {
+                workspace.register_panel(panel, window, cx);
+            });
+        });
+        if registered.is_none() {
+            // The window closed before there was a store to register against.
+            continue;
+        }
+        cx.default_global::<HistoryPanelWiring>()
+            .registered
+            .push(workspace_id);
+    }
 }
 
 /// `settings`: the bundled defaults, then the user's `settings.json` watched by a

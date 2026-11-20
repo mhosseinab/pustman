@@ -25,6 +25,7 @@ environment_picker.workspace = true
 gpui.workspace = true
 gpui_platform.workspace = true
 gpui_tokio.workspace = true
+history_panel.workspace = true
 http_engine.workspace = true
 image.workspace = true
 pustman_actions.workspace = true
