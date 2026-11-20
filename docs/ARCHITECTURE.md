@@ -84,7 +84,7 @@ Init order in `pustman::init_with_store` (`crates/pustman/src/pustman.rs`): `set
 - Harness: `scripts/pustman-v1-init.sh` (toolchain + GPUI deps), `scripts/pustman-v1-test.sh <crate>
   [filter]` (fast loop), `scripts/pustman-v1-verify.sh` (merge gate), `scripts/pustman-v1-tripwire.sh`.
 - "Staging" is the build host: `scripts/pustman-v1-init.sh --require-gpui` → `cargo build --release
-  -p pustman` → manual smoke on Linux + macOS. Rollback: rebuild the previous `release/pustman-v1-*`
+  -p pustman` → package with the app icon (`promote` skill, step 3) → manual smoke on Linux + macOS. Rollback: rebuild the previous `release/pustman-v1-*`
   tag; migrations roll back with their `down`.
 
 ## Decisions

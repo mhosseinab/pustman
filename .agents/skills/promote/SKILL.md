@@ -27,7 +27,11 @@ time. Before step 1: `git status` must be clean and the log's last entry must no
    deep-read (offer `/explain S<N>` for each), the deploy deltas the human must apply on the build
    hosts (scripted/manual lines verbatim), and wait.
 3. **On my "go":** `git tag release/pustman-v1-<n> <sha>`; build the release
-   (`cargo build --release -p pustman`); the human runs the manual smoke on Linux and macOS;
+   (`cargo build --release -p pustman`) and package it with the app icon — Linux:
+   `scripts/install-desktop-entry.sh target/release/pustman` (desktop entry + hicolor icons, so the
+   dock/launcher shows the Pustman icon); macOS: `scripts/bundle-macos.sh` → `target/release/Pustman.app`
+   (smoke the bundle, not the bare binary); the human runs the manual smoke on Linux and macOS,
+   including that the icon shows in the dock/launcher and window switcher;
    mark the window's deltas `applied(<evidence>)` in `DEPLOY_DELTAS.md`; append the Promotions row in the progress
    main file, a `shipped in release/pustman-v1-<n>` line under *Later* in each included step record, and a
    log entry; commit them as `progress: release/pustman-v1-<n>`; report the smoke result and stop. There is

@@ -159,7 +159,8 @@ crates with no GPUI views, sharing the `SessionEvent` shape from `docs/PRD.md` �
   caps every worktree build at `[build] jobs = 4` so 4 parallel workers fit 16 cores. It is gitignored, so
   recreate it if missing.
 - Releases are tags `release/pustman-v1-<n>` (plan D11). This is a desktop app — "staging" is the
-  build host: tag → `cargo build --release -p pustman` → human manual smoke on Linux and macOS.
+  build host: tag → `cargo build --release -p pustman` → package with the app icon → human manual smoke on
+  Linux and macOS (exact steps: the `promote` skill, step 3).
 - Host/env changes are typed Deploy deltas in `DEPLOY_DELTAS.md` (`codified`/`scripted`/`manual`);
   `scripts/promote-check.sh` refuses a promotion with pending deltas.
 
