@@ -5468,6 +5468,7 @@ name = "response_viewer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "api_model",
  "cookie_store",
  "gpui",
  "hex",
@@ -5482,6 +5483,7 @@ dependencies = [
  "theme",
  "time",
  "ui",
+ "url",
  "workspace",
 ]
 

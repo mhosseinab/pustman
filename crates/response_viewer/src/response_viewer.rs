@@ -19,12 +19,14 @@ mod pretty;
 mod preview;
 mod save_body;
 mod status_line;
+mod timeline;
 
 pub use body_view::BodyView;
 pub use cookies_tab::{CookiesTab, ParsedCookie};
 pub use headers_view::{HeaderRow, HeadersView};
 pub use save_body::write_body;
 pub use status_line::StatusLine;
+pub use timeline::TimelineTab;
 
 use std::sync::Arc;
 
@@ -50,13 +52,15 @@ const BODY_PANE_SELECTOR: &str = "response-body-pane";
 
 /// The tabs across the top of the response, in order. Later steps append here (Cookies,
 /// Timeline); the bar is built from this list, so a new tab is one line and nothing else.
-const TAB_TITLES: [&str; 3] = ["Body", "Headers", "Cookies"];
+const TAB_TITLES: [&str; 4] = ["Body", "Headers", "Cookies", "Timeline"];
 /// Where the body renders.
 const BODY_TAB: usize = 0;
 /// Where the headers table renders.
 const HEADERS_TAB: usize = 1;
 /// Where the cookies table renders.
 const COOKIES_TAB: usize = 2;
+/// Where the timeline renders.
+const TIMELINE_TAB: usize = 3;
 
 /// The response region: status line on top, tabs, and the selected pane below.
 pub struct ResponseView {
@@ -68,6 +72,7 @@ pub struct ResponseView {
     body: Entity<BodyView>,
     headers: Entity<HeadersView>,
     cookies: Entity<CookiesTab>,
+    timeline: Entity<TimelineTab>,
     /// The failed send on screen instead of its body (REQ-RESP-08).
     error: Option<TransportError>,
     /// The response on screen, kept for `response::SaveBody` and `response::CopyBody`
@@ -93,6 +98,7 @@ impl ResponseView {
             body: cx.new(BodyView::new),
             headers: cx.new(HeadersView::new),
             cookies: cx.new(CookiesTab::new),
+            timeline: cx.new(TimelineTab::new),
             error: None,
             response: None,
             save_task: None,
@@ -119,6 +125,8 @@ impl ResponseView {
             .update(cx, |headers, cx| headers.set_headers(&response.headers, cx));
         self.cookies
             .update(cx, |cookies, cx| cookies.set_headers(&response.headers, cx));
+        self.timeline
+            .update(cx, |timeline, cx| timeline.set_response(&response, cx));
         self.body
             .update(cx, |body, cx| body.set_body(Arc::clone(&response), cx));
         cx.notify();
@@ -142,6 +150,7 @@ impl ResponseView {
             None => match self.selected_tab {
                 HEADERS_TAB => self.headers.clone().into_any_element(),
                 COOKIES_TAB => self.cookies.clone().into_any_element(),
+                TIMELINE_TAB => self.timeline.clone().into_any_element(),
                 _ => div()
                     .size_full()
                     .debug_selector(|| BODY_PANE_SELECTOR.to_owned())
