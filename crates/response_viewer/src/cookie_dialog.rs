@@ -1,6 +1,11 @@
 //! The Manage Cookies dialog (PRD REQ-HTTP-08): a modal listing the workspace's cookie
-//! jar grouped by domain, where one cookie can be deleted and one whole domain cleared —
-//! every change persisted through the [`CookieJar`] API on a background task.
+//! jar grouped by domain, where a cookie can be added, edited or deleted and one whole
+//! domain cleared — every change persisted through the [`CookieJar`] API on a background
+//! task.
+//!
+//! Add and edit go through the inline [`crate::cookie_form`] panel (its module docs hold
+//! the form's decisions): the "Add cookie" control and each row's Edit control put it
+//! where the list is, and a save that lands rebuilds the rows from the jar.
 //!
 //! [`CookieJar`] and `http_engine::cookie_persistence` do the whole job — listing,
 //! deleting, clearing, saving — so this file is the dialog and never another jar. The
@@ -28,7 +33,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use gpui::{
-    App, Context, DismissEvent, EventEmitter, FocusHandle, Focusable, Global, Render, Task, Window,
+    App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Global, Render,
+    Subscription, Task, Window,
 };
 use http_engine::{CookieEntry, CookieError, CookieJar, save_jar};
 use pustman_actions::cookies::Manage;
@@ -38,6 +44,7 @@ use ui::prelude::*;
 use workspace::{ModalView, Workspace};
 
 use crate::child_id;
+use crate::cookie_form::{CookieForm, CookieFormEvent};
 
 #[cfg(test)]
 #[path = "cookie_dialog_tests.rs"]
@@ -47,8 +54,8 @@ mod tests;
 /// measures one row for all of them (the `history_list` contract).
 const ROW_HEIGHT_PX: f32 = 40.;
 
-/// The width of a row's action column — the delete button's box.
-const ACTION_COLUMN_PX: f32 = 32.;
+/// The width of a row's action column — the edit and delete buttons' box.
+const ACTION_COLUMN_PX: f32 = 68.;
 
 /// How many rows the list shows before it scrolls inside the dialog.
 const MAX_VISIBLE_ROWS: u16 = 12;
@@ -101,11 +108,12 @@ enum Row {
         cookie_count: usize,
         clear_focus: FocusHandle,
     },
-    /// One cookie: the entry, its expiry as the row shows it, and its delete button's
-    /// focus handle.
+    /// One cookie: the entry, its expiry as the row shows it, and its edit and delete
+    /// buttons' focus handles.
     Cookie {
         entry: CookieEntry,
         expires_text: String,
+        edit_focus: FocusHandle,
         delete_focus: FocusHandle,
     },
 }
@@ -141,6 +149,13 @@ pub struct CookieDialog {
     /// supersedes: a save writes the whole snapshot, so only the newest one needs to
     /// finish (AGENTS.md › Dropping a `Task` cancels it).
     save_task: Option<Task<()>>,
+    /// The add/edit form open over the list, while one is open (REQ-HTTP-08).
+    form: Option<Entity<CookieForm>>,
+    /// The "Add cookie" button's focus handle: its slot in the tab order.
+    add_focus: FocusHandle,
+    /// Kept so the form's Save and Cancelled events keep reaching us; dropping it would
+    /// silently strand the form (AGENTS.md › GPUI).
+    form_subscription: Option<Subscription>,
 }
 
 impl CookieDialog {
@@ -160,6 +175,9 @@ impl CookieDialog {
             rows: Arc::new(Vec::new()),
             error: None,
             save_task: None,
+            form: None,
+            add_focus: cx.focus_handle(),
+            form_subscription: None,
         };
         dialog.reload_rows(cx);
         dialog
@@ -213,6 +231,30 @@ impl CookieDialog {
         })
     }
 
+    /// The edit control of the (domain, path, name) row, as the keyboard reaches it —
+    /// [`Self::delete_focus_handle`]'s twin.
+    pub fn edit_focus_handle(&self, domain: &str, path: &str, name: &str) -> Option<FocusHandle> {
+        self.rows.iter().find_map(|row| match row {
+            Row::Cookie {
+                entry, edit_focus, ..
+            } if entry.domain == domain && entry.path == path && entry.name == name => {
+                Some(edit_focus.clone())
+            }
+            _ => None,
+        })
+    }
+
+    /// The "Add cookie" control, as the keyboard reaches it: the dialog hands the
+    /// control its tab order through this handle.
+    pub fn add_focus_handle(&self) -> FocusHandle {
+        self.add_focus.clone()
+    }
+
+    /// The add/edit form open where the list is, while one is open (REQ-HTTP-08).
+    pub fn form(&self) -> Option<Entity<CookieForm>> {
+        self.form.clone()
+    }
+
     /// Rebuild the listed rows from the jar — on open and after every change.
     fn reload_rows(&mut self, cx: &mut Context<Self>) {
         // The handle is cloned out first so the lock never borrows `self` while the
@@ -226,48 +268,130 @@ impl CookieDialog {
         }
     }
 
-    /// Delete one cookie from the jar and persist what is left (REQ-HTTP-08).
+    /// Delete one cookie from the jar and persist what is left (REQ-HTTP-08). A refused
+    /// change shows in the dialog banner — there is no form to show it in.
     fn delete_cookie(&mut self, entry: &CookieEntry, cx: &mut Context<Self>) {
         let (domain, path, name) = (entry.domain.clone(), entry.path.clone(), entry.name.clone());
-        self.change_jar(move |jar| jar.delete(&domain, &path, &name), cx);
+        if let Err(message) = self.change_jar(move |jar| jar.delete(&domain, &path, &name), cx) {
+            self.error = Some(message);
+            cx.notify();
+        }
     }
 
     /// Remove every cookie of one domain and persist what is left (REQ-HTTP-08).
     fn clear_domain(&mut self, domain: &str, cx: &mut Context<Self>) {
         let domain = domain.to_owned();
-        self.change_jar(
+        if let Err(message) = self.change_jar(
             move |jar| {
                 jar.clear_domain(&domain);
                 Ok(())
             },
             cx,
-        );
+        ) {
+            self.error = Some(message);
+            cx.notify();
+        }
+    }
+
+    /// The "Add cookie" control: a blank form where the list is (REQ-HTTP-08).
+    fn open_add_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let form = cx.new(|cx| CookieForm::add(window, cx));
+        self.mount_form(form, window, cx);
+    }
+
+    /// A row's Edit control: the form over that cookie (REQ-HTTP-08).
+    fn open_edit_form(&mut self, entry: &CookieEntry, window: &mut Window, cx: &mut Context<Self>) {
+        let form = cx.new(|cx| CookieForm::edit(entry.clone(), window, cx));
+        self.mount_form(form, window, cx);
+    }
+
+    /// Put `form` where the list is, with the keyboard in its first field.
+    fn mount_form(
+        &mut self,
+        form: Entity<CookieForm>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.form_subscription = Some(cx.subscribe(&form, Self::on_form_event));
+        self.form = Some(form.clone());
+        self.error = None;
+        let first_field = form.read(cx).focus_handle(cx);
+        window.focus(&first_field, cx);
+        cx.notify();
+    }
+
+    /// The form's Save and Cancel (REQ-HTTP-08): a save goes through the jar and the
+    /// same background `save_jar` every other change uses, and closes the form when it
+    /// lands; a refused save stays open on exactly the fields it failed on.
+    fn on_form_event(
+        &mut self,
+        _form: Entity<CookieForm>,
+        event: &CookieFormEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            CookieFormEvent::Cancelled => self.close_form(cx),
+            CookieFormEvent::Save { original, entry } => {
+                let entry = entry.clone();
+                let outcome = match original {
+                    Some(identity) => self.change_jar(
+                        move |jar| {
+                            jar.edit(&identity.domain, &identity.path, &identity.name, entry)
+                        },
+                        cx,
+                    ),
+                    None => self.change_jar(move |jar| jar.add(entry), cx),
+                };
+                match outcome {
+                    // The rows are rebuilt and the save is in flight: the form's job is
+                    // done, the list comes back.
+                    Ok(()) => self.close_form(cx),
+                    // The jar refused the change; its message shows where the change was
+                    // typed (AGENTS.md: errors reach the user).
+                    Err(message) => self.show_form_error(message, cx),
+                }
+            }
+        }
+    }
+
+    /// Take the form down: the list shows again — unchanged (Cancel) or rebuilt from the
+    /// jar the save changed (Save).
+    fn close_form(&mut self, cx: &mut Context<Self>) {
+        self.form = None;
+        self.form_subscription = None;
+        cx.notify();
+    }
+
+    /// Put `message` in the form's inline error — or the dialog banner if the form is
+    /// already gone. The handle is strong, so a present form always takes it.
+    fn show_form_error(&mut self, message: SharedString, cx: &mut Context<Self>) {
+        match self.form.clone() {
+            Some(form) => form.update(cx, |form, cx| form.show_error(message, cx)),
+            None => self.error = Some(message),
+        }
+        cx.notify();
     }
 
     /// Apply `change` to the jar, rebuild the rows from it and save it on a background
-    /// task. A refused change and a failed save both land in [`Self::error`] — inline in
-    /// the dialog, never only logged (AGENTS.md).
+    /// task. On refusal it returns the message to show — the jar's `CookieError` Display,
+    /// which names the cookie and never its value (PRD §7), or the poisoned-lock message
+    /// — because the list-mode changes show it in [`Self::error`] while a form save shows
+    /// it in the form that asked for it. A failed save always lands in [`Self::error`]
+    /// (inline in the dialog, never only logged; AGENTS.md).
     fn change_jar(
         &mut self,
         change: impl FnOnce(&mut CookieJar) -> Result<(), CookieError>,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Result<(), SharedString> {
         // Cloned out first so the lock never borrows `self` while the rows and the error
         // land on it (`.agents/rules/rust-code.md`).
         let jar_handle = Arc::clone(&self.jar);
         let mut jar = match jar_handle.lock() {
             Ok(jar) => jar,
-            Err(_) => {
-                self.error = Some(SharedString::new_static(JAR_LOCK_MESSAGE));
-                cx.notify();
-                return;
-            }
+            Err(_) => return Err(SharedString::new_static(JAR_LOCK_MESSAGE)),
         };
         if let Err(refusal) = change(&mut jar) {
-            // `CookieError`'s Display names the cookie and never its value (PRD §7).
-            self.error = Some(SharedString::from(refusal.to_string()));
-            cx.notify();
-            return;
+            return Err(SharedString::from(refusal.to_string()));
         }
         self.rows = Arc::new(build_rows(&jar, cx));
         self.error = None;
@@ -297,6 +421,7 @@ impl CookieDialog {
                 }
             }
         }));
+        Ok(())
     }
 
     /// One row's content — the wrapper [`VirtualList`] draws around it carries the row's
@@ -318,8 +443,9 @@ impl CookieDialog {
             Row::Cookie {
                 entry,
                 expires_text,
+                edit_focus,
                 delete_focus,
-            } => self.render_cookie_row(&row_id, entry, expires_text, delete_focus, cx),
+            } => self.render_cookie_row(&row_id, entry, expires_text, edit_focus, delete_focus, cx),
         }
     }
 
@@ -376,17 +502,21 @@ impl CookieDialog {
             .into_any_element()
     }
 
-    /// One cookie row: the name, value, path and expiry cells, and its delete button.
+    /// One cookie row: the name, value, path and expiry cells, and its edit and delete
+    /// buttons.
     fn render_cookie_row(
         &self,
         row_id: &ElementId,
         entry: &CookieEntry,
         expires_text: &str,
+        edit_focus: &FocusHandle,
         delete_focus: &FocusHandle,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let deleted = entry.clone();
-        let weak = cx.weak_entity();
+        let edited = entry.clone();
+        let delete_weak = cx.weak_entity();
+        let edit_weak = cx.weak_entity();
         h_flex()
             .w_full()
             .h(px_to_rems(ROW_HEIGHT_PX))
@@ -413,23 +543,44 @@ impl CookieDialog {
             ))
             .child(cell(child_id(row_id, "expires"), expires_text.into(), cx))
             .child(
-                div().flex_none().w(px_to_rems(ACTION_COLUMN_PX)).child(
-                    IconButton::new(
-                        child_id(row_id, "delete"),
-                        IconName::Trash,
-                        Tooltip::text(format!("Delete cookie {}", entry.name)),
+                h_flex()
+                    .flex_none()
+                    .w(px_to_rems(ACTION_COLUMN_PX))
+                    .gap(DynamicSpacing::Base02.rems(cx))
+                    .child(
+                        IconButton::new(
+                            child_id(row_id, "edit"),
+                            IconName::Pencil,
+                            Tooltip::text(format!("Edit cookie {}", entry.name)),
+                        )
+                        .focus_handle(edit_focus.clone())
+                        .on_click(move |_event, window, cx| {
+                            if edit_weak
+                                .update(cx, |dialog, cx| dialog.open_edit_form(&edited, window, cx))
+                                .is_err()
+                            {
+                                // Handled: the dialog went away with its window while
+                                // the button was up; there is nothing left to edit.
+                            }
+                        }),
                     )
-                    .focus_handle(delete_focus.clone())
-                    .on_click(move |_event, _window, cx| {
-                        if weak
-                            .update(cx, |dialog, cx| dialog.delete_cookie(&deleted, cx))
-                            .is_err()
-                        {
-                            // Handled: the dialog went away with its window while the
-                            // button was up; there is nothing left to delete.
-                        }
-                    }),
-                ),
+                    .child(
+                        IconButton::new(
+                            child_id(row_id, "delete"),
+                            IconName::Trash,
+                            Tooltip::text(format!("Delete cookie {}", entry.name)),
+                        )
+                        .focus_handle(delete_focus.clone())
+                        .on_click(move |_event, _window, cx| {
+                            if delete_weak
+                                .update(cx, |dialog, cx| dialog.delete_cookie(&deleted, cx))
+                                .is_err()
+                            {
+                                // Handled: the dialog went away with its window while the
+                                // button was up; there is nothing left to delete.
+                            }
+                        }),
+                    ),
             )
             .into_any_element()
     }
@@ -441,6 +592,7 @@ impl Render for CookieDialog {
         let base = ElementId::from(("cookie-dialog", cx.entity_id()));
         let rows = Arc::clone(&self.rows);
         let error = self.error.clone();
+        let form = self.form.clone();
         let content = v_flex()
             .w_full()
             .min_w_0()
@@ -453,10 +605,13 @@ impl Render for CookieDialog {
                 ),
                 None => this,
             })
-            .map(|this| {
-                if rows.is_empty() {
-                    this.child(empty_state(cx))
-                } else {
+            .map(|this| match form {
+                // The form is where the list is while it is open (its module docs'
+                // Decision); the list comes back — refreshed from the jar — after a
+                // save or a cancel.
+                Some(form) => this.child(form),
+                None if rows.is_empty() => this.child(empty_state(cx)),
+                None => {
                     let key_rows = Arc::clone(&rows);
                     let key_base = base.clone();
                     this.child(column_headings(cx)).child(
@@ -480,13 +635,33 @@ impl Render for CookieDialog {
         Modal::new("Manage cookies")
             .max_width(px_to_rems(DIALOG_WIDTH_PX))
             .content(content)
-            .footer(h_flex().w_full().justify_end().child(
-                Button::new(child_id(&base, "close"), "Close").on_click(cx.listener(
-                    |_this, _event, _window, cx| {
-                        cx.emit(DismissEvent);
-                    },
-                )),
-            ))
+            .footer(
+                h_flex()
+                    .w_full()
+                    .justify_end()
+                    .gap(DynamicSpacing::Base04.rems(cx))
+                    .map(|this| match &self.form {
+                        // The form is its own add flow (it has Save and Cancel): the
+                        // list's "Add cookie" would only lose what is typed in it.
+                        Some(_) => this,
+                        None => this.child(
+                            Button::new(child_id(&base, "add-cookie"), "Add cookie")
+                                .start_icon(Icon::new(IconName::Plus))
+                                .tooltip(Tooltip::text("Add a cookie to this workspace's jar"))
+                                .focus_handle(self.add_focus.clone())
+                                .on_click(cx.listener(|this, _event, window, cx| {
+                                    this.open_add_form(window, cx)
+                                })),
+                        ),
+                    })
+                    .child(
+                        Button::new(child_id(&base, "close"), "Close").on_click(cx.listener(
+                            |_this, _event, _window, cx| {
+                                cx.emit(DismissEvent);
+                            },
+                        )),
+                    ),
+            )
     }
 }
 
@@ -563,6 +738,7 @@ fn build_rows(jar: &CookieJar, cx: &mut App) -> Vec<Row> {
             rows.push(Row::Cookie {
                 entry,
                 expires_text,
+                edit_focus: cx.focus_handle(),
                 delete_focus: cx.focus_handle(),
             });
         }

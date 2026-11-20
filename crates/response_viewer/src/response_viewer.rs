@@ -11,6 +11,7 @@
 
 mod body_view;
 pub mod cookie_dialog;
+mod cookie_form;
 mod cookies_tab;
 mod error_panel;
 mod find;
