@@ -15,6 +15,7 @@ mod pane_tabs;
 mod panel;
 mod restore;
 mod status_bar;
+mod title_bar;
 mod toast_layer;
 mod welcome;
 
@@ -26,10 +27,13 @@ pub use pane::Pane;
 pub use panel::{Panel, PanelHandle};
 pub use restore::{ItemFactory, Restore};
 pub use status_bar::StatusBar;
+pub use title_bar::TitleBar;
 pub use toast_layer::{TOAST_DURATION, ToastAction, ToastHandler};
 pub use welcome::Welcome;
 
-use gpui::{App, Context, Entity, FocusHandle, Focusable, ParentElement, Render, Window};
+use gpui::{
+    App, Context, Decorations, Entity, FocusHandle, Focusable, ParentElement, Render, Window,
+};
 use pustman_actions::workspace::{
     CloseTab, NewTab, NextTab, PreviousTab, ToggleConsole, ToggleSidebar,
 };
@@ -47,6 +51,7 @@ pub struct Workspace {
     bottom_dock: Entity<Dock>,
     center_pane: Entity<Pane>,
     status_bar: Entity<StatusBar>,
+    title_bar: Entity<TitleBar>,
     toasts: Entity<ui::Toasts>,
     modal_layer: ModalLayer,
 }
@@ -66,6 +71,7 @@ impl Workspace {
             bottom_dock: cx.new(|cx| Dock::new(DockPosition::Bottom, cx)),
             center_pane: cx.new(Pane::new),
             status_bar: cx.new(StatusBar::new),
+            title_bar: cx.new(TitleBar::new),
             toasts: cx.new(Toasts::new),
             modal_layer: ModalLayer::default(),
         }
@@ -134,8 +140,9 @@ impl Focusable for Workspace {
 }
 
 impl Render for Workspace {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let decorations = window.window_decorations();
+        let shell = v_flex()
             .id("workspace")
             .size_full()
             // The two overlays at the end position themselves against the root.
@@ -149,6 +156,11 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::next_tab))
             .on_action(cx.listener(Self::previous_tab))
             .bg(cx.theme().colors().background)
+            // Only a client-decorated window draws its own title bar; the compositor draws
+            // one around a server-decorated window.
+            .when(matches!(decorations, Decorations::Client { .. }), |shell| {
+                shell.child(self.title_bar.clone())
+            })
             // The docks and the pane share the rows above the console.
             .child(
                 h_flex()
@@ -171,7 +183,11 @@ impl Render for Workspace {
             .child(self.status_bar.clone())
             // Toasts float bottom-right above the status bar; the modal layer covers all.
             .child(self.toasts_overlay(cx))
-            .child(self.modal_overlay(cx))
+            .child(self.modal_overlay(cx));
+        match decorations {
+            Decorations::Server => shell.into_any_element(),
+            Decorations::Client { tiling } => title_bar::client_frame(tiling, shell, window, cx),
+        }
     }
 }
 

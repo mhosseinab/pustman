@@ -69,10 +69,8 @@ fn palette_toggle_keys(cx: &VisualTestContext) -> &'static str {
 /// row of the action bound to it must show.
 fn keystroke_text(keystroke: &str, cx: &VisualTestContext) -> String {
     let os = cx.read(|cx| cx.platform_info().os);
-    Keystroke::parse_with_os(keystroke, os)
-        .expect("the test keystroke must parse")
-        .display(os)
-        .to_string()
+    let keystroke = Keystroke::parse_with_os(keystroke, os).expect("the test keystroke must parse");
+    ui::keystroke_label(&keystroke.modifiers, &keystroke.key, os)
 }
 
 /// Whether the modal layer is showing the palette.

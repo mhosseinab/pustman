@@ -40,7 +40,7 @@ pub use components::button::{
 };
 pub use components::context_menu::ContextMenu;
 pub use components::divider::{Divider, DividerColor};
-pub use components::key_binding::KeyBinding;
+pub use components::key_binding::{KeyBinding, keystroke_label};
 pub use components::label::{Headline, Label, LabelSize};
 pub use components::list::VirtualList;
 pub use components::modal::Modal;

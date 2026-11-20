@@ -4,7 +4,10 @@
 //! user rebinds a key (`references/interaction-focus-a11y.md`: "bindings are shown in
 //! tooltips and menus").
 
-use gpui::{Action, App, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
+use gpui::{
+    Action, App, IntoElement, Keystroke, Modifiers, OperatingSystem, ParentElement, RenderOnce,
+    Styled, Window, div,
+};
 use theme::ActiveTheme;
 
 use crate::color::Color;
@@ -62,7 +65,7 @@ impl KeyBinding {
         binding
             .keystrokes()
             .iter()
-            .map(|keystroke| keystroke.display(os).to_string())
+            .map(|keystroke| keystroke_label(keystroke.modifiers(), keystroke.key(), os))
             .collect()
     }
 
@@ -73,6 +76,53 @@ impl KeyBinding {
             None
         } else {
             Some(keys.join(" "))
+        }
+    }
+}
+
+/// One keystroke as a hint spells it: `Ctrl+Shift+Tab` on Linux and Windows, GPUI's native
+/// symbols (`⌘⇧P`) on macOS. GPUI's own display on Linux is the keymap syntax
+/// (`ctrl-shift-tab`), which reads as code, not as a key to press.
+pub fn keystroke_label(modifiers: &Modifiers, key: &str, os: OperatingSystem) -> String {
+    if os == OperatingSystem::Mac {
+        let keystroke = Keystroke {
+            modifiers: *modifiers,
+            key: key.to_string(),
+            key_char: None,
+        };
+        return keystroke.display(os).to_string();
+    }
+    let platform = if os == OperatingSystem::Windows {
+        "Win"
+    } else {
+        "Super"
+    };
+    let names = [
+        (modifiers.function, "Fn"),
+        (modifiers.control, "Ctrl"),
+        (modifiers.alt, "Alt"),
+        (modifiers.platform, platform),
+        (modifiers.shift, "Shift"),
+    ];
+    let mut parts: Vec<String> = names
+        .into_iter()
+        .filter(|(held, _)| *held)
+        .map(|(_, name)| name.to_string())
+        .collect();
+    parts.push(key_name(key));
+    parts.join("+")
+}
+
+fn key_name(key: &str) -> String {
+    match key {
+        "pageup" => "PageUp".to_string(),
+        "pagedown" => "PageDown".to_string(),
+        _ => {
+            let mut chars = key.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().chain(chars).collect(),
+                None => String::new(),
+            }
         }
     }
 }
@@ -95,3 +145,7 @@ impl RenderOnce for KeyBinding {
             }))
     }
 }
+
+#[cfg(test)]
+#[path = "key_binding_tests.rs"]
+mod tests;

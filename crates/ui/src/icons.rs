@@ -111,6 +111,8 @@ pub enum IconName {
     Settings,
     /// Environments and request options.
     SlidersHorizontal,
+    /// Maximize or restore the window.
+    Square,
     /// The console panel.
     Terminal,
     /// Delete.
@@ -178,6 +180,7 @@ pub const ALL: &[IconName] = &[
     IconName::Send,
     IconName::Settings,
     IconName::SlidersHorizontal,
+    IconName::Square,
     IconName::Terminal,
     IconName::Trash,
     IconName::TriangleAlert,
@@ -239,6 +242,7 @@ impl IconName {
             Self::Send => "icons/send.svg",
             Self::Settings => "icons/settings.svg",
             Self::SlidersHorizontal => "icons/sliders_horizontal.svg",
+            Self::Square => "icons/square.svg",
             Self::Terminal => "icons/terminal.svg",
             Self::Trash => "icons/trash.svg",
             Self::TriangleAlert => "icons/triangle_alert.svg",
@@ -302,6 +306,7 @@ impl IconName {
             Self::SlidersHorizontal => {
                 include_bytes!("../../../assets/icons/sliders_horizontal.svg")
             }
+            Self::Square => include_bytes!("../../../assets/icons/square.svg"),
             Self::Terminal => include_bytes!("../../../assets/icons/terminal.svg"),
             Self::Trash => include_bytes!("../../../assets/icons/trash.svg"),
             Self::TriangleAlert => include_bytes!("../../../assets/icons/triangle_alert.svg"),

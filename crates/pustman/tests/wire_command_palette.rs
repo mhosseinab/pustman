@@ -28,10 +28,10 @@ fn wire_command_palette_toggle_opens_modal(cx: &mut TestAppContext) {
     } else {
         "ctrl-shift-p"
     };
-    let expected_text = Keystroke::parse_with_os(expected_keys, os)
-        .expect("the platform toggle keystroke must parse")
-        .display(os)
-        .to_string();
+    let expected_keystroke = Keystroke::parse_with_os(expected_keys, os)
+        .expect("the platform toggle keystroke must parse");
+    let expected_text =
+        ui::keystroke_label(&expected_keystroke.modifiers, &expected_keystroke.key, os);
     let bound = cx.update(|window, cx| KeyBinding::for_action(&Toggle).keystroke_text(window, cx));
     assert_eq!(
         bound.as_deref(),

@@ -1426,11 +1426,10 @@ impl Element for TextElement {
         let state = &input.state;
         let content = state.text();
         let style = window.text_style();
-        let (display_text, text_color) = if content.is_empty() {
-            (input.placeholder.clone(), Color::Placeholder.color(cx))
-        } else {
-            (SharedString::from(content), Color::Default.color(cx))
-        };
+        // The placeholder is the label `TextInput::render` draws; shaping it here too
+        // painted it twice.
+        let display_text = SharedString::from(content);
+        let text_color = Color::Default.color(cx);
 
         let run = TextRun {
             len: display_text.len(),
@@ -1590,7 +1589,9 @@ impl Render for TextInput {
             .children(self.state.is_empty().then(|| {
                 div()
                     .absolute()
-                    .left_0()
+                    // Absolute children ignore the parent's padding; match the text
+                    // line's origin so the placeholder sits where typing starts.
+                    .left(DynamicSpacing::Base04.px(cx))
                     .top_0()
                     .debug_selector(|| PLACEHOLDER_SELECTOR.to_string())
                     .text_color(Color::Placeholder.color(cx))
@@ -1603,3 +1604,7 @@ impl Render for TextInput {
 #[cfg(test)]
 #[path = "input_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "input_placeholder_tests.rs"]
+mod placeholder_tests;
