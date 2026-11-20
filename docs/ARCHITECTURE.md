@@ -31,7 +31,7 @@ the code disagree, the code is right and this file is a bug.
 | `integration_tests` *(S37, S47)* | end-to-end proofs (redaction test S37, sharing AC S47) | — | `crates/integration_tests/tests/` |
 | later milestones | `websocket_client` (M4), `grpc_client` (M5), `mqtt_client` (M6) — same `SessionEvent` shape (PRD §9) | UI crates | `connect()` per crate |
 
-Init order in `pustman::init_with_store` (`crates/pustman/src/pustman.rs`): `settings → theme → ui → text_input → keymap → local store → workspace → feature crates (command_palette) → http client → request editor → environment picker → history panel → restore wiring`.
+Init order in `pustman::init_with_store` (`crates/pustman/src/pustman.rs`): `settings → theme → ui → text_input → keymap → local store → workspace → feature crates (command_palette) → http client → response viewer → request editor → environment picker → history panel → restore wiring`.
 
 ## Data flow (the flows that matter)
 

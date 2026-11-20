@@ -30,6 +30,7 @@ http_engine.workspace = true
 image.workspace = true
 pustman_actions.workspace = true
 request_editor.workspace = true
+response_viewer.workspace = true
 secrets.workspace = true
 settings.workspace = true
 storage.workspace = true
