@@ -182,3 +182,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-20: S29c passed (`4f14b87`, review 1 PASS_WITH_ISSUES; LOW #125–#126). S29b dispatched.
 - 2026-11-20: S26b passed (`0fde41b`, review 1 PASS_WITH_ISSUES; LOW #127–#129). S27a will be rebased onto main.
 - 2026-11-20: S34b passed (`dd8e4ce`, review 1 PASS_WITH_ISSUES; LOW #130–#131). S35c built (`c1a7876`), review 1 dispatched.
+- 2026-11-20: S29b built (`09ac86d`), review 1 dispatched; S30d dispatched into the freed slot. `/lows` skill committed (`774b97c`).
