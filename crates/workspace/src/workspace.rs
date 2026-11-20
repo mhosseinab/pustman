@@ -6,6 +6,7 @@
 //! `.agents/skills/rust-gpui-ui-ux/references/gpui-fundamentals.md`, and every color comes
 //! from `cx.theme()` so light and dark stay correct.
 
+mod autosave;
 mod dock;
 mod item;
 mod modal_layer;
@@ -17,6 +18,7 @@ mod status_bar;
 mod toast_layer;
 mod welcome;
 
+pub use autosave::Autosave;
 pub use dock::{Dock, DockPosition};
 pub use item::{AnyViewItem, Item, ItemHandle};
 pub use modal_layer::{ModalLayer, ModalView};

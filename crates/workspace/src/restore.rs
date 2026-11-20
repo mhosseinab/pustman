@@ -315,6 +315,36 @@ impl Restore {
         }));
     }
 
+    /// Write the current layout and tabs now — the entry point the draft autosave timer
+    /// drives ([`crate::Autosave`], PRD REQ-NFR-05). It reuses [`Self::snapshot`] and
+    /// [`write_snapshot`], so there is no second serializer and no second `open_tabs`
+    /// writer. While a restore is landing it does nothing (see [`Self::schedule_save`]),
+    /// and a failed write shows the same fixed message as the debounced path.
+    pub(crate) fn save_now(&mut self, cx: &mut Context<Self>) {
+        if self.is_restoring {
+            return;
+        }
+        let Some(snapshot) = self.snapshot(cx) else {
+            return;
+        };
+        let store = Arc::clone(&self.store);
+        let workspace_id = self.workspace_id.clone();
+        self.pending_save = Some(cx.spawn(async move |this, cx| {
+            let write = cx
+                .background_executor()
+                .spawn(async move { write_snapshot(&store, &workspace_id, &snapshot) })
+                .await;
+            if let Err(_error) = write
+                && let Err(_released) = this.update(cx, |restore, cx| {
+                    restore.report(WRITE_FAILURE_MESSAGE, Severity::Error, cx);
+                })
+            {
+                // Handled: the workspace went away with its window; no one is left to
+                // tell that the write failed.
+            }
+        }));
+    }
+
     /// Show `message` through the workspace's toast stack — the one door
     /// [`Workspace::show_toast`] provides (AGENTS.md › errors must reach the user).
     fn report(&self, message: impl Into<SharedString>, level: Severity, cx: &mut Context<Self>) {
