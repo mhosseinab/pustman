@@ -170,3 +170,5 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
   - `cargo build --release -p pustman` → exit 0.
   - The Linux and macOS smoke is still pending with the human. It must cover Backspace, arrows, undo and paste in a text field, which is the `999746d` fix.
   - 34 step records got a "shipped in" line. Segment 3 (S26–S37) starts.
+- 2026-11-20: Segment 3 dispatched: S26a, S29a, S32a, S34a (pi `mimo-v2.6-pro`, four disjoint new crates).
+- 2026-11-20: App icon wired (`5868102`): window app id `pustman` + X11 icon, `scripts/install-desktop-entry.sh` (installed on the build host), `scripts/bundle-macos.sh` (unverified, no macOS host). S32a built (`f85b822`), review 1 dispatched; S35a dispatched into the freed slot.
