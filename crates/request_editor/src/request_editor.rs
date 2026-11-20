@@ -7,6 +7,7 @@
 //! the status line are declared here and filled by S26b's send work, so the send task
 //! has exactly one home to live in (replacing it cancels the in-flight request).
 
+mod curl_paste;
 mod headers;
 mod key_value_table;
 mod method;
@@ -56,6 +57,9 @@ pub struct RequestEditor {
     params: Entity<Params>,
     /// The Headers tab: the user's rows and the request's auto headers (S27b).
     headers: Entity<Headers>,
+    /// The request as it was before the last cURL import — what "Undo import" restores
+    /// in one step (S27c). `None` while no import can be undone.
+    pre_import_request: Option<HttpRequest>,
     /// The send task (S26b): replacing it cancels the request in flight, because
     /// dropping a `Task` cancels it.
     pending_send: Option<Task<()>>,
@@ -107,6 +111,7 @@ impl RequestEditor {
             active_tab: PARAMS_TAB_INDEX,
             params,
             headers,
+            pre_import_request: None,
             pending_send: None,
             inline_error: None,
             status_line: None,
@@ -250,9 +255,19 @@ impl Render for RequestEditor {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::handle_send))
             .on_action(cx.listener(Self::handle_cancel))
+            .on_action(cx.listener(Self::handle_copy_as_curl))
             .size_full()
             .min_w_0()
-            .child(self.url_bar.clone())
+            // The URL bar, wrapped: the cURL paste is captured on this wrapper, which
+            // is on the dispatch path exactly while the URL bar has focus (`curl_paste`).
+            .child(
+                div()
+                    .capture_action::<text_input::input::Paste>(
+                        cx.listener(Self::handle_paste_curl),
+                    )
+                    .child(self.url_bar.clone()),
+            )
+            .children(self.render_import_undo(cx))
             // Under the URL bar, where the send happened: the inline failure and then
             // the status line with the Send/Cancel button.
             .child(self.render_send_area(cx))
