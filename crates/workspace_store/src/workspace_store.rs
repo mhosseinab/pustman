@@ -63,6 +63,12 @@ pub struct Item {
 }
 
 /// What an [`Item`] holds (PRD §4).
+// `Request` is the largest variant because a request carries its tables and settings
+// inline (REQ-HTTP-03's `disabled_auto_headers` included); model values are cloned per
+// edit rather than per frame, so boxing would cost more in call sites than it saves —
+// the same reason `Child` in `collection.rs` and `CollectionItem` in `request.rs` allow
+// this lint.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum ItemBody {
     Workspace(Workspace),

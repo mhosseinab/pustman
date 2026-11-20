@@ -16,7 +16,7 @@ mod params;
 pub mod send;
 pub mod url_bar;
 
-use api_model::HttpRequest;
+use api_model::{HttpRequest, RequestSettings};
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render, SharedString,
     Subscription, Task, Window,
@@ -189,8 +189,10 @@ impl RequestEditor {
         }
     }
 
-    /// A table in the Headers tab changed: the draft's header rows follow it, and the
-    /// auto headers recompute (a user header of the same name suppresses an auto one).
+    /// A table in the Headers tab changed: the draft's header rows follow it, the
+    /// tab's disabled-auto-header list reaches the draft's settings (REQ-HTTP-03), and
+    /// the auto headers recompute (a user header of the same name suppresses an auto
+    /// one).
     fn on_headers_event(
         &mut self,
         _headers: &Entity<Headers>,
@@ -199,10 +201,35 @@ impl RequestEditor {
         cx: &mut Context<Self>,
     ) {
         match event {
-            HeadersEvent::RowsChanged => self.draft.headers = self.headers.read(cx).rows(cx),
+            HeadersEvent::RowsChanged => {
+                self.draft.headers = self.headers.read(cx).rows(cx);
+                self.copy_disabled_auto_headers_to_draft(cx);
+            }
         }
         self.refresh_auto_headers(cx);
         cx.notify();
+    }
+
+    /// The Headers tab's disabled-auto-header list is the new truth for the draft's
+    /// (REQ-HTTP-03) — the one place the copy happens. Only that list comes from the
+    /// tab; every other [`RequestSettings`] field keeps whatever the draft carries. A
+    /// settings that overrides nothing is stored as `None` (which is what `None`
+    /// means: inherit the global settings), so a switch flipped off and on again
+    /// leaves the request — and the workspace format — exactly as it was.
+    fn copy_disabled_auto_headers_to_draft(&mut self, cx: &App) {
+        let disabled = self
+            .headers
+            .read(cx)
+            .draft_settings()
+            .disabled_auto_headers
+            .clone();
+        let mut settings = self.draft.settings.take().unwrap_or_default();
+        settings.disabled_auto_headers = disabled;
+        self.draft.settings = if settings == RequestSettings::default() {
+            None
+        } else {
+            Some(settings)
+        };
     }
 
     /// The draft changed: the auto-header list follows it (S27b). Recomputed on every
@@ -286,3 +313,7 @@ impl Render for RequestEditor {
 pub fn init(cx: &mut App) {
     new_request::init(cx);
 }
+
+#[cfg(test)]
+#[path = "request_editor_auto_header_tests.rs"]
+mod auto_header_tests;

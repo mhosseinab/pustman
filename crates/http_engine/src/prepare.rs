@@ -153,6 +153,19 @@ pub fn prepare(
         &resolved.url,
         &resolved.headers,
     );
+    // A disabled auto header is not sent at all (REQ-HTTP-03): the request's own
+    // settings drop it from the resolved request right here.
+    // `Decision:` this call site is the one place the rule lives. `prepare` is where
+    // "the request as sent" is built, so the Console listing, `wire_auto_headers` and
+    // every transport — `FakeTransport` included — see the same list. Filtering in
+    // `reqwest_transport::wire_auto_headers` would cover the reqwest transport only,
+    // and `body::auto_headers` describes what a body and URL generate, not what a
+    // request's settings switch off.
+    if let Some(settings) = &request.settings {
+        resolved
+            .auto_headers
+            .retain(|header| !settings.is_auto_header_disabled(&header.name));
+    }
     let mut secret_values: Vec<String> = secrets_fetched
         .into_iter()
         .map(|(_name, value)| value)
@@ -350,3 +363,7 @@ impl<'a> ReferencedSecrets<'a> {
 #[cfg(test)]
 #[path = "prepare_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "prepare_disabled_auto_tests.rs"]
+mod disabled_auto_tests;
