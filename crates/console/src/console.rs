@@ -13,9 +13,11 @@
 //! [`init`] installs the store; producers push through [`ConsoleStore::push`] and the
 //! Console panel reads through [`ConsoleStore::entries`] (S32d).
 
+mod export;
 mod feed;
 mod store;
 
+pub use export::export_text;
 pub use feed::{record_error, record_outcome, watch};
 pub use store::{ConsoleEntry, ConsoleLevel, ConsoleSetting, ConsoleStore};
 
