@@ -7,7 +7,10 @@
 //! line — code, reason, time and size — and a failure lands inline under the URL bar as
 //! the transport's own [`TransportError::user_message`] and
 //! [`TransportError::suggested_fix`], verbatim, never re-worded here (AGENTS.md — errors
-//! reach the user).
+//! reach the user). A TLS failure's inline display additionally offers "Disable
+//! verification for this request" (REQ-HTTP-10): it pins `verify_tls` off on this
+//! request's draft and sends again, with the warning badge beside Send for as long as
+//! the override is on. No global setting is ever changed from here.
 //!
 //! `Decision:` the editor sends through the [`RequestClient`] global instead of holding
 //! a client of its own: `new_request`'s app-level handler constructs `RequestEditor` and
@@ -19,7 +22,7 @@
 
 use std::time::Duration;
 
-use gpui::{App, Context, Entity, Global};
+use gpui::{App, Context, Entity, Global, Role, Window};
 use http_engine::{
     HttpClient, PipelineError, Response, ResponseBody, TransportError, resolve_request,
 };
@@ -28,6 +31,7 @@ use ui::prelude::*;
 use variables::{DynamicValues, ScopeStack};
 
 use crate::RequestEditor;
+use crate::settings_tab::SettingChange;
 
 /// Test hook: the button that sends the request, when nothing is in flight.
 pub const SEND_BUTTON_SELECTOR: &str = "send-button";
@@ -40,6 +44,13 @@ pub const STATUS_LINE_SELECTOR: &str = "status-line";
 
 /// Test hook: the inline failure under the URL bar.
 pub const INLINE_ERROR_SELECTOR: &str = "inline-error";
+
+/// Test hook: the warning badge beside Send while TLS verification is off for this
+/// request.
+pub const TLS_BADGE_SELECTOR: &str = "tls-verification-badge";
+
+/// Test hook: the "Disable verification for this request" offer on a TLS failure.
+pub const TLS_OFFER_SELECTOR: &str = "disable-tls-verification";
 
 /// The HTTP client every request tab sends through. The app installs it once at
 /// startup; a test installs one backed by `FakeTransport`.
@@ -60,6 +71,16 @@ pub struct InlineError {
     pub message: String,
     /// [`TransportError::suggested_fix`]: what to do about it.
     pub fix: String,
+}
+
+impl InlineError {
+    /// The inline form of a transport failure: both texts, verbatim.
+    fn from_transport(error: &TransportError) -> Self {
+        Self {
+            message: error.user_message(),
+            fix: error.suggested_fix().to_string(),
+        }
+    }
 }
 
 /// What the status line shows for the last response: the code, the reason phrase, the
@@ -180,6 +201,7 @@ impl RequestEditor {
             .try_global::<RequestClient>()
             .map(|client| client.0.clone())
         else {
+            self.tls_offer_error = None;
             self.inline_error = Some(InlineError {
                 message: String::from("Pustman's HTTP client is not available."),
                 fix: String::from("Restart the app — the request was not sent."),
@@ -200,6 +222,7 @@ impl RequestEditor {
             };
         let send_task = client.update(cx, |client, cx| client.send(resolved, cx));
         self.inline_error = None;
+        self.tls_offer_error = None;
         self.pending_send = Some(cx.spawn(async move |this, cx| {
             let result = send_task.await;
             let landed = this.update(cx, |editor, cx| editor.finish_send(result, cx));
@@ -229,18 +252,30 @@ impl RequestEditor {
     /// inline, exactly as a transport failure is shown.
     fn fail_send(&mut self, error: &PipelineError, cx: &mut Context<Self>) {
         self.pending_send = None;
-        self.inline_error = Some(match error {
-            PipelineError::Transport(error) => InlineError {
-                message: error.user_message(),
-                fix: error.suggested_fix().to_string(),
-            },
+        match error {
+            PipelineError::Transport(error) => self.show_transport_error(error, cx),
             // `ResolveError` carries no `suggested_fix` of its own (its `Display` names
             // the variables involved and nothing else), so only the message is its text.
-            PipelineError::Resolve(error) => InlineError {
-                message: error.to_string(),
-                fix: String::from("Check the variables this request references."),
-            },
-        });
+            PipelineError::Resolve(error) => {
+                self.tls_offer_error = None;
+                self.inline_error = Some(InlineError {
+                    message: error.to_string(),
+                    fix: String::from("Check the variables this request references."),
+                });
+                cx.notify();
+            }
+        }
+    }
+
+    /// Show `error` inline where the send happened: both texts verbatim (AGENTS.md —
+    /// errors reach the user). A TLS failure keeps its offer form in `tls_offer_error`,
+    /// so "Disable verification for this request" renders for it — and, because the
+    /// shown error must be that very failure, never for another error that replaces
+    /// `inline_error` outside a send.
+    fn show_transport_error(&mut self, error: &TransportError, cx: &mut Context<Self>) {
+        let inline = InlineError::from_transport(error);
+        self.tls_offer_error = matches!(error, TransportError::Tls { .. }).then(|| inline.clone());
+        self.inline_error = Some(inline);
         cx.notify();
     }
 
@@ -251,15 +286,11 @@ impl RequestEditor {
             Ok(response) => {
                 self.status_line = Some(StatusLine::from_response(&response));
                 self.inline_error = None;
+                self.tls_offer_error = None;
             }
             // A cancelled or replaced send is not a failure to report (REQ-HTTP-12).
             Err(TransportError::Cancelled) => {}
-            Err(error) => {
-                self.inline_error = Some(InlineError {
-                    message: error.user_message(),
-                    fix: error.suggested_fix().to_string(),
-                });
-            }
+            Err(error) => self.show_transport_error(&error, cx),
         }
         cx.notify();
     }
@@ -280,13 +311,21 @@ impl RequestEditor {
                     .justify_between()
                     .min_w_0()
                     .child(self.render_status(cx))
-                    .child(self.render_send_button(cx)),
+                    .child(
+                        h_flex()
+                            .gap(DynamicSpacing::Base03.rems(cx))
+                            .items_center()
+                            .children(self.render_tls_badge(cx))
+                            .child(self.render_send_button(cx)),
+                    ),
             )
             .into_any_element()
     }
 
-    /// The failure under the URL bar: what happened, and what to do about it.
+    /// The failure under the URL bar: what happened, what to do about it, and — for
+    /// the TLS failure the offer belongs to — the way past it (REQ-HTTP-10).
     fn render_inline_error(&self, error: &InlineError, cx: &Context<Self>) -> AnyElement {
+        let offers_tls_disable = self.tls_offer_error.as_ref() == Some(error);
         v_flex()
             .debug_selector(|| INLINE_ERROR_SELECTOR.to_string())
             .gap(DynamicSpacing::Base01.rems(cx))
@@ -300,7 +339,92 @@ impl RequestEditor {
                     .size(LabelSize::Small)
                     .color(Color::Hint),
             )
+            .children(offers_tls_disable.then(|| self.render_tls_offer(cx)))
             .into_any_element()
+    }
+
+    /// The way past a self-signed or otherwise untrusted certificate: pin verification
+    /// off on THIS request and send it again. A [`Button`], so it is a tab stop Enter
+    /// and Space activate.
+    fn render_tls_offer(&self, cx: &Context<Self>) -> AnyElement {
+        div()
+            .debug_selector(|| TLS_OFFER_SELECTOR.to_string())
+            .child(
+                Button::new(
+                    "disable-tls-verification",
+                    SharedString::new_static("Disable verification for this request"),
+                )
+                .size(ButtonSize::Medium)
+                .style(ButtonStyle::Outlined)
+                .tooltip(Tooltip::text(SharedString::new_static(
+                    "Turn TLS verification off for this request only, then send it again",
+                )))
+                .on_click(cx.listener(|this, _event, window, cx| {
+                    this.disable_verification_and_resend(window, cx)
+                })),
+            )
+            .into_any_element()
+    }
+
+    /// The offer on a TLS failure (REQ-HTTP-10, the HTTP acceptance criterion about
+    /// self-signed servers): pin `verify_tls` off on this draft — the Settings tab
+    /// reflects it and the badge shows — then call the existing send path again. The
+    /// draft is written first so the send below carries it: the tab's change event
+    /// would only reach the draft after this update, too late here. A global setting
+    /// is never changed.
+    ///
+    /// Focus goes back to the editor, because the offer's own error is about to be
+    /// replaced by the re-send's outcome: the button this click landed on disappears
+    /// with it, and a keyboard user's focus must not disappear too.
+    pub(super) fn disable_verification_and_resend(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.apply_setting_change(SettingChange::VerifyTls(Some(false)), cx);
+        self.settings_tab
+            .update(cx, |tab, cx| tab.reseed(&self.draft, cx));
+        window.focus(&self.focus_handle, cx);
+        self.start_send(cx);
+    }
+
+    /// The persistent warning beside Send while TLS verification is off for this
+    /// request (REQ-HTTP-10) — a badge, not a toast: it stays up until the request
+    /// verifies again, and the text says what the color repeats.
+    fn render_tls_badge(&self, _cx: &App) -> Option<AnyElement> {
+        let verification_off = self
+            .draft
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.verify_tls)
+            == Some(false);
+        if !verification_off {
+            return None;
+        }
+        Some(
+            h_flex()
+                .id(ElementId::Name(SharedString::new_static(
+                    "tls-verification-badge",
+                )))
+                .debug_selector(|| TLS_BADGE_SELECTOR.to_string())
+                .role(Role::Status)
+                .aria_label(SharedString::new_static(
+                    "Warning: TLS certificate verification is disabled for this request",
+                ))
+                .tooltip(
+                    Tooltip::text(SharedString::new_static(
+                        "TLS certificate verification is off for this request only — the \
+                         global default is unchanged",
+                    ))
+                    .builder(),
+                )
+                .child(
+                    Badge::new(SharedString::new_static("TLS verification off"))
+                        .severity(Severity::Warning)
+                        .icon(IconName::TriangleAlert),
+                )
+                .into_any_element(),
+        )
     }
 
     /// The status line: code (colored by class), reason, total time and size; "Sending…"

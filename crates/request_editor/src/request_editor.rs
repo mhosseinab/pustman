@@ -1,8 +1,8 @@
 //! `request_editor` — the request tab (PRD REQ-HTTP-01..04): a [`RequestEditor`] item
 //! holding the [`HttpRequest`] draft, with the URL bar's method picker and URL field on
 //! top, the send/status area (`send`) under it, and the request tab strip (Params,
-//! Headers, Body and Auth now; later steps append) over the tab content (`params`,
-//! `headers`, `body_tab`, `auth_tab`).
+//! Headers, Body, Auth and Settings now; later steps append) over the tab content
+//! (`params`, `headers`, `body_tab`, `auth_tab`, `settings_tab`).
 //!
 //! `Decision:` the step's scope stops at the URL bar: `pending_send`, `inline_error` and
 //! the status line are declared here and filled by S26b's send work, so the send task
@@ -17,6 +17,7 @@ mod method;
 mod new_request;
 mod params;
 pub mod send;
+mod settings_tab;
 pub mod url_bar;
 
 use api_model::{HttpRequest, RequestSettings};
@@ -32,6 +33,7 @@ use body_tab::{BodyTab, BodyTabEvent};
 use headers::{Headers, HeadersEvent};
 use params::{Params, ParamsEvent};
 use send::{InlineError, StatusLine};
+use settings_tab::{SettingChange, SettingsTab, SettingsTabEvent};
 use url_bar::{UrlBar, UrlBarEvent};
 
 /// The key context the editor answers the keyboard in; `assets/keymaps/` binds
@@ -49,6 +51,9 @@ const BODY_TAB_INDEX: usize = 2;
 
 /// The Auth tab's index in the request tab strip.
 const AUTH_TAB_INDEX: usize = 3;
+
+/// The Settings tab's index in the request tab strip.
+const SETTINGS_TAB_INDEX: usize = 4;
 
 /// One open request: the draft the tab is editing, the URL bar that edits it, and the
 /// fields the status line area below it is drawn from (S26b).
@@ -72,6 +77,8 @@ pub struct RequestEditor {
     body_tab: Entity<BodyTab>,
     /// The Auth tab: the auth-type editors (S28b).
     auth_tab: Entity<AuthTab>,
+    /// The Settings tab: this request's settings overrides (S28c).
+    settings_tab: Entity<SettingsTab>,
     /// The request as it was before the last cURL import — what "Undo import" restores
     /// in one step (S27c). `None` while no import can be undone.
     pre_import_request: Option<HttpRequest>,
@@ -80,6 +87,11 @@ pub struct RequestEditor {
     pending_send: Option<Task<()>>,
     /// Why the last send failed, shown under the URL bar.
     inline_error: Option<InlineError>,
+    /// The TLS failure whose inline display carries the "Disable verification for this
+    /// request" offer (REQ-HTTP-10). The offer renders only while this is the error on
+    /// display: `curl_paste`'s import error replaces `inline_error` outside a send and
+    /// must never show it (`send`'s `render_inline_error`).
+    tls_offer_error: Option<InlineError>,
     /// What the status line shows for the last response.
     status_line: Option<StatusLine>,
     _url_bar_subscription: Subscription,
@@ -87,6 +99,7 @@ pub struct RequestEditor {
     _headers_subscription: Subscription,
     _body_tab_subscription: Subscription,
     _auth_tab_subscription: Subscription,
+    _settings_tab_subscription: Subscription,
     _tab_bar_subscription: Subscription,
 }
 
@@ -105,6 +118,9 @@ impl RequestEditor {
         let body_tab_subscription = cx.subscribe_in(&body_tab, window, Self::on_body_tab_event);
         let auth_tab = cx.new(|cx| AuthTab::new(&request, window, cx));
         let auth_tab_subscription = cx.subscribe_in(&auth_tab, window, Self::on_auth_tab_event);
+        let settings_tab = cx.new(|cx| SettingsTab::new(&request, window, cx));
+        let settings_tab_subscription =
+            cx.subscribe_in(&settings_tab, window, Self::on_settings_tab_event);
         let tab_bar = cx.new(TabBar::new);
         tab_bar.update(cx, |bar, cx| {
             bar.set_tabs(
@@ -126,6 +142,10 @@ impl RequestEditor {
                         SharedString::new_static("request-tab-auth"),
                         SharedString::new_static("Auth"),
                     ),
+                    Tab::new(
+                        SharedString::new_static("request-tab-settings"),
+                        SharedString::new_static("Settings"),
+                    ),
                 ],
                 cx,
             )
@@ -142,15 +162,18 @@ impl RequestEditor {
             headers,
             body_tab,
             auth_tab,
+            settings_tab,
             pre_import_request: None,
             pending_send: None,
             inline_error: None,
+            tls_offer_error: None,
             status_line: None,
             _url_bar_subscription: url_bar_subscription,
             _params_subscription: params_subscription,
             _headers_subscription: headers_subscription,
             _body_tab_subscription: body_tab_subscription,
             _auth_tab_subscription: auth_tab_subscription,
+            _settings_tab_subscription: settings_tab_subscription,
             _tab_bar_subscription: tab_bar_subscription,
         }
     }
@@ -183,6 +206,11 @@ impl RequestEditor {
     /// The Auth tab.
     pub fn auth_tab(&self) -> &Entity<AuthTab> {
         &self.auth_tab
+    }
+
+    /// The Settings tab.
+    pub fn settings_tab(&self) -> &Entity<SettingsTab> {
+        &self.settings_tab
     }
 
     /// Move focus to the URL field — `request::FocusUrlBar` (Ctrl-L / Cmd-L).
@@ -226,6 +254,14 @@ impl RequestEditor {
         let index = match event {
             TabBarEvent::Selected { index } | TabBarEvent::Activated { index } => *index,
         };
+        if index == SETTINGS_TAB_INDEX {
+            // The Settings tab mirrors the draft's settings and nothing else writes to
+            // it: a cURL import or undo replaces the whole request without re-seeding
+            // this tab (`curl_paste` is outside its step's Edits), so it re-reads the
+            // draft whenever the user comes back to it.
+            self.settings_tab
+                .update(cx, |tab, cx| tab.reseed(&self.draft, cx));
+        }
         if self.active_tab != index {
             self.active_tab = index;
             cx.notify();
@@ -298,6 +334,33 @@ impl RequestEditor {
         }
         self.refresh_auto_headers(cx);
         cx.notify();
+    }
+
+    /// A control in the Settings tab changed one override: write that change into the
+    /// draft's settings (REQ-HTTP-09) — the one place they are written from this tab.
+    /// `disabled_auto_headers` and `extra` are fields the tab does not own and come
+    /// through untouched, and a settings that overrides nothing is stored as `None`
+    /// (the `copy_disabled_auto_headers_to_draft` rule), so a setting flipped away
+    /// from and back to its default leaves the request exactly as it was.
+    fn apply_setting_change(&mut self, change: SettingChange, cx: &mut Context<Self>) {
+        let mut settings = self.draft.settings.take().unwrap_or_default();
+        change.apply(&mut settings);
+        self.draft.settings = (settings != RequestSettings::default()).then_some(settings);
+        cx.notify();
+    }
+
+    /// The Settings tab changed: its one changed override reaches the draft (the
+    /// event carries it, so an edit of one field never touches another).
+    fn on_settings_tab_event(
+        &mut self,
+        _settings_tab: &Entity<SettingsTab>,
+        event: &SettingsTabEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            SettingsTabEvent::SettingChanged(change) => self.apply_setting_change(*change, cx),
+        }
     }
 
     /// The Body tab changed: the draft's body follows it (REQ-HTTP-04) — the one
@@ -384,6 +447,7 @@ impl Render for RequestEditor {
                 HEADERS_TAB_INDEX => this.child(self.headers.clone()),
                 BODY_TAB_INDEX => this.child(self.body_tab.clone()),
                 AUTH_TAB_INDEX => this.child(self.auth_tab.clone()),
+                SETTINGS_TAB_INDEX => this.child(self.settings_tab.clone()),
                 _ => this.child(self.params.clone()),
             })
     }
