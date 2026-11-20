@@ -1,0 +1,363 @@
+//! The URL bar: the method picker and the URL field of a request editor (REQ-HTTP-01/02,
+//! pack screen S03 "HTTP composer").
+//!
+//! `Decision:` the method dropdown composes the `ui` [`Button`] and [`ContextMenu`]
+//! primitives — the step's constraint — instead of a popover-menu primitive `crates/ui`
+//! does not have yet. While it is open it is drawn in a [`gpui::deferred`] floating
+//! layer anchored under the trigger and snapped to the window edge, so it is never
+//! clipped by the editor below it and never leaves the window.
+
+use std::sync::Arc;
+
+use api_model::Method;
+use gpui::{
+    Anchor, AnyElement, Entity, EventEmitter, Focusable, Subscription, Window, anchored, deferred,
+};
+use text_input::{TextInput, TextInputEvent};
+use ui::components::context_menu::ContextMenuEvent;
+use ui::prelude::*;
+
+use crate::method;
+
+/// The height of one method control (a [`ButtonSize::Medium`]) in pixels at the default
+/// scale: the dropdown is anchored just under it.
+const METHOD_CONTROL_HEIGHT_PX: f32 = 28.;
+
+/// The width of the custom method field in pixels at the default scale — room for the
+/// longest plausible token (`PROPFIND`) without taking space from the URL.
+const CUSTOM_FIELD_WIDTH_PX: f32 = 120.;
+
+/// Test hook: the inline error that says why a custom method was rejected.
+pub const CUSTOM_ERROR_SELECTOR: &str = "custom-method-error";
+
+/// What a [`UrlBar`] tells its owner.
+#[derive(Clone, Debug, PartialEq)]
+pub enum UrlBarEvent {
+    /// The URL text changed — typing, paste or [`UrlBar::set_url`].
+    UrlChanged,
+    /// A method was applied: a dropdown pick or an accepted custom token.
+    MethodChanged(Method),
+}
+
+impl EventEmitter<UrlBarEvent> for UrlBar {}
+
+/// One request's method picker and URL field.
+///
+/// The bar owns what it edits — the method and the URL text — and reports every applied
+/// change as a [`UrlBarEvent`]; the owner keeps the request draft in step with it.
+pub struct UrlBar {
+    method: Method,
+    url_input: Entity<TextInput>,
+    /// The method button's focus handle. It is the flow's anchor: the dropdown and the
+    /// custom method field hand focus back to it when they close.
+    method_focus_handle: FocusHandle,
+    /// The open dropdown and its subscription: dropped together when it dismisses.
+    method_menu: Option<Entity<ContextMenu>>,
+    method_menu_subscription: Option<Subscription>,
+    /// The custom method field while a custom token is being typed.
+    custom_input: Option<Entity<TextInput>>,
+    custom_input_subscription: Option<Subscription>,
+    /// Why the last typed custom method was not applied, shown under the field.
+    custom_error: Option<SharedString>,
+    _url_subscription: Subscription,
+}
+
+impl UrlBar {
+    /// A bar for a request that already has a method and a URL.
+    pub fn new(method: Method, url: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let url_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .with_placeholder(SharedString::new_static("Enter request URL"))
+        });
+        url_input.update(cx, |input, cx| input.set_text(&url, cx));
+        // `text_input`'s handle defaults to not being a tab stop; the URL field belongs
+        // in the tab order right after the method control.
+        url_input.read(cx).focus_handle(cx).tab_stop(true);
+        let url_subscription = cx.subscribe_in(&url_input, window, Self::on_url_event);
+        Self {
+            method,
+            url_input,
+            method_focus_handle: cx.focus_handle().tab_stop(true),
+            method_menu: None,
+            method_menu_subscription: None,
+            custom_input: None,
+            custom_input_subscription: None,
+            custom_error: None,
+            _url_subscription: url_subscription,
+        }
+    }
+
+    /// The URL text.
+    pub fn url(&self, cx: &App) -> String {
+        self.url_input.read(cx).text()
+    }
+
+    /// Replace the URL text. The owner hears [`UrlBarEvent::UrlChanged`] like for any
+    /// other edit, so the draft cannot drift from the field.
+    pub fn set_url(&self, url: &str, cx: &mut App) {
+        self.url_input
+            .update(cx, |input, cx| input.set_text(url, cx));
+    }
+
+    /// The method the picker shows.
+    pub fn method(&self) -> &Method {
+        &self.method
+    }
+
+    /// Why the last custom method was not applied, if one was rejected.
+    pub fn custom_error(&self) -> Option<&SharedString> {
+        self.custom_error.as_ref()
+    }
+
+    /// Move focus into the URL field (the editor's `request::FocusUrlBar` lands here).
+    pub fn focus_url(&self, window: &mut Window, cx: &mut App) {
+        let focus_handle = self.url_input.read(cx).focus_handle(cx);
+        window.focus(&focus_handle, cx);
+    }
+
+    /// Open the field a custom method token is typed into — what the dropdown's
+    /// "Custom Method…" entry runs. Enter applies the token, Escape backs out.
+    pub fn begin_custom_method(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.custom_input.is_some() {
+            return;
+        }
+        self.custom_error = None;
+        // A custom token already in place is what the user wants to edit; a standard
+        // verb starts the field empty rather than inviting "GET" as a custom method.
+        let initial = match &self.method {
+            Method::Custom(token) => token.clone(),
+            _ => String::new(),
+        };
+        let input = cx.new(|cx| {
+            TextInput::new(window, cx).with_placeholder(SharedString::new_static("e.g. PROPFIND"))
+        });
+        input.read(cx).focus_handle(cx).tab_stop(true);
+        input.update(cx, |input, cx| input.set_text(&initial, cx));
+        let subscription = cx.subscribe_in(&input, window, Self::on_custom_input_event);
+        self.custom_input_subscription = Some(subscription);
+        self.custom_input = Some(input.clone());
+        let focus_handle = input.read(cx).focus_handle(cx);
+        window.focus(&focus_handle, cx);
+        cx.notify();
+    }
+
+    /// Apply a method: the dropdown pick and an accepted custom token both land here.
+    fn apply_method(&mut self, method: Method, window: &mut Window, cx: &mut Context<Self>) {
+        self.method = method;
+        self.custom_error = None;
+        self.close_custom_input();
+        cx.emit(UrlBarEvent::MethodChanged(self.method.clone()));
+        window.focus(&self.method_focus_handle, cx);
+        cx.notify();
+    }
+
+    /// Close the custom method field without applying anything.
+    fn close_custom_input(&mut self) {
+        self.custom_input = None;
+        self.custom_input_subscription = None;
+    }
+
+    /// Open the method dropdown under the method button.
+    fn open_method_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.method_menu.is_some() {
+            return;
+        }
+        let picker = cx.weak_entity();
+        let custom_picker = cx.weak_entity();
+        let menu = cx.new(|cx| {
+            let mut menu = ContextMenu::new(cx);
+            for standard in method::STANDARD_METHODS {
+                let picked = standard.clone();
+                let picker = picker.clone();
+                menu = menu.entry(standard.as_str(), move |_event, window, cx| {
+                    if picker
+                        .update(cx, |bar, cx| bar.apply_method(picked.clone(), window, cx))
+                        .is_err()
+                    {
+                        // The bar was dropped while the menu was open; there is no
+                        // request left to apply a method to.
+                    }
+                });
+            }
+            menu.separator().entry(
+                SharedString::new_static("Custom Method…"),
+                move |_event, window, cx| {
+                    if custom_picker
+                        .update(cx, |bar, cx| bar.begin_custom_method(window, cx))
+                        .is_err()
+                    {
+                        // The bar was dropped while the menu was open; there is no
+                        // field left to type into.
+                    }
+                },
+            )
+        });
+        let subscription = cx.subscribe_in(&menu, window, Self::on_menu_event);
+        menu.update(cx, |menu, cx| menu.focus(window, cx));
+        self.method_menu = Some(menu);
+        self.method_menu_subscription = Some(subscription);
+        cx.notify();
+    }
+
+    /// The dropdown is done — an entry ran or Escape backed out — so it goes away and
+    /// focus returns to the method button, unless the custom field just took it.
+    fn on_menu_event(
+        &mut self,
+        _menu: &Entity<ContextMenu>,
+        event: &ContextMenuEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if *event != ContextMenuEvent::Dismissed {
+            return;
+        }
+        self.method_menu = None;
+        self.method_menu_subscription = None;
+        if self.custom_input.is_none() {
+            window.focus(&self.method_focus_handle, cx);
+        }
+        cx.notify();
+    }
+
+    /// The URL field changed; the owner tracks it through [`UrlBarEvent::UrlChanged`].
+    fn on_url_event(
+        &mut self,
+        _input: &Entity<TextInput>,
+        event: &TextInputEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if *event == TextInputEvent::Changed {
+            cx.emit(UrlBarEvent::UrlChanged);
+        }
+    }
+
+    /// Enter in the custom method field applies the token it holds; a token the rule
+    /// rejects is not applied and is explained inline instead.
+    fn on_custom_input_event(
+        &mut self,
+        input: &Entity<TextInput>,
+        event: &TextInputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if *event != TextInputEvent::Submitted {
+            return;
+        }
+        let typed = input.read(cx).text();
+        match method::custom_method(&typed) {
+            Ok(method) => self.apply_method(method, window, cx),
+            Err(_) => {
+                self.custom_error = Some(method::rejection_message(&typed));
+                cx.notify();
+            }
+        }
+    }
+
+    /// `request::Cancel` (Escape): back out of the custom method field. With nothing to
+    /// back out of here, the action keeps bubbling to the editor — S26b answers it with
+    /// "cancel the in-flight send".
+    fn cancel(
+        &mut self,
+        _: &pustman_actions::request::Cancel,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.custom_input.is_none() {
+            cx.propagate();
+            return;
+        }
+        self.close_custom_input();
+        self.custom_error = None;
+        window.focus(&self.method_focus_handle, cx);
+        cx.notify();
+    }
+
+    /// The method control: the dropdown trigger, or the custom method field while a
+    /// custom token is being typed. The dropdown floats under it.
+    fn render_method_control(&self, cx: &mut Context<Self>) -> AnyElement {
+        let control = match self.custom_input.clone() {
+            Some(input) => div()
+                .w(px_to_rems(CUSTOM_FIELD_WIDTH_PX))
+                .border_1()
+                .border_color(cx.theme().colors().border)
+                .rounded_sm()
+                .px(DynamicSpacing::Base04.rems(cx))
+                .child(input)
+                .into_any_element(),
+            None => Button::new(
+                ElementId::from(&self.method_focus_handle),
+                SharedString::from(self.method.as_str()),
+            )
+            .size(ButtonSize::Medium)
+            .end_icon(Icon::new(IconName::ChevronDown).size(IconSize::Small))
+            .tooltip(Tooltip::text("Choose the HTTP method"))
+            .focus_handle(self.method_focus_handle.clone())
+            .on_click(cx.listener(|this, _event, window, cx| this.open_method_menu(window, cx)))
+            .into_any_element(),
+        };
+        div()
+            .relative()
+            .child(control)
+            .children(self.method_menu.clone().map(|menu| {
+                div()
+                    .absolute()
+                    .top(px_to_rems(METHOD_CONTROL_HEIGHT_PX))
+                    .left_0()
+                    .child(
+                        deferred(
+                            anchored()
+                                .anchor(Anchor::TopLeft)
+                                .snap_to_window_with_margin(DynamicSpacing::Base04.px(cx))
+                                .child(menu),
+                        )
+                        .with_priority(1),
+                    )
+            }))
+            .into_any_element()
+    }
+
+    /// The inline error under the bar: what the rejected token was and why.
+    fn render_custom_error(&self, message: SharedString) -> impl IntoElement {
+        h_flex()
+            .id(ElementId::NamedChild(
+                Arc::new(ElementId::from(&self.method_focus_handle)),
+                SharedString::new_static("custom-method-error"),
+            ))
+            .debug_selector(|| CUSTOM_ERROR_SELECTOR.to_string())
+            .child(
+                Label::new(message)
+                    .size(LabelSize::Small)
+                    .color(Color::Error),
+            )
+    }
+}
+
+impl Render for UrlBar {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .id(ElementId::from(&self.method_focus_handle))
+            .gap(DynamicSpacing::Base02.rems(cx))
+            .on_action(cx.listener(Self::cancel))
+            .child(
+                h_flex()
+                    .gap(DynamicSpacing::Base03.rems(cx))
+                    .child(self.render_method_control(cx))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .border_1()
+                            .border_color(cx.theme().colors().border)
+                            .rounded_sm()
+                            .px(DynamicSpacing::Base04.rems(cx))
+                            .child(self.url_input.clone()),
+                    ), // S26b's Send button lands at the end of this row.
+            )
+            .children(
+                self.custom_error
+                    .clone()
+                    .map(|message| self.render_custom_error(message)),
+            )
+    }
+}

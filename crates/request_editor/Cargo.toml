@@ -1,0 +1,27 @@
+# crates/request_editor — the request tab (PRD REQ-HTTP-01..04): the URL bar with the
+# method picker, and the `HttpRequest` draft behind it. Zed's workspace `Item`s are GPL:
+# this is our own composition of the `ui` and `text_input` primitives.
+
+[package]
+name = "request_editor"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/request_editor.rs"
+
+[dependencies]
+api_model.workspace = true
+gpui.workspace = true
+pustman_actions.workspace = true
+text_input.workspace = true
+ui.workspace = true
+workspace.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+ui = { workspace = true, features = ["test-support"] }
