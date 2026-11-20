@@ -175,3 +175,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-20: Release procedure now packages the app icon (`c31e3b5`, promote skill step 3). S32a merged `f01121f` (review 1 PASS; LOW #108, #109).
 - 2026-11-20: S35a passed (`cb0be4c`, review 1 PASS_WITH_ISSUES; LOW #110–#112). S29a built (`5e4ff7e`), in review; S29c (stacked on S29a) and S32d dispatched.
 - 2026-11-20: S32b passed (`68e868a`, review 1 PASS_WITH_ISSUES; LOW #113–#115).
+- 2026-11-20: S26a passed (`ed1e69d`, review 1 PASS_WITH_ISSUES; LOW #116–#117).
