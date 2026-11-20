@@ -24,6 +24,7 @@ use std::sync::Arc;
 
 use cookie_store::RawCookie;
 use http_engine::Header;
+use pustman_actions::cookies::Manage;
 use time::format_description::well_known::Rfc2822;
 use ui::prelude::*;
 
@@ -207,14 +208,24 @@ pub fn parse_set_cookies(headers: &[Header]) -> Vec<ParsedCookie> {
 /// The Cookies tab: the parsed rows of one response, and the table that draws them.
 pub struct CookiesTab {
     rows: Arc<Vec<ParsedCookie>>,
+    /// The "Manage cookies" button's focus handle: the tab order the keyboard reaches
+    /// the button with (REQ-HTTP-08's dialog opens from here).
+    manage_focus: FocusHandle,
 }
 
 impl CookiesTab {
     /// An empty tab, waiting for a response.
-    pub fn new(_cx: &mut Context<Self>) -> Self {
+    pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             rows: Arc::new(Vec::new()),
+            manage_focus: cx.focus_handle(),
         }
+    }
+
+    /// The "Manage cookies" button, as the keyboard reaches it: the tab hands the
+    /// button its tab order through this handle.
+    pub fn manage_focus_handle(&self) -> FocusHandle {
+        self.manage_focus.clone()
     }
 
     /// Show the `Set-Cookie` headers of the response that just arrived. The rows are
@@ -238,6 +249,27 @@ impl Render for CookiesTab {
         let base = ElementId::from(("cookies-tab", cx.entity_id()));
         v_flex()
             .size_full()
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .justify_end()
+                    .px(DynamicSpacing::Base04.rems(cx))
+                    .py(DynamicSpacing::Base02.rems(cx))
+                    .border_b_1()
+                    .border_color(cx.theme().colors().border_variant)
+                    .child(
+                        // The tab's one door into the Manage Cookies dialog
+                        // (REQ-HTTP-08): it dispatches `cookies::Manage`, whose
+                        // app-level handler opens the dialog over this window.
+                        Button::new(child_id(&base, "manage-cookies"), "Manage cookies")
+                            .size(ButtonSize::Default)
+                            .focus_handle(self.manage_focus.clone())
+                            .on_click(cx.listener(|_this, _event, window, cx| {
+                                window.dispatch_action(Box::new(Manage), cx);
+                            })),
+                    ),
+            )
             .child(
                 h_flex()
                     .w_full()

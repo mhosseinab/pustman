@@ -24,6 +24,7 @@ mime.workspace = true
 regex.workspace = true
 serde_json.workspace = true
 pustman_actions.workspace = true
+storage.workspace = true
 text_input.workspace = true
 theme.workspace = true
 time.workspace = true

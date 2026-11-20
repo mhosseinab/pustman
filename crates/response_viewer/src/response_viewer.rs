@@ -10,6 +10,7 @@
 //! parallel model here.
 
 mod body_view;
+pub mod cookie_dialog;
 mod cookies_tab;
 mod error_panel;
 mod find;
@@ -215,9 +216,11 @@ impl Focusable for ResponseView {
 }
 
 /// The response viewer's init-order hook (`pustman::init` runs it after its
-/// dependencies). S29a registers nothing globally: the views are created by their hosts,
-/// and later steps register their actions here.
-pub fn init(_cx: &mut App) {}
+/// dependencies). The views are created by their hosts; the app-level actions live
+/// with their feature — [`cookie_dialog`] answers `cookies::Manage` (REQ-HTTP-08).
+pub fn init(cx: &mut App) {
+    cookie_dialog::init(cx);
+}
 
 /// The tabs, built from [`TAB_TITLES`] so later steps append there and nowhere else.
 fn tabs() -> Vec<Tab> {
