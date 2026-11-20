@@ -12,6 +12,7 @@
 mod body_view;
 mod cookies_tab;
 mod error_panel;
+mod find;
 mod headers_view;
 mod hex_view;
 mod pretty;
@@ -178,6 +179,7 @@ impl Render for ResponseView {
             .size_full()
             .min_h_0()
             .key_context(RESPONSE_VIEW_CONTEXT)
+            .on_action(cx.listener(Self::find))
             .on_action(cx.listener(Self::save_body))
             .on_action(cx.listener(Self::copy_body))
             .track_focus(&self.focus_handle)

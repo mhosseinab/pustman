@@ -21,13 +21,15 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use gpui::{
-    Anchor, AnyElement, Entity, FocusHandle, Subscription, Task, Window, anchored, deferred,
+    Anchor, AnyElement, Entity, FocusHandle, Focusable, HighlightStyle, ScrollStrategy, StyledText,
+    Subscription, Task, UniformListScrollHandle, Window, anchored, deferred,
 };
 use http_engine::{Header, Response, ResponseBody};
 use ui::components::context_menu::ContextMenuEvent;
 use ui::prelude::*;
 
 use crate::child_id;
+use crate::find::{FindBar, FindEvent, FindMatch};
 use crate::hex_view::{HexRows, HexView};
 use crate::pretty::{FormatError, Formatter};
 use crate::preview::{PreviewContent, PreviewPane};
@@ -118,6 +120,15 @@ pub struct BodyView {
     formatter_menu_subscription: Option<Subscription>,
     /// The override trigger's focus handle — the menu hands focus back to it on close.
     formatter_focus_handle: FocusHandle,
+    /// The find bar over the lines while it is open (REQ-RESP-03), and the subscription
+    /// bringing its events back here.
+    find_bar: Option<Entity<FindBar>>,
+    find_subscription: Option<Subscription>,
+    /// The lines list's scroll state: the find bar scrolls the current match into view
+    /// through it.
+    list_scroll_handle: UniformListScrollHandle,
+    /// The pane's own focus handle — what Escape from the find bar hands focus back to.
+    focus_handle: FocusHandle,
     _mode_bar_subscription: Subscription,
 }
 
@@ -148,6 +159,10 @@ impl BodyView {
             formatter_menu: None,
             formatter_menu_subscription: None,
             formatter_focus_handle: cx.focus_handle().tab_stop(true),
+            find_bar: None,
+            find_subscription: None,
+            list_scroll_handle: UniformListScrollHandle::default(),
+            focus_handle: cx.focus_handle(),
             _mode_bar_subscription,
         }
     }
@@ -213,6 +228,7 @@ impl BodyView {
                                 );
                             }
                         }
+                        view.refresh_find(cx);
                         cx.notify();
                     }) {
                         // Handled: the view went away with its window; there is nobody
@@ -221,6 +237,7 @@ impl BodyView {
                 }));
             }
         }
+        self.refresh_find(cx);
         cx.notify();
     }
 
@@ -238,14 +255,80 @@ impl BodyView {
         });
         self.refresh_format(cx);
         self.refresh_preview(cx);
+        self.refresh_find(cx);
         cx.notify();
     }
 
+    /// Open the find bar over the lines (REQ-RESP-03). It is created on first use and
+    /// re-synced and focused on every `response::Find`.
+    pub fn open_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.find_bar.is_none() {
+            let bar = cx.new(|cx| FindBar::new(window, cx));
+            let subscription = cx.subscribe_in(&bar, window, Self::on_find_event);
+            self.find_bar = Some(bar);
+            self.find_subscription = Some(subscription);
+        }
+        if let Some(bar) = &self.find_bar {
+            let lines = Arc::clone(self.shown());
+            bar.update(cx, |bar, cx| bar.set_lines(lines, cx));
+            let query_focus = bar.read(cx).focus_handle(cx);
+            window.focus(&query_focus, cx);
+        }
+        cx.notify();
+    }
+
+    /// The find bar's events: a new current match scrolls into view, and Escape closes
+    /// the bar and hands focus back to the body.
+    fn on_find_event(
+        &mut self,
+        bar: &Entity<FindBar>,
+        event: &FindEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            FindEvent::Changed => {
+                if let Some(line) = bar.read(cx).current_line() {
+                    self.list_scroll_handle
+                        .scroll_to_item(line, ScrollStrategy::Nearest);
+                }
+                cx.notify();
+            }
+            FindEvent::Dismissed => {
+                self.find_bar = None;
+                self.find_subscription = None;
+                window.focus(&self.focus_handle, cx);
+                cx.notify();
+            }
+        }
+    }
+
+    /// Tell the find bar about new shown lines. The match list recomputes there — this
+    /// only moves the data.
+    fn refresh_find(&mut self, cx: &mut Context<Self>) {
+        if let Some(bar) = &self.find_bar {
+            let lines = Arc::clone(self.shown());
+            bar.update(cx, |bar, cx| bar.set_lines(lines, cx));
+        }
+    }
+
+    /// The find bar's current matches (empty while it is closed) — what the visible rows
+    /// highlight. The list itself is computed in [`FindBar`], never here.
+    fn find_matches(&self, cx: &App) -> Arc<Vec<FindMatch>> {
+        match &self.find_bar {
+            Some(bar) => bar.read(cx).matches(),
+            None => Arc::new(Vec::new()),
+        }
+    }
+
     /// Override the detected formatter by hand — [`None`] returns to the `Content-Type`
-    /// choice. The Pretty lines describe the old formatter, so they reformat.
+    /// choice. The Pretty lines describe the old formatter, so they reformat — and the
+    /// find bar re-syncs to the lines on screen meanwhile, the same way [`Self::set_mode`]
+    /// keeps it in step.
     pub fn set_formatter_override(&mut self, formatter: Option<Formatter>, cx: &mut Context<Self>) {
         self.formatter_override = formatter;
         self.refresh_format(cx);
+        self.refresh_find(cx);
         cx.notify();
     }
 
@@ -317,6 +400,7 @@ impl BodyView {
                     Ok(lines) => view.pretty_lines = Arc::new(lines),
                     Err(message) => view.format_error = Some(message),
                 }
+                view.refresh_find(cx);
                 cx.notify();
             }) {
                 // Handled: the view went away with its window; there is nobody left to
@@ -496,6 +580,7 @@ impl BodyView {
             return div().into_any_element();
         }
         let row_lines = Arc::clone(&lines);
+        let row_matches = self.find_matches(cx);
         let row_base = base.clone();
         let list_base = base.clone();
         let render_base = base.clone();
@@ -503,8 +588,11 @@ impl BodyView {
             child_id(&list_base, "lines"),
             lines.len(),
             move |index| child_id(&row_base, format!("line-{index}")),
-            move |index, _window, cx| render_line(&row_lines, index, &render_base, cx),
+            move |index, _window, cx| {
+                render_line_with_matches(&row_lines, index, &render_base, &row_matches, cx)
+            },
         )
+        .track_scroll(self.list_scroll_handle.clone())
         .into_any_element()
     }
 
@@ -535,7 +623,9 @@ impl Render for BodyView {
         let base = ElementId::from(("body-view", cx.entity_id()));
         v_flex()
             .size_full()
+            .track_focus(&self.focus_handle)
             .child(self.render_toolbar(cx))
+            .children(self.find_bar.clone())
             .map(|this| match &self.error {
                 Some(message) => this.child(
                     div()
@@ -567,6 +657,14 @@ impl Render for BodyView {
     }
 }
 
+impl Focusable for BodyView {
+    /// The pane itself is a focus target so Escape from the find bar has somewhere to
+    /// return to ([`Self::on_find_event`]).
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
 /// One body line: the content font, truncated with the full line behind a tooltip.
 /// Shared with the Preview text lines ([`crate::preview`]): a body pane's lines all draw
 /// the same way.
@@ -576,9 +674,32 @@ pub(crate) fn render_line(
     base: &ElementId,
     cx: &mut App,
 ) -> AnyElement {
+    render_line_with_matches(lines, index, base, &[], cx)
+}
+
+/// One body line with the find matches on it painted as [`HighlightStyle`] backgrounds
+/// (REQ-RESP-03). Only visible rows get here ([`VirtualList`] asks per row), and the
+/// row's matches come out of the ordered list by one binary search.
+fn render_line_with_matches(
+    lines: &[SharedString],
+    index: usize,
+    base: &ElementId,
+    matches: &[FindMatch],
+    cx: &App,
+) -> AnyElement {
     let Some(line) = lines.get(index).cloned() else {
         return div().into_any_element();
     };
+    let highlight = HighlightStyle {
+        background_color: Some(cx.theme().colors().search_match_background),
+        ..HighlightStyle::default()
+    };
+    let first = matches.partition_point(|found| found.line < index);
+    let highlights = matches[first..]
+        .iter()
+        .take_while(|found| found.line == index)
+        .map(|found| (found.range.clone(), highlight))
+        .collect::<Vec<_>>();
     let line_id = child_id(base, format!("line-{index}"));
     div()
         .id(child_id(&line_id, "text"))
@@ -590,7 +711,13 @@ pub(crate) fn render_line(
         .text_buffer(cx)
         .text_color(cx.theme().colors().text)
         .tooltip(Tooltip::text(line.clone()).builder())
-        .child(div().w_full().min_w_0().truncate().child(line))
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .truncate()
+                .child(StyledText::new(line).with_highlights(highlights)),
+        )
         .into_any_element()
 }
 
@@ -684,3 +811,7 @@ fn body_bytes(response: &Response) -> std::io::Result<Vec<u8>> {
 #[cfg(test)]
 #[path = "body_view_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "find_format_tests.rs"]
+mod format_tests;
