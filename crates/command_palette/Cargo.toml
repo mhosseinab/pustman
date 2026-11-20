@@ -1,0 +1,25 @@
+# crates/command_palette — the reusable modal picker (src/picker.rs) and the fuzzy scorer
+# that ranks its matches (src/fuzzy.rs). The picker is ours: Zed's `picker`/`fuzzy` crates
+# are GPL and are studied for patterns only. S34a (the command palette), S41b and S46
+# depend on this crate to reuse `Picker<D: PickerDelegate>`.
+
+[package]
+name = "command_palette"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/command_palette.rs"
+
+[dependencies]
+gpui.workspace = true
+text_input.workspace = true
+ui.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+ui = { workspace = true, features = ["test-support"] }
