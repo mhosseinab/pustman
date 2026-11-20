@@ -61,7 +61,7 @@ These run at the next human sign-off and are recorded in that sign-off's step re
 
 ## Window
 
-Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 34 (S11–S24 sub-steps + S22f) · unapplied deltas: 0 (cap 3 / 16). SEGMENT 2 DONE; `release/pustman-v1-2` candidate `999746d` is NOT PROMOTABLE (flag rate 62%, doc-truth process FAIL) — awaiting the human's ruling.
+Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending) · unpromoted passed steps: 0 · unapplied deltas: 0 (cap 3 / 16). SEGMENT 3 (S26–S37) IN FLIGHT.
 
 ## Status
 
@@ -160,3 +160,4 @@ Each entry is a fact a later step must know, with its source record linked.
 | Tag | SHA | Steps | promote-check | Build | Smoke (Linux / macOS) | Brief |
 |---|---|---|---|---|---|---|
 | `release/pustman-v1-1` | `6620061` | S0–S10 | PROMOTABLE 9/9 | none (domain-only, D11) | none (domain-only, D11) | [brief](briefs/release-pustman-v1-1.md) |
+| `release/pustman-v1-2` | `999746d` | S11–S24 (34 sub-steps incl. S22f) | NOT PROMOTABLE → **waived** by human-delegated go 2026-11-20: items 1–7, 9 PASS; doc-truth 5/5 claims confirmed, FAIL only on docs-only `019923c`; flag rate 21/34 = 62% | `cargo build --release -p pustman` exit 0 | pending / pending | [brief](briefs/release-pustman-v1-2.md) |
