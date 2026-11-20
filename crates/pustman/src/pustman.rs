@@ -8,7 +8,9 @@ pub mod restore_wiring;
 
 use std::sync::{Arc, Mutex};
 
+use environment_picker::{quick_look, selector};
 use gpui::{App, AppContext, Entity, Global, WeakEntity};
+use secrets::{KeyringStore, SecretStore};
 use storage::LocalStore;
 use ui::Severity;
 use workspace::Workspace;
@@ -82,9 +84,9 @@ impl StartupProblems {
 }
 
 /// The app's init order (AGENTS.md): `settings → theme → ui → text_input → pustman_actions keymap →
-/// storage → workspace → command_palette → http client → request editor → restore wiring`, one
-/// line per crate or wire step so later ones append their own. This is the binary's entry point:
-/// its local store is the one in the platform config dir.
+/// storage → workspace → command_palette → http client → request editor → environment picker →
+/// restore wiring`, one line per crate or wire step so later ones append their own. This is the
+/// binary's entry point: its local store is the one in the platform config dir.
 pub fn init(cx: &mut App) {
     init_with_store(cx, StoreLocation::ConfigDir);
 }
@@ -102,6 +104,7 @@ pub fn init_with_store(cx: &mut App, store: StoreLocation) {
     command_palette::init(cx);
     init_http_client(cx);
     request_editor::init(cx);
+    environment_picker::init(cx);
     restore_wiring::init(cx);
 }
 
@@ -116,6 +119,45 @@ fn init_http_client(cx: &mut App) {
     let transport = http_engine::ReqwestTransport::new(gpui_tokio::Tokio::handle(cx));
     let client = cx.new(|_| http_engine::HttpClient::new(Arc::new(transport)));
     request_editor::send::set_http_client(client, cx);
+}
+
+/// The id of the one workspace v1 has: the same string `restore_wiring::WORKSPACE_KEY`
+/// saves that window's tabs and layout under, and the picker's per-workspace selection
+/// and the quick-look's secret keys must scope to that same workspace. `restore_wiring`'s
+/// copy is module-private and this hotspot step may edit only this file, so the shared
+/// value is written twice; exposing one copy is a follow-up.
+const WORKSPACE_ID: &str = "default";
+
+/// `environment_picker` (S34w): the inputs its openers read when `environment::SelectEnvironment`
+/// and `environment::QuickLook` fire. Installed where [`AppStore`] lands rather than in
+/// [`init_with_store`], because the store opens on a background task and is not there during
+/// init (the same ordering `restore_wiring` watches `AppStore` for); a run with no store at
+/// all (`StoreStartup::Unavailable`) installs nothing and keeps the openers' own "not wired"
+/// toast, which is the report the user gets either way. No workspace folder is open yet
+/// (S39+), so the environment list is empty and no environment is active — nothing is
+/// fabricated — and the quick-look lists no variables and uses the OS keychain for the
+/// secret rows it will have once a workspace supplies them.
+fn install_environment_picker_inputs(cx: &mut App, store: &Arc<Mutex<LocalStore>>) {
+    selector::install_inputs(
+        cx,
+        selector::SelectorInputs {
+            workspace_id: WORKSPACE_ID.to_owned(),
+            environments: Vec::new(),
+            active: None,
+            store: Arc::clone(store),
+        },
+    );
+    let secret_store: Arc<dyn SecretStore> = Arc::new(KeyringStore::new());
+    quick_look::install_inputs(
+        cx,
+        quick_look::QuickLookInputs {
+            workspace_id: WORKSPACE_ID.to_owned(),
+            environment: None,
+            globals: Vec::new(),
+            local_values: Vec::new(),
+            secret_store,
+        },
+    );
 }
 
 /// `settings`: the bundled defaults, then the user's `settings.json` watched by a
@@ -153,7 +195,8 @@ fn init_keymap(cx: &mut App) {
 }
 
 /// `storage`: the local store opened and migrated off the foreground thread (REQ-NFR-02),
-/// installed as [`AppStore`] when it lands. A store that will not open falls back to an
+/// installed as [`AppStore`] when it lands, with [`install_environment_picker_inputs`] right
+/// behind it. A store that will not open falls back to an
 /// in-memory one so the app still runs — with an error toast, because nothing is saved
 /// then.
 fn open_local_store(cx: &mut App, location: StoreLocation) {
@@ -162,9 +205,13 @@ fn open_local_store(cx: &mut App, location: StoreLocation) {
             .background_spawn(async move { open_store_off_foreground(location) })
             .await;
         cx.update(|cx| match startup {
-            StoreStartup::Opened(store) => cx.set_global(AppStore(store)),
+            StoreStartup::Opened(store) => {
+                cx.set_global(AppStore(Arc::clone(&store)));
+                install_environment_picker_inputs(cx, &store);
+            }
             StoreStartup::Fallback { store, reason } => {
-                cx.set_global(AppStore(store));
+                cx.set_global(AppStore(Arc::clone(&store)));
+                install_environment_picker_inputs(cx, &store);
                 StartupProblems::push(
                     cx,
                     format!(

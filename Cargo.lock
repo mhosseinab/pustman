@@ -4947,6 +4947,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "command_palette",
+ "environment_picker",
  "gpui",
  "gpui_platform",
  "gpui_tokio",
@@ -4954,6 +4955,7 @@ dependencies = [
  "image",
  "pustman_actions",
  "request_editor",
+ "secrets",
  "settings",
  "storage",
  "text_input",
