@@ -98,6 +98,9 @@ cargo fmt --all -- --check
 cargo run -p pustman
 ```
 
+Cargo uses at most 4 cores: the checked-in `.cargo/config.toml` sets `[build] jobs = 4` and
+`RUST_TEST_THREADS=4` for every checkout and worktree. Don't raise it with `-j`, `--jobs` or `--test-threads`.
+
 Run the narrowest command that proves your change (`cargo test -p request_editor some_test`) before the
 workspace-wide ones.
 
@@ -156,9 +159,7 @@ crates with no GPUI views, sharing the `SessionEvent` shape from `docs/PRD.md` Â
   worktree and one branch `pustman-v1/S<N>` per step. Work only inside your own worktree; never touch another
   worktree, the main checkout or `pustman-v1/main`. Worker briefs go in `.claude/worktrees/pustman-v1/.briefs/`.
 - Run cargo from inside your worktree and let it use the worktree's own `target/`; don't set `CARGO_TARGET_DIR`
-  to a shared path (parallel builds then block on one cache). `.claude/worktrees/pustman-v1/.cargo/config.toml`
-  caps every worktree build at `[build] jobs = 4` so 4 parallel workers fit 16 cores. It is gitignored, so
-  recreate it if missing.
+  to a shared path (parallel builds then block on one cache).
 - Each worktree's `target/` costs 4â€“10 GB, so the driver runs `scripts/pustman-v1-cleanup.sh` after every
   merge (removes merged steps' worktrees, keeps branches) and before every dispatch (fails under 80 GB free).
   Test: `bun test ./scripts/pustman-v1-cleanup.test.ts`.
