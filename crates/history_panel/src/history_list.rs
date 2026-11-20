@@ -1,5 +1,7 @@
 //! The History panel's list (PRD §8.5, REQ-HIST-01/04): the recorded sends of one
-//! workspace, grouped by day and filterable through a search box.
+//! workspace, grouped by day and filterable through a search box. Activating a row — a
+//! click on it, or Enter on the keyboard selection — opens the entry through
+//! [`crate::open_entry`] (REQ-HIST-02).
 //!
 //! `storage` is synchronous (ADR-0002), so every read runs on `cx.background_executor`
 //! and the foreground never touches SQLite. The read is kicked off by the constructor
@@ -10,23 +12,41 @@
 use std::sync::{Arc, Mutex};
 
 use gpui::{
-    AnyElement, App, Context, ElementId, Entity, FocusHandle, Focusable, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Task,
-    Window, div,
+    AnyElement, App, Context, ElementId, Entity, FocusHandle, Focusable, Global,
+    InteractiveElement, IntoElement, ParentElement, Render, Role, ScrollStrategy, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, Task, UniformListScrollHandle, Window, div,
 };
 use storage::{HistoryEntry, LocalStore};
 use text_input::{TextInput, TextInputEvent};
 use time::{Date, OffsetDateTime};
 use ui::prelude::*;
-use workspace::{DockPosition, Panel};
+use workspace::{DockPosition, Panel, Workspace};
+
+use crate::open_entry::open_entry;
 
 #[cfg(test)]
 #[path = "history_list_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "history_list_activation_tests.rs"]
+mod activation_tests;
+
 /// The panel's stable id: its dock selector entry, its hitbox and the id
 /// [`crate::focus_history_panel`] activates it under.
 pub const PANEL_ID: &str = "history";
+
+/// The key context the list answers the keyboard in: the arrows move the selection,
+/// Enter opens it. The search field's own `"TextInput"` context nests inside this one —
+/// the `command_palette::picker` shape.
+pub const LIST_KEY_CONTEXT: &str = "HistoryList";
+
+/// Marks that this app's keymap already carries [`LIST_KEY_CONTEXT`]'s bindings.
+/// [`HistoryList::new`] is the only door this crate has to bind them (the crate's `init`
+/// is outside this step's scope), and a second panel must not stack duplicates.
+struct ListKeysBound;
+
+impl Global for ListKeysBound {}
 
 /// One row's height at the default scale. Rows are uniform because the virtualized
 /// list measures one row for all of them — the same contract `command_palette::Picker`
@@ -69,6 +89,12 @@ pub struct HistoryList {
     /// The in-flight read. Replacing it cancels the previous one (a dropped `Task`
     /// cancels its work — AGENTS.md), so only the newest query's rows can land.
     pending_load: Option<Task<()>>,
+    /// The entry the keyboard is on — its stored id, which survives search re-ordering
+    /// — or [`None`] while the arrows and clicks have not put it anywhere. Rows the
+    /// store left without an id cannot carry it (none reach the list from `storage`).
+    selected_entry_id: Option<i64>,
+    /// The list's scroll state, so moving the selection scrolls its row into view.
+    scroll_handle: UniformListScrollHandle,
     // Kept so the search box's edits keep reaching us; dropping it would silently stop
     // filtering.
     _search_subscription: Subscription,
@@ -83,6 +109,19 @@ impl HistoryList {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        // `Decision:` the list's keys are bound here rather than in `history_panel::init`
+        // (outside this step's scope) and reuse `ui`'s component actions instead of
+        // declaring new ones — `command_palette::picker`'s shape with the actions that
+        // already exist. They go in once per app: a second panel must not stack
+        // duplicates into the keymap.
+        if cx.try_global::<ListKeysBound>().is_none() {
+            cx.set_global(ListKeysBound);
+            cx.bind_keys([
+                gpui::KeyBinding::new("down", SelectNext, Some(LIST_KEY_CONTEXT)),
+                gpui::KeyBinding::new("up", SelectPrevious, Some(LIST_KEY_CONTEXT)),
+                gpui::KeyBinding::new("enter", Activate, Some(LIST_KEY_CONTEXT)),
+            ]);
+        }
         let search = cx.new(|cx| {
             TextInput::new(window, cx).with_placeholder(SharedString::new_static("Search history"))
         });
@@ -95,6 +134,8 @@ impl HistoryList {
             is_loading: true,
             error: None,
             pending_load: None,
+            selected_entry_id: None,
+            scroll_handle: UniformListScrollHandle::new(),
             _search_subscription,
         };
         this.reload(cx);
@@ -108,17 +149,123 @@ impl HistoryList {
     }
 
     /// The search box is the panel's only input: every edit re-reads the history under
-    /// the new query.
+    /// the new query, and Enter in it opens the selected row — the panel's whole
+    /// keyboard contract lives in its one focus (the `command_palette::picker` shape).
     fn on_search_event(
         &mut self,
         _search: &Entity<TextInput>,
         event: &TextInputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            TextInputEvent::Changed => self.reload(cx),
+            TextInputEvent::Submitted => self.open_selected(window, cx),
+        }
+    }
+
+    /// The row the keyboard selection is on: the row carrying [`Self::selected_entry_id`],
+    /// wherever the latest read placed it — so a search re-run leaves the selection on
+    /// the same entry (or clears it) instead of sliding onto its neighbour.
+    fn selected_row_index(&self) -> Option<usize> {
+        let selected = self.selected_entry_id?;
+        self.rows
+            .iter()
+            .position(|row| matches!(row, HistoryRow::Entry(entry) if entry.id == Some(selected)))
+    }
+
+    /// Move the keyboard selection one entry row, skipping the day headers and stopping
+    /// at the ends: the history is a long list, where wrapping would fling the viewport
+    /// from one end to the other. With no selection yet, Down lands on the first entry
+    /// row and Up on the last.
+    fn move_selection(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let rows = Arc::clone(&self.rows);
+        let entry_rows: Vec<usize> = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(index, row)| matches!(row, HistoryRow::Entry(_)).then_some(index))
+            .collect();
+        if entry_rows.is_empty() {
+            return;
+        }
+        let current = self
+            .selected_row_index()
+            .and_then(|selected| entry_rows.iter().position(|&index| index == selected));
+        let target = match (current, forward) {
+            (Some(position), true) => (position + 1).min(entry_rows.len() - 1),
+            (Some(position), false) => position.saturating_sub(1),
+            (None, true) => 0,
+            (None, false) => entry_rows.len() - 1,
+        };
+        let Some(&target_row) = entry_rows.get(target) else {
+            return;
+        };
+        self.selected_entry_id = match rows.get(target_row) {
+            Some(HistoryRow::Entry(entry)) => entry.id,
+            _ => None,
+        };
+        self.scroll_handle
+            .scroll_to_item(target_row, ScrollStrategy::Top);
+        cx.notify();
+    }
+
+    fn select_next(&mut self, _: &SelectNext, _window: &mut Window, cx: &mut Context<Self>) {
+        self.move_selection(true, cx);
+    }
+
+    fn select_previous(
+        &mut self,
+        _: &SelectPrevious,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let TextInputEvent::Changed = event {
-            self.reload(cx);
-        }
+        self.move_selection(false, cx);
+    }
+
+    /// Enter opens the selected row — and does nothing at all while the keyboard is on
+    /// no row (the `command_palette::picker`'s empty-selection contract).
+    fn activate(&mut self, _: &Activate, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_selected(window, cx);
+    }
+
+    fn open_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(index) = self.selected_row_index() else {
+            return;
+        };
+        let rows = Arc::clone(&self.rows);
+        let Some(HistoryRow::Entry(entry)) = rows.get(index) else {
+            return;
+        };
+        self.open_row((**entry).clone(), window, cx);
+    }
+
+    /// The one door a row is activated through — a click on it, and Enter on the
+    /// selection: select the entry, then open it in the center pane through
+    /// [`crate::open_entry`], which owns the restore and its error toasts.
+    ///
+    /// `Decision:` the [`Workspace`] is resolved from the window root at activation time
+    /// (the shape `response_viewer::save_body` reaches its toast through), not held on
+    /// the list: this step may not change the constructor or its callers. The root
+    /// update is deferred — a window cannot be updated while it is on the update stack,
+    /// which is exactly where a click or a keystroke runs.
+    fn open_row(&mut self, entry: HistoryEntry, window: &mut Window, cx: &mut Context<Self>) {
+        self.selected_entry_id = entry.id;
+        cx.notify();
+        let window_handle = window.window_handle();
+        cx.defer(move |cx| {
+            let opened = window_handle.update(cx, |root, window, cx| {
+                let Ok(workspace) = root.downcast::<Workspace>() else {
+                    // Handled: a window whose root is not a workspace has no center pane
+                    // to open anything in (the `save_body` toast's shape).
+                    return;
+                };
+                open_entry(&entry, &workspace, window, cx);
+            });
+            if opened.is_err() {
+                // Handled: the window closed between the keystroke and this callback;
+                // there is no pane left to open the entry in.
+            }
+        });
     }
 
     /// Read the history under the current query and land it in the rows. A failure
@@ -155,8 +302,9 @@ impl HistoryList {
 
     /// One row's content — the wrapper `VirtualList` draws around it carries the row's
     /// id and test selector.
-    fn render_row(&self, index: usize, cx: &App) -> AnyElement {
-        match self.rows.get(index) {
+    fn render_row(&mut self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        let rows = Arc::clone(&self.rows);
+        match rows.get(index) {
             Some(HistoryRow::Day { label, .. }) => self.render_day_header(label.clone(), cx),
             Some(HistoryRow::Entry(entry)) => self.render_entry(entry, cx),
             // The list is told the row count of the same snapshot it draws ids from, so
@@ -177,18 +325,37 @@ impl HistoryList {
             .into_any_element()
     }
 
-    fn render_entry(&self, entry: &HistoryEntry, cx: &App) -> AnyElement {
+    fn render_entry(&mut self, entry: &HistoryEntry, cx: &mut Context<Self>) -> AnyElement {
         let target_id = ElementId::NamedChild(
             Arc::new(entry_element_id(entry.id)),
             SharedString::new_static("target"),
         );
+        // The clickable container is a child id of the row's stable key (the
+        // `command_palette::picker`'s row shape), so a click selects and opens *this*
+        // entry even if the rows re-order underneath the pointer.
+        let row_id = ElementId::NamedChild(
+            Arc::new(entry_element_id(entry.id)),
+            SharedString::new_static("row"),
+        );
+        let selected = entry.id.is_some() && entry.id == self.selected_entry_id;
+        let clicked_entry = entry.clone();
         v_flex()
+            .id(row_id)
+            .role(Role::ListBoxOption)
+            .aria_selected(selected)
             .w_full()
             .h(px_to_rems(ROW_HEIGHT_PX))
             .min_w_0()
             .justify_center()
             .px(DynamicSpacing::Base04.rems(cx))
             .gap(DynamicSpacing::Base01.rems(cx))
+            .rounded_sm()
+            .cursor_pointer()
+            .hover(|row| row.bg(cx.theme().colors().ghost_element_hover))
+            .when(selected, |row| row.bg(cx.theme().colors().element_selected))
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.open_row(clicked_entry.clone(), window, cx);
+            }))
             .child(
                 h_flex()
                     .w_full()
@@ -254,7 +421,7 @@ impl Panel for HistoryList {
 }
 
 impl Render for HistoryList {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors();
         let error = self.error.clone();
         let search_is_empty = self.search.read(cx).text().is_empty();
@@ -275,6 +442,10 @@ impl Render for HistoryList {
 
         v_flex()
             .id(panel_element_id)
+            .key_context(LIST_KEY_CONTEXT)
+            .on_action(cx.listener(Self::select_next))
+            .on_action(cx.listener(Self::select_previous))
+            .on_action(cx.listener(Self::activate))
             .size_full()
             .font_ui(cx)
             .p(DynamicSpacing::Base04.rems(cx))
@@ -297,7 +468,13 @@ impl Render for HistoryList {
                 ),
                 None => panel,
             })
-            .child(self.body(list, search_is_empty, &error))
+            .child(self.body(
+                list,
+                search_is_empty,
+                &error,
+                self.focus_handle(cx).contains_focused(window, cx),
+                cx,
+            ))
     }
 }
 
@@ -309,9 +486,24 @@ impl HistoryList {
         list: VirtualList,
         search_is_empty: bool,
         error: &Option<SharedString>,
+        list_focused: bool,
+        cx: &App,
     ) -> AnyElement {
         if !self.rows.is_empty() {
-            return v_flex().flex_1().min_h_0().child(list).into_any_element();
+            return v_flex()
+                .flex_1()
+                .min_h_0()
+                // The list's focus style: the panel's keyboard focus lives in the search
+                // box, so the rows around it say "the list is live" in the theme's focus
+                // token (ux-checklist: visible focus state).
+                .when(list_focused, |list_area| {
+                    list_area
+                        .border_1()
+                        .rounded_sm()
+                        .border_color(cx.theme().colors().border_focused)
+                })
+                .child(list)
+                .into_any_element();
         }
         if error.is_some() {
             // The failure is already spelled out above the list; an empty-state caption
