@@ -16,7 +16,14 @@ path = "src/console.rs"
 [dependencies]
 api_model.workspace = true
 gpui.workspace = true
+http_engine.workspace = true
 settings.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+# Enabling `test-support` is what makes `FakeTransport` and `MemorySecretStore` visible
+# to this crate's tests: dev-dependencies unify features with the test build.
+http_engine = { workspace = true, features = ["test-support"] }
+secrets = { workspace = true, features = ["test-support"] }
+variables.workspace = true

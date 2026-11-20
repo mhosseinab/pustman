@@ -1179,7 +1179,11 @@ version = "0.1.0"
 dependencies = [
  "api_model",
  "gpui",
+ "http_engine",
+ "secrets",
  "settings",
+ "url",
+ "variables",
 ]
 
 [[package]]

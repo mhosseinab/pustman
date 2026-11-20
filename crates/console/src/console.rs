@@ -13,8 +13,10 @@
 //! [`init`] installs the store; producers push through [`ConsoleStore::push`] and the
 //! Console panel reads through [`ConsoleStore::entries`] (S32d).
 
+mod feed;
 mod store;
 
+pub use feed::{record_error, record_outcome, watch};
 pub use store::{ConsoleEntry, ConsoleLevel, ConsoleSetting, ConsoleStore};
 
 use gpui::App;

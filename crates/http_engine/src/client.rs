@@ -45,10 +45,15 @@ pub struct SendInput {
 
 /// What one [`HttpClient::send_request`] produced.
 ///
-/// `Debug` prints no values: the response's `Debug` redacts, and `secrets_used` prints
-/// counts only, so an outcome can be logged as it is.
+/// `Debug` prints no values: the request's `Debug` prints no header or body values, the
+/// response's `Debug` redacts, and `secrets_used` prints counts only, so an outcome can
+/// be logged as it is.
 #[derive(Debug)]
 pub struct SendOutcome {
+    /// The request as it went on the wire, every `{{variable}}` resolved — what the
+    /// Console's raw view shows (REQ-CON-03). The redaction downstream uses
+    /// `secrets_used` on it, exactly as `history` does.
+    pub request: ResolvedRequest,
     /// The server's answer. 4xx and 5xx are responses, not errors.
     pub response: Response,
     /// What to tell the user about the send: variables nothing resolved, TLS verification
@@ -229,12 +234,16 @@ impl HttpClient {
                         }
                         // The history row is written before the outcome reaches the
                         // caller: the caller's task resolves only once it is stored.
+                        // The resolved request is kept for the outcome: the Console
+                        // shows it as it went on the wire (REQ-CON-03).
+                        let sent = resolved.clone();
                         match transport.send(resolved).await {
                             Ok(response) => {
                                 if let Some(draft) = &recorded {
                                     draft.record_response(&request, &response, &secrets_used);
                                 }
                                 Ok(SendOutcome {
+                                    request: sent,
                                     response,
                                     warnings,
                                     auth,
