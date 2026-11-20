@@ -1,5 +1,5 @@
-//! The response body: Pretty and Raw (REQ-RESP-02) — the lines the pane draws and how
-//! they got here.
+//! The response body: Pretty, Raw, Hex and Preview (REQ-RESP-02) — what the pane draws
+//! and how it got here.
 //!
 //! Raw shows the decoded text exactly, one line per line; only bytes that are not valid
 //! UTF-8 decode lossily, and then with a visible note. Pretty shows the formatter's
@@ -12,6 +12,10 @@
 //! A body that streamed or spilled to disk ([`http_engine::ResponseBody::File`],
 //! [`http_engine::ResponseBody::Spilled`]) is read on a background task instead: the
 //! foreground never touches the disk, and the pane says so until the lines land.
+//!
+//! Hex ([`crate::hex_view`]) dumps the body's raw bytes as `offset | hex | ascii` rows,
+//! and Preview ([`crate::preview`]) shows images from those bytes and HTML as safe text.
+//! Both draw from the same cached bytes the text modes draw from.
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -24,19 +28,25 @@ use ui::components::context_menu::ContextMenuEvent;
 use ui::prelude::*;
 
 use crate::child_id;
+use crate::hex_view::{HexRows, HexView};
 use crate::pretty::{FormatError, Formatter};
+use crate::preview::{PreviewContent, PreviewPane};
 
 /// The height of one formatter control (a [`ButtonSize::Medium`]) in pixels at the
 /// default scale: the override menu is anchored just under it.
 const FORMATTER_CONTROL_HEIGHT_PX: f32 = 28.;
 
-/// The two ways the body pane draws a body (REQ-RESP-02).
+/// The ways the body pane draws a body (REQ-RESP-02).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BodyMode {
     /// The formatter's output: JSON pretty-printed, XML and HTML indented.
     Pretty,
     /// The decoded text exactly, as it arrived.
     Raw,
+    /// The raw bytes as a hexdump: `offset | hex | ascii`.
+    Hex,
+    /// Images from the body's own bytes; HTML as safe plain text.
+    Preview,
 }
 
 impl BodyMode {
@@ -45,6 +55,8 @@ impl BodyMode {
         match self {
             Self::Pretty => 0,
             Self::Raw => 1,
+            Self::Hex => 2,
+            Self::Preview => 3,
         }
     }
 
@@ -53,6 +65,8 @@ impl BodyMode {
         match index {
             0 => Some(Self::Pretty),
             1 => Some(Self::Raw),
+            2 => Some(Self::Hex),
+            3 => Some(Self::Preview),
             _ => None,
         }
     }
@@ -68,6 +82,11 @@ pub struct BodyView {
     /// The decoded body text, cached so a mode or override change reformats without
     /// re-reading the body.
     text: Arc<str>,
+    /// The body's raw bytes, cached the same way: Hex dumps them, Preview decodes or
+    /// strips them.
+    bytes: Arc<Vec<u8>>,
+    /// The body's `Content-Type`, what Preview picks its rendering from.
+    content_type: Option<Arc<str>>,
     /// The formatter `Content-Type` asked for; the override wins over it.
     detected: Formatter,
     /// The formatter picked by hand, if any.
@@ -75,6 +94,9 @@ pub struct BodyView {
     mode: BodyMode,
     /// The formatter failed; the pane shows the Raw lines with this note instead.
     format_error: Option<SharedString>,
+    /// What Preview draws for the body, computed off the foreground like the formatted
+    /// lines. [`None`] until it lands.
+    preview: Option<PreviewContent>,
     /// The bytes are not valid UTF-8, so the lines hold replacement characters.
     lossy: bool,
     /// A file-backed body is being read off the foreground.
@@ -86,7 +108,9 @@ pub struct BodyView {
     load_task: Option<Task<()>>,
     /// The in-flight format, cancelled the same way by a newer body, mode or override.
     format_task: Option<Task<()>>,
-    /// The Pretty/Raw switch: one tab bar, keyboard-navigable like the viewer's tabs.
+    /// The in-flight preview computation, cancelled the same way by a newer body or mode.
+    preview_task: Option<Task<()>>,
+    /// The mode switch: one tab bar, keyboard-navigable like the viewer's tabs.
     mode_bar: Entity<TabBar>,
     /// The open formatter override menu and its subscription: dropped together when it
     /// dismisses (`request_editor::url_bar`).
@@ -107,15 +131,19 @@ impl BodyView {
             lines: Arc::new(Vec::new()),
             pretty_lines: Arc::new(Vec::new()),
             text: Arc::from(""),
+            bytes: Arc::new(Vec::new()),
+            content_type: None,
             detected: Formatter::Plain,
             formatter_override: None,
             mode: BodyMode::Pretty,
             format_error: None,
+            preview: None,
             lossy: false,
             loading: false,
             error: None,
             load_task: None,
             format_task: None,
+            preview_task: None,
             mode_bar,
             formatter_menu: None,
             formatter_menu_subscription: None,
@@ -129,21 +157,28 @@ impl BodyView {
     pub fn set_body(&mut self, response: Arc<Response>, cx: &mut Context<Self>) {
         self.load_task = None;
         self.format_task = None;
+        self.preview_task = None;
         self.error = None;
         self.lossy = false;
         self.loading = false;
         self.text = Arc::from("");
+        self.bytes = Arc::new(Vec::new());
         self.lines = Arc::new(Vec::new());
         self.pretty_lines = Arc::new(Vec::new());
+        self.preview = None;
         self.format_error = None;
-        self.detected = Formatter::detect(content_type(&response.headers));
+        let content_type = content_type(&response.headers);
+        self.detected = Formatter::detect(content_type);
+        self.content_type = content_type.map(Arc::from);
         match &response.body {
             ResponseBody::Bytes(bytes) => {
+                self.bytes = Arc::new(bytes.clone());
                 let (text, lossy) = decode(bytes);
                 self.lines = Arc::new(split_lines(&text));
                 self.lossy = lossy;
                 self.text = Arc::from(text.into_owned());
                 self.refresh_format(cx);
+                self.refresh_preview(cx);
             }
             ResponseBody::File { .. } | ResponseBody::Spilled { .. } => {
                 self.loading = true;
@@ -152,11 +187,9 @@ impl BodyView {
                         .background_spawn(async move {
                             let bytes = body_bytes(&response)?;
                             let (text, lossy) = decode(&bytes);
-                            Ok::<_, std::io::Error>((
-                                Arc::<str>::from(text.as_ref()),
-                                split_lines(text.as_ref()),
-                                lossy,
-                            ))
+                            let text = Arc::<str>::from(text.into_owned());
+                            let lines = split_lines(&text);
+                            Ok::<_, std::io::Error>((Arc::new(bytes), text, lines, lossy))
                         })
                         .await;
                     let outcome = match loaded {
@@ -166,11 +199,13 @@ impl BodyView {
                     if let Err(_released) = this.update(cx, |view, cx| {
                         view.loading = false;
                         match outcome {
-                            Ok((text, lines, lossy)) => {
+                            Ok((bytes, text, lines, lossy)) => {
+                                view.bytes = bytes;
                                 view.text = text;
                                 view.lines = Arc::new(lines);
                                 view.lossy = lossy;
                                 view.refresh_format(cx);
+                                view.refresh_preview(cx);
                             }
                             Err(message) => {
                                 view.error = Some(
@@ -202,6 +237,7 @@ impl BodyView {
             }
         });
         self.refresh_format(cx);
+        self.refresh_preview(cx);
         cx.notify();
     }
 
@@ -230,6 +266,17 @@ impl BodyView {
         self.lossy
     }
 
+    /// The hexdump rows Hex mode draws for the body on screen ([`crate::hex_view`]).
+    pub fn hex_rows(&self) -> HexRows {
+        HexRows::new(Arc::clone(&self.bytes))
+    }
+
+    /// What Preview shows for the body on screen, once it is computed
+    /// ([`crate::preview`]).
+    pub fn preview_content(&self) -> Option<&PreviewContent> {
+        self.preview.as_ref()
+    }
+
     /// What the pane draws: the formatted lines whenever Pretty has them, the Raw lines
     /// otherwise.
     fn shown(&self) -> &Arc<Vec<SharedString>> {
@@ -252,7 +299,7 @@ impl BodyView {
         self.format_task = None;
         self.pretty_lines = Arc::new(Vec::new());
         self.format_error = None;
-        if self.mode == BodyMode::Raw || self.text.is_empty() {
+        if self.mode != BodyMode::Pretty || self.text.is_empty() {
             return;
         }
         let text = Arc::clone(&self.text);
@@ -274,6 +321,33 @@ impl BodyView {
             }) {
                 // Handled: the view went away with its window; there is nobody left to
                 // show the formatted body to.
+            }
+        }));
+    }
+
+    /// Compute what Preview shows for the cached body. Reducing an HTML body to its text
+    /// is heavy work, so it runs on a background task like the formatter — and a newer
+    /// body or mode cancels the in-flight computation the same way.
+    fn refresh_preview(&mut self, cx: &mut Context<Self>) {
+        self.preview_task = None;
+        self.preview = None;
+        if self.mode != BodyMode::Preview || self.bytes.is_empty() {
+            return;
+        }
+        let bytes = Arc::clone(&self.bytes);
+        let content_type = self.content_type.clone();
+        self.preview_task = Some(cx.spawn(async move |this, cx| {
+            let content = cx
+                .background_spawn(async move {
+                    PreviewContent::for_body(content_type.as_deref(), bytes.as_slice())
+                })
+                .await;
+            if let Err(_released) = this.update(cx, |view, cx| {
+                view.preview = Some(content);
+                cx.notify();
+            }) {
+                // Handled: the view went away with its window; there is nobody left to
+                // show the preview to.
             }
         }));
     }
@@ -410,11 +484,53 @@ impl BodyView {
             }))
             .into_any_element()
     }
+
+    /// Pretty and Raw: the lines of the mode in effect, or the pane's state when there
+    /// are none to draw.
+    fn render_lines(&self, base: &ElementId, cx: &mut Context<Self>) -> AnyElement {
+        let lines = Arc::clone(self.shown());
+        if lines.is_empty() && !self.loading && self.error.is_none() {
+            return note("No content", cx).into_any_element();
+        }
+        if lines.is_empty() {
+            return div().into_any_element();
+        }
+        let row_lines = Arc::clone(&lines);
+        let row_base = base.clone();
+        let list_base = base.clone();
+        let render_base = base.clone();
+        VirtualList::new(
+            child_id(&list_base, "lines"),
+            lines.len(),
+            move |index| child_id(&row_base, format!("line-{index}")),
+            move |index, _window, cx| render_line(&row_lines, index, &render_base, cx),
+        )
+        .into_any_element()
+    }
+
+    /// Hex: the body's raw bytes as hexdump rows ([`crate::hex_view`]), formatted lazily
+    /// per visible row.
+    fn render_hex(&self, base: &ElementId, cx: &mut Context<Self>) -> AnyElement {
+        if self.bytes.is_empty() && !self.loading {
+            return note("No content", cx).into_any_element();
+        }
+        HexView::new(base.clone(), Arc::clone(&self.bytes)).into_any_element()
+    }
+
+    /// Preview: what [`crate::preview`] made of the body, or a note while it computes.
+    fn render_preview(&self, base: &ElementId, cx: &mut Context<Self>) -> AnyElement {
+        if self.bytes.is_empty() && !self.loading {
+            return note("No content", cx).into_any_element();
+        }
+        match &self.preview {
+            Some(content) => PreviewPane::new(base.clone(), content.clone()).into_any_element(),
+            None => note("Preparing preview…", cx).into_any_element(),
+        }
+    }
 }
 
 impl Render for BodyView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let lines = Arc::clone(self.shown());
         // One base id per entity, so two viewers in one frame never share element ids.
         let base = ElementId::from(("body-view", cx.entity_id()));
         v_flex()
@@ -430,37 +546,36 @@ impl Render for BodyView {
                 None => this,
             })
             .when(self.loading, |this| this.child(note("Loading body…", cx)))
-            .when(self.lossy, |this| {
-                this.child(note(
-                    "Body is not valid UTF-8 — shown with replacement characters.",
-                    cx,
-                ))
-            })
+            .when(
+                self.lossy && matches!(self.mode, BodyMode::Pretty | BodyMode::Raw),
+                |this| {
+                    this.child(note(
+                        "Body is not valid UTF-8 — shown with replacement characters.",
+                        cx,
+                    ))
+                },
+            )
             .map(|this| match &self.format_error {
                 Some(message) => this.child(note(message.clone(), cx)),
                 None => this,
             })
-            .map(|this| {
-                if lines.is_empty() && !self.loading && self.error.is_none() {
-                    this.child(note("No content", cx))
-                } else if lines.is_empty() {
-                    this
-                } else {
-                    let row_lines = Arc::clone(&lines);
-                    let row_base = base.clone();
-                    this.child(VirtualList::new(
-                        child_id(&base, "lines"),
-                        lines.len(),
-                        move |index| child_id(&row_base, format!("line-{index}")),
-                        move |index, _window, cx| render_line(&row_lines, index, &base, cx),
-                    ))
-                }
+            .map(|this| match self.mode {
+                BodyMode::Pretty | BodyMode::Raw => this.child(self.render_lines(&base, cx)),
+                BodyMode::Hex => this.child(self.render_hex(&base, cx)),
+                BodyMode::Preview => this.child(self.render_preview(&base, cx)),
             })
     }
 }
 
 /// One body line: the content font, truncated with the full line behind a tooltip.
-fn render_line(lines: &[SharedString], index: usize, base: &ElementId, cx: &mut App) -> AnyElement {
+/// Shared with the Preview text lines ([`crate::preview`]): a body pane's lines all draw
+/// the same way.
+pub(crate) fn render_line(
+    lines: &[SharedString],
+    index: usize,
+    base: &ElementId,
+    cx: &mut App,
+) -> AnyElement {
     let Some(line) = lines.get(index).cloned() else {
         return div().into_any_element();
     };
@@ -480,7 +595,7 @@ fn render_line(lines: &[SharedString], index: usize, base: &ElementId, cx: &mut 
 }
 
 /// A muted note line — the empty, loading, lossy and format-fallback states.
-fn note(text: impl Into<SharedString>, cx: &App) -> impl IntoElement {
+pub(crate) fn note(text: impl Into<SharedString>, cx: &App) -> impl IntoElement {
     div()
         .px(DynamicSpacing::Base04.rems(cx))
         .py(DynamicSpacing::Base02.rems(cx))
@@ -496,14 +611,19 @@ fn format_error_note(formatter: Formatter, error: FormatError) -> SharedString {
     .into()
 }
 
-/// The Pretty/Raw switch, one tab per [`BodyMode`] under a stable base id.
+/// The mode switch's tabs, one per [`BodyMode`] under a stable base id.
 fn mode_tabs(view_id: gpui::EntityId) -> Vec<Tab> {
     let base = ElementId::from(("body-mode", view_id));
-    [BodyMode::Pretty, BodyMode::Raw]
-        .into_iter()
-        .enumerate()
-        .map(|(index, mode)| Tab::new(child_id(&base, format!("mode-{index}")), mode_label(mode)))
-        .collect()
+    [
+        BodyMode::Pretty,
+        BodyMode::Raw,
+        BodyMode::Hex,
+        BodyMode::Preview,
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, mode)| Tab::new(child_id(&base, format!("mode-{index}")), mode_label(mode)))
+    .collect()
 }
 
 /// The name of a mode's tab on the switch.
@@ -511,6 +631,8 @@ fn mode_label(mode: BodyMode) -> &'static str {
     match mode {
         BodyMode::Pretty => "Pretty",
         BodyMode::Raw => "Raw",
+        BodyMode::Hex => "Hex",
+        BodyMode::Preview => "Preview",
     }
 }
 

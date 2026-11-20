@@ -11,7 +11,9 @@
 mod body_view;
 mod error_panel;
 mod headers_view;
+mod hex_view;
 mod pretty;
+mod preview;
 mod save_body;
 mod status_line;
 

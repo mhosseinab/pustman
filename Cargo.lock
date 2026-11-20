@@ -5464,7 +5464,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "gpui",
+ "hex",
  "http_engine",
+ "image",
  "mime",
  "pustman_actions",
  "serde_json",
