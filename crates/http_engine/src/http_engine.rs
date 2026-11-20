@@ -88,3 +88,5 @@ mod cookie_test_support;
 #[cfg(test)]
 #[path = "debug_redaction_tests.rs"]
 mod debug_redaction_tests;
+
+mod retention;

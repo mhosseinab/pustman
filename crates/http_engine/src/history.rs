@@ -29,6 +29,7 @@ use variables::{ScopeStack, spans};
 use crate::error::TransportError;
 use crate::pipeline::PipelineError;
 use crate::response::{Response, ResponseBody};
+use crate::retention::{DEFAULT_HISTORY_RETENTION_DAYS, RetentionGate, prune_once};
 
 #[cfg(test)]
 #[path = "history_tests.rs"]
@@ -58,15 +59,30 @@ const PROTOCOL: &str = "http";
 pub struct HistoryRecorder {
     store: Arc<Mutex<LocalStore>>,
     workspace_id: String,
+    retention_gate: Arc<RetentionGate>,
+    retention_days: u32,
 }
 
 impl HistoryRecorder {
-    /// A recorder writing `workspace_id`'s rows through `store`.
+    /// A recorder writing `workspace_id`'s rows through `store`, pruning history older
+    /// than [`DEFAULT_HISTORY_RETENTION_DAYS`] days —
+    /// [`HistoryRecorder::with_retention_days`] takes the caller's settings value.
     pub fn new(store: Arc<Mutex<LocalStore>>, workspace_id: impl Into<String>) -> Self {
         Self {
             store,
             workspace_id: workspace_id.into(),
+            retention_gate: Arc::new(RetentionGate::new()),
+            retention_days: DEFAULT_HISTORY_RETENTION_DAYS,
         }
+    }
+
+    /// The retention window the writer prunes by (REQ-HIST-04): the caller's
+    /// `history_retention_days`, since this domain crate never reads `settings` itself.
+    /// `0` disables pruning, as in `storage`'s `prune_older_than`. Additive, so
+    /// [`HistoryRecorder::new`] keeps its signature.
+    pub fn with_retention_days(mut self, retention_days: u32) -> Self {
+        self.retention_days = retention_days;
+        self
     }
 
     /// The record one send leaves behind (REQ-HIST-01 records every send). The request
@@ -189,10 +205,12 @@ impl HistoryDraft {
 
     /// Insert `entry`, at most once per send: the send's own work and the cancel hook can
     /// both race to record it, and REQ-HIST-01 is one row per send. The claim is taken
-    /// before the insert, so a write is attempted at most once even when it fails. Runs
-    /// on a background task (ADR-0002) and holds no lock across an await. Both failures
-    /// — a poisoned lock and a failed insert — are one fixed message: the error behind
-    /// them is dropped unread, because its text can quote the row it failed on.
+    /// before the insert, so a write is attempted at most once even when it fails. Once
+    /// per app session the same write also prunes rows past the retention window
+    /// (REQ-HIST-04). Runs on a background task (ADR-0002) and holds no lock across an
+    /// await. Both failures — a poisoned lock and a failed insert — are one fixed
+    /// message: the error behind them is dropped unread, because its text can quote the
+    /// row it failed on.
     fn write(&self, entry: HistoryEntry) {
         let mut recorded = match self.recorded.lock() {
             Ok(recorded) => recorded,
@@ -207,10 +225,19 @@ impl HistoryDraft {
         *recorded = true;
         drop(recorded);
         match self.recorder.store.lock() {
-            Ok(store) => match store.history().insert(&entry) {
-                Ok(_) => {}
-                Err(_) => log::error!("the history row could not be written"),
-            },
+            Ok(store) => {
+                match store.history().insert(&entry) {
+                    Ok(_) => {}
+                    Err(_) => log::error!("the history row could not be written"),
+                }
+                // Inside the same lock scope, after the insert: a failed prune never
+                // blocks or undoes the row above.
+                prune_once(
+                    &self.recorder.retention_gate,
+                    &store,
+                    self.recorder.retention_days,
+                );
+            }
             Err(_) => log::error!("the history row could not be written"),
         }
     }
