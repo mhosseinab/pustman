@@ -171,6 +171,9 @@ DISPATCH PROTOCOL — SINGLE-PHASE RUNS (validated 2026-11-18 at S10; read this 
      protocol) passed BUILD and REVIEW both first-try.
 
 1) DISPATCH WORKER (a FRESH subagent every time):
+   - Disk gate first: `scripts/pustman-v1-cleanup.sh | tail -1` → `CLEANUP OK`. On
+     `CLEANUP LOW-DISK` (< 80 GB free) dispatch nothing new: merge or drop parked steps, or
+     `cargo clean` in this checkout (costs one rebuild at the next verify); if it stays low, tell me.
    - Own worktree (isolation: worktree). Mark the row in_progress, attempts+1; log the dispatch.
    - Worker prompt:
        "Run the session-start ritual: pwd; `git switch -C pustman-v1/S<N> pustman-v1/main`;
@@ -231,6 +234,9 @@ DISPATCH PROTOCOL — SINGLE-PHASE RUNS (validated 2026-11-18 at S10; read this 
      missing); WRITE docs/progress/pustman-v1/steps/S<N>.md; in the same `progress: S<N> passed`
      commit set the main row passed + SHA + record link, move Open-work out, update Active
      CARRY-FORWARD, append a log entry. Never spend a fix cycle on LOW-only findings.
+     Then run `scripts/pustman-v1-cleanup.sh` in this checkout: it removes every worktree whose
+     step has its `S<N>:` commit on pustman-v1/main (branches stay) — each holds a multi-GB
+     `target/`, and lingering ones filled the disk once (2026-11-20, all workers died ENOSPC).
    - CHANGES_REQUESTED → record findings + failed approach in Open work + log; dispatch a FRESH
      FIXER with the branch diff, the MEDIUM/HIGH findings and the Verify block: "Address every
      numbered finding, re-run Verify, paste output, commit." Back to (2). Budget 4 cycles; cycles

@@ -209,6 +209,9 @@ DISPATCH PROTOCOL — SINGLE-PHASE RUNS (validated 2026-11-18 at S10):
      brief (fewer findings / one file / one chunk) and retry.
 
 1) BUILD (a FRESH subagent; agent per routing; `cwd: WT/S<N>`):
+   - Disk gate first: `scripts/pustman-v1-cleanup.sh | tail -1` in REPO → `CLEANUP OK`. On
+     `CLEANUP LOW-DISK` (< 80 GB free) dispatch nothing new: merge or drop parked steps, or
+     `cargo clean` in REPO (costs one rebuild at the next verify); if it stays low, tell me.
    - Mark the row in_progress, attempts+1; log the dispatch.
    - Task text:
        "You are in WT/S<N>. Session-start ritual: pwd; `git branch --show-current` must print
@@ -266,7 +269,10 @@ DISPATCH PROTOCOL — SINGLE-PHASE RUNS (validated 2026-11-18 at S10):
      "<file:line, problem, fix, SHA>" --label "pustman-v1,low"`; WRITE
      docs/progress/pustman-v1/steps/S<N>.md; in the same `progress: S<N> passed` commit set the main
      row passed + SHA + record link, move Open-work out, update Active CARRY-FORWARD, append a log
-     entry. Never spend a fix cycle on LOW-only findings. Leave the worktree in place.
+     entry. Never spend a fix cycle on LOW-only findings. Then run `scripts/pustman-v1-cleanup.sh`
+     in REPO: it removes every worktree whose step has its `S<N>:` commit on pustman-v1/main
+     (branches stay) — each holds a multi-GB `target/`, and lingering ones filled the disk once
+     (2026-11-20, all workers died ENOSPC).
    - CHANGES_REQUESTED → record findings + failed approach in Open work + log; dispatch a FRESH
      `fixer` (`cwd: WT/S<N>`) with the review report paths, the MEDIUM/HIGH findings and the Verify
      block: "Address every numbered finding, re-run Verify once, commit, write REPORTS/S<N>-fix-<cycle>.md,
