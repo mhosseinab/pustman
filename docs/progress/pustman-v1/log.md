@@ -217,3 +217,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-20 — S36b PASSED: review 1 PASS_WITH_ISSUES (LOW #179, #180); merged as `05b1a4f`, VERIFY OK. S36 complete.
 - 2026-11-20 — S28c PASSED: build timed out once, resumed; review 1 PASS (LOW #181); merged as `6b83ba2`, VERIFY OK. S28 complete.
 - 2026-11-20 — S30c PASSED: review 1 PASS_WITH_ISSUES (LOW #182, #183); merged as `0c19d94`. The verify run was cut off in the test stage with no FAIL line; a direct `cargo test --workspace` re-run exited 0 and TRIPWIRE 0. S30 complete.
+- 2026-11-20 — S31b PASSED: review 1 PASS (LOW #184, repo docs); merged as `2987446`, VERIFY OK. S31 complete. Also landed `dabaedc` (repo-wide cargo cap: 4 jobs, 4 test threads). S29e build timed out after committing `80a1c9e`; resumed.
