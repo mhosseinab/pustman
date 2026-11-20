@@ -1,0 +1,26 @@
+# crates/response_viewer — what a send comes back with, on screen: the status line
+# (REQ-RESP-01), the headers table (REQ-RESP-05) and the body (REQ-RESP-02). S29a lands
+# Raw mode; Pretty mode, the error panel and the remaining tabs follow in later steps.
+
+[package]
+name = "response_viewer"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/response_viewer.rs"
+
+[dependencies]
+gpui.workspace = true
+http_engine.workspace = true
+theme.workspace = true
+ui.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true
+ui = { workspace = true, features = ["test-support"] }
