@@ -145,3 +145,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-20: **S24a passed → `6cd85c6`.** A generic Picker and fuzzy scorer in the new command_palette crate. Round 1 HIGH (confirm on an empty match list) fixed behind one confirm gate. PASS 13; VERIFY OK. LOW #81 #82. S24b is unblocked.
 - 2026-11-20 S24b PASSED `092ae5e` — palette delegate; orchestrator review clean; LOW #83 #84; S24 complete
 - 2026-11-20: **S23a passed → `bf98243`.** Layout and tab restore (debounced background save, ItemFactory restore, missing-item toast). Orchestrator review clean; PASS 28; VERIFY OK. LOW #85 #86. S23b is unblocked.
+- 2026-11-20: **S16a passed → `131c73a`.** History recording with redaction and a 1 MB body cap. Round 3 MEDIUM (unknown file size skipped the straddle trim) fixed by the orchestrator: completeness is now an explicit flag. Consensus: pi review plus the orchestrator probe. PASS 126; VERIFY OK. LOW #87–#90. S16b is unblocked.
