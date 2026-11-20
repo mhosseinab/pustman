@@ -17,6 +17,8 @@ path = "src/response_viewer.rs"
 [dependencies]
 gpui.workspace = true
 http_engine.workspace = true
+mime.workspace = true
+serde_json.workspace = true
 theme.workspace = true
 ui.workspace = true
 

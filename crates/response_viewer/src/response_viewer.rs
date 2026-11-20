@@ -11,6 +11,7 @@
 mod body_view;
 mod error_panel;
 mod headers_view;
+mod pretty;
 mod status_line;
 
 pub use body_view::BodyView;

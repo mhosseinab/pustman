@@ -5439,6 +5439,8 @@ version = "0.1.0"
 dependencies = [
  "gpui",
  "http_engine",
+ "mime",
+ "serde_json",
  "tempfile",
  "theme",
  "ui",
