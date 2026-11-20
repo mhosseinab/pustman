@@ -99,10 +99,10 @@ Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending)
 | S24 | Command palette | **passed** | | | [S24a](progress/pustman-v1/steps/S24a.md) `6cd85c6` · [S24b](progress/pustman-v1/steps/S24b.md) `092ae5e` · [S24w](progress/pustman-v1/steps/S24w.md) `7f5fa60` | LOW #81–#84 |
 | S25 | M0 SIGN-OFF (HUMAN) | passed | 1 | e999232 | [S25](progress/pustman-v1/steps/S25.md) | human "M0 GO" after S22f re-smoke |
 | S26 | `request_editor`: URL bar, method, send/cancel, response status line | passed | | | [S26a](progress/pustman-v1/steps/S26a.md), [S26b](progress/pustman-v1/steps/S26b.md), [S26w](progress/pustman-v1/steps/S26w.md) | S26a, S26b, S26w (`21ebcb1`) passed |
-| S27 | Params, path variables, headers tables; cURL paste/copy | in_progress | | | [S27a](progress/pustman-v1/steps/S27a.md) | S27a (`e9d848e`) passed; S27b next |
+| S27 | Params, path variables, headers tables; cURL paste/copy | in_progress | | | [S27a](progress/pustman-v1/steps/S27a.md), [S27b](progress/pustman-v1/steps/S27b.md) | S27a (`e9d848e`), S27b (`b325398`) passed; S27c next |
 | S28 | Body, auth and settings tabs (TLS badge) | pending | 0 | | |  |
 | S29 | `response_viewer`: Pretty/Raw body, headers, error panel | in_progress | | | [S29a](progress/pustman-v1/steps/S29a.md), [S29b](progress/pustman-v1/steps/S29b.md), [S29c](progress/pustman-v1/steps/S29c.md) | S29a, S29b (`25cfe1e`), S29c passed |
-| S30 | Response: Hex, Preview, Find, save/copy, large bodies, Cookies tab | in_progress | | | [S30d](progress/pustman-v1/steps/S30d.md), [S30a](progress/pustman-v1/steps/S30a.md) | S30d (`a179be2`), S30a (`13a5b5b`) passed; S30e in fix, S30b next |
+| S30 | Response: Hex, Preview, Find, save/copy, large bodies, Cookies tab | in_progress | | | [S30d](progress/pustman-v1/steps/S30d.md), [S30a](progress/pustman-v1/steps/S30a.md), [S30e](progress/pustman-v1/steps/S30e.md) | S30d (`a179be2`), S30a (`13a5b5b`), S30e (`feb4bb8`) passed; S30b in build |
 | S31 | Timeline tab: phases, network info, redirect chain, resolved request as sent | pending | 0 | | |  |
 | S32 | `console` crate (bottom dock) | in_progress | | | [S32a](progress/pustman-v1/steps/S32a.md), [S32b](progress/pustman-v1/steps/S32b.md), [S32c](progress/pustman-v1/steps/S32c.md), [S32d](progress/pustman-v1/steps/S32d.md) | S32a–S32d passed; S32w next (wire) |
 | S33 | Variable highlighting, autocomplete, hover, pre-send warning | pending | 0 | | |  |
