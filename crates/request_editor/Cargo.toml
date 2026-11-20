@@ -20,6 +20,7 @@ gpui.workspace = true
 http_engine.workspace = true
 pustman_actions.workspace = true
 secrets.workspace = true
+serde_json.workspace = true
 text_input.workspace = true
 ui.workspace = true
 variables.workspace = true
@@ -28,5 +29,4 @@ workspace.workspace = true
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
 http_engine = { workspace = true, features = ["test-support"] }
-serde_json.workspace = true
 ui = { workspace = true, features = ["test-support"] }

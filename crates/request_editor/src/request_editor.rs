@@ -1,12 +1,14 @@
 //! `request_editor` — the request tab (PRD REQ-HTTP-01..04): a [`RequestEditor`] item
 //! holding the [`HttpRequest`] draft, with the URL bar's method picker and URL field on
-//! top, the send/status area (`send`) under it, and the request tab strip (Params and
-//! Headers now; later steps append) over the tab content (`params`, `headers`).
+//! top, the send/status area (`send`) under it, and the request tab strip (Params,
+//! Headers and Body now; later steps append) over the tab content (`params`, `headers`,
+//! `body_tab`).
 //!
 //! `Decision:` the step's scope stops at the URL bar: `pending_send`, `inline_error` and
 //! the status line are declared here and filled by S26b's send work, so the send task
 //! has exactly one home to live in (replacing it cancels the in-flight request).
 
+mod body_tab;
 mod curl_paste;
 mod headers;
 mod key_value_table;
@@ -24,6 +26,7 @@ use gpui::{
 use ui::prelude::*;
 use workspace::Item;
 
+use body_tab::{BodyTab, BodyTabEvent};
 use headers::{Headers, HeadersEvent};
 use params::{Params, ParamsEvent};
 use send::{InlineError, StatusLine};
@@ -39,6 +42,9 @@ const PARAMS_TAB_INDEX: usize = 0;
 /// The Headers tab's index in the request tab strip.
 const HEADERS_TAB_INDEX: usize = 1;
 
+/// The Body tab's index in the request tab strip.
+const BODY_TAB_INDEX: usize = 2;
+
 /// One open request: the draft the tab is editing, the URL bar that edits it, and the
 /// fields the status line area below it is drawn from (S26b).
 pub struct RequestEditor {
@@ -49,7 +55,7 @@ pub struct RequestEditor {
     /// and then its undo leave the tab clean.
     saved: HttpRequest,
     url_bar: Entity<UrlBar>,
-    /// The request tab strip (Params and Headers; later tabs append).
+    /// The request tab strip (Params, Headers and Body; later tabs append).
     tab_bar: Entity<TabBar>,
     /// Which request tab's content shows: the [`TabBar`]'s selection index.
     active_tab: usize,
@@ -57,6 +63,8 @@ pub struct RequestEditor {
     params: Entity<Params>,
     /// The Headers tab: the user's rows and the request's auto headers (S27b).
     headers: Entity<Headers>,
+    /// The Body tab: the body-mode editors (S28a).
+    body_tab: Entity<BodyTab>,
     /// The request as it was before the last cURL import — what "Undo import" restores
     /// in one step (S27c). `None` while no import can be undone.
     pre_import_request: Option<HttpRequest>,
@@ -70,6 +78,7 @@ pub struct RequestEditor {
     _url_bar_subscription: Subscription,
     _params_subscription: Subscription,
     _headers_subscription: Subscription,
+    _body_tab_subscription: Subscription,
     _tab_bar_subscription: Subscription,
 }
 
@@ -84,6 +93,8 @@ impl RequestEditor {
         let params_subscription = cx.subscribe_in(&params, window, Self::on_params_event);
         let headers = cx.new(|cx| Headers::new(&request, window, cx));
         let headers_subscription = cx.subscribe_in(&headers, window, Self::on_headers_event);
+        let body_tab = cx.new(|cx| BodyTab::new(&request, window, cx));
+        let body_tab_subscription = cx.subscribe_in(&body_tab, window, Self::on_body_tab_event);
         let tab_bar = cx.new(TabBar::new);
         tab_bar.update(cx, |bar, cx| {
             bar.set_tabs(
@@ -96,6 +107,10 @@ impl RequestEditor {
                     Tab::new(
                         SharedString::new_static("request-tab-headers"),
                         SharedString::new_static("Headers"),
+                    ),
+                    Tab::new(
+                        SharedString::new_static("request-tab-body"),
+                        SharedString::new_static("Body"),
                     ),
                 ],
                 cx,
@@ -111,6 +126,7 @@ impl RequestEditor {
             active_tab: PARAMS_TAB_INDEX,
             params,
             headers,
+            body_tab,
             pre_import_request: None,
             pending_send: None,
             inline_error: None,
@@ -118,6 +134,7 @@ impl RequestEditor {
             _url_bar_subscription: url_bar_subscription,
             _params_subscription: params_subscription,
             _headers_subscription: headers_subscription,
+            _body_tab_subscription: body_tab_subscription,
             _tab_bar_subscription: tab_bar_subscription,
         }
     }
@@ -140,6 +157,11 @@ impl RequestEditor {
     /// The Headers tab.
     pub fn headers(&self) -> &Entity<Headers> {
         &self.headers
+    }
+
+    /// The Body tab.
+    pub fn body_tab(&self) -> &Entity<BodyTab> {
+        &self.body_tab
     }
 
     /// Move focus to the URL field — `request::FocusUrlBar` (Ctrl-L / Cmd-L).
@@ -256,6 +278,26 @@ impl RequestEditor {
         self.refresh_auto_headers(cx);
         cx.notify();
     }
+
+    /// The Body tab changed: the draft's body follows it (REQ-HTTP-04) — the one
+    /// place the body is written — and the auto headers recompute, because the body's
+    /// mode decides its Content-Type. `Known gap:` `curl_paste`'s `replace_request`
+    /// (S27c, outside this step's Edits) rebuilds the URL bar, Params and Headers but
+    /// not this tab, so an imported body is shown stale here until `replace_request`
+    /// rebuilds the Body tab too.
+    fn on_body_tab_event(
+        &mut self,
+        _body_tab: &Entity<BodyTab>,
+        event: &BodyTabEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            BodyTabEvent::BodyChanged => self.draft.body = self.body_tab.read(cx).body(cx),
+        }
+        self.refresh_auto_headers(cx);
+        cx.notify();
+    }
 }
 
 impl Focusable for RequestEditor {
@@ -303,6 +345,7 @@ impl Render for RequestEditor {
             .child(self.tab_bar.clone())
             .map(|this| match self.active_tab {
                 HEADERS_TAB_INDEX => this.child(self.headers.clone()),
+                BODY_TAB_INDEX => this.child(self.body_tab.clone()),
                 _ => this.child(self.params.clone()),
             })
     }
