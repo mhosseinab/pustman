@@ -211,3 +211,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-20 — RESUMED by the human. S32w PASSED: review 1 PASS (LOW #166); merged as `64fd088`, VERIFY OK; follow-up #167 (completed sends never reach the Console). S27d review 2 PASS_WITH_ISSUES (1 LOW); merging next.
 - 2026-11-20 — S27d PASSED: review 2 PASS_WITH_ISSUES; merged as `f97066e`, VERIFY OK; LOW #168, #169, #170; S27 row passed. S31a (timeline tab) dispatched from `8bf88f7`; S28a (body tab) dispatched next from main.
 - 2026-11-20 — S31a PASSED: review 1 PASS_WITH_ISSUES (LOW #171, #172); merged as `fab5c6b`, VERIFY OK. S28a (body tab) building.
+- 2026-11-20 — S28a PASSED: review 1 PASS_WITH_ISSUES (LOW #173, #174); merged as `514fbd3`, VERIFY OK. #173 (cURL import leaves the Body tab stale) folded into the S28b brief. S28b dispatched; S36a building.
