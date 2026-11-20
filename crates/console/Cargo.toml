@@ -1,0 +1,22 @@
+# crates/console — the Console's entries in memory: one per send, warning and cancel,
+# held in a capped ring buffer (PRD §8.3). Nothing here is written to disk (REQ-CON-06).
+
+[package]
+name = "console"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/console.rs"
+
+[dependencies]
+api_model.workspace = true
+gpui.workspace = true
+settings.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

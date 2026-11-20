@@ -7,7 +7,7 @@ the code disagree, the code is right and this file is a bug.
 > **Target — crates appear as steps land.** The layout below is the v1 target from
 > `docs/pustman-v1-plan.md` §3/§5 and `docs/PRD.md` §9. **Landed (S0–S25):** `api_model`,
 > `variables`, `workspace_store`, `storage`, `secrets`, `http_engine`, `pustman_actions`, `theme`,
-> `settings`, `ui`, `workspace`, `text_input`, `command_palette`, `pustman`. **Pending (S26–S48):**
+> `settings`, `ui`, `workspace`, `text_input`, `command_palette`, `pustman`, `console` (S32a). **Pending (S26–S48):**
 > every other v1 crate below (rows marked *(S26–S48)*). **Later milestones:** `websocket_client` (M4), `grpc_client` (M5), `mqtt_client` (M6).
 > Each step updates this file in the same commit as the code it adds.
 
@@ -22,7 +22,7 @@ the code disagree, the code is right and this file is a bug.
 | `storage` | SQLite local store (rusqlite, D6): history, tabs, layout, local values, cookies, kv | `gpui`, UI crates | `storage::LocalStore` |
 | `secrets` | OS keychain via `SecretStore` (`KeyringStore`, `MemorySecretStore` for tests) | `gpui`, UI crates | `secrets::SecretStore` |
 | `git` *(S26–S48)* | thin `git` CLI wrapper (`smol::process`): status, diff, commit, pull, push, branch | `gpui` | `git::*` |
-| `console` *(S26–S48)* | console entries, ring buffer, HAR export, redaction | `gpui` | `console::*` |
+| `console` [GPUI global, no views] | console entries in a memory-only ring buffer (`ConsoleStore` global, cap from `console_max_entries`, pause, clear); HAR export, redaction *(S32b–d)* | UI crates | `console::init`, `console::ConsoleStore` |
 | `http_engine` [GPUI] | HTTP/GraphQL/SSE transport (reqwest on `gpui_tokio`), auth helpers, cookies, TLS, redirects, timing | — | `http_engine::Transport` |
 | `pustman_actions` | every PRD action + default keymaps (D10); feature crates implement handlers | UI implementation crates | `pustman_actions::*` |
 | `theme`, `settings`, `ui`, `workspace`, `text_input` | design system, theming, typed settings, shell (Pane/Dock/ModalLayer, status bar, toasts, client-side title bar and resize frame, restore/autosave), text editing | domain crates never import these | `pub fn init(cx: &mut App)` (`ui`, `workspace`, `text_input`); `theme::init(cx) -> Result`; `settings::SettingsStore::init(cx, user_json) -> Result` |

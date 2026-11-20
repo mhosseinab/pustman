@@ -1,0 +1,36 @@
+//! `console` — the Console's entries, in memory only (PRD §8.3).
+//!
+//! One [`ConsoleEntry`] lands per send and per warning or cancel (REQ-CON-01,
+//! REQ-CON-04): a summary line — method, URL, status, time and size — plus the level,
+//! the protocol and the raw request and response text exactly as they went on the wire
+//! (REQ-CON-03). [`ConsoleStore`] holds them in a ring buffer capped by the
+//! `console_max_entries` setting and drops the oldest first when it runs out of room
+//! (REQ-CON-02). Nothing here is ever written to disk unless the user exports it
+//! (REQ-CON-06), and nothing here is logged: [`ConsoleEntry`]'s `Debug` prints the raw
+//! text's size, never its content, which can hold Authorization headers and cookies
+//! (REQ-NFR-04).
+//!
+//! [`init`] installs the store; producers push through [`ConsoleStore::push`] and the
+//! Console panel reads through [`ConsoleStore::entries`] (S32d).
+
+mod store;
+
+pub use store::{ConsoleEntry, ConsoleLevel, ConsoleSetting, ConsoleStore};
+
+use gpui::App;
+use settings::Setting;
+
+/// Install the [`ConsoleStore`] global together with its slice of the settings.
+///
+/// Called once at startup, after `settings`, in the init order `main.rs` runs. The cap
+/// follows the `console_max_entries` setting from then on: a change trims the buffer to
+/// the new size, dropping the oldest entries first.
+pub fn init(cx: &mut App) {
+    ConsoleSetting::register(cx);
+    let max_entries = ConsoleSetting::get_global(cx).max_entries;
+    let settings_subscription = cx.observe_global::<settings::SettingsStore>(|cx| {
+        let max_entries = ConsoleSetting::get_global(cx).max_entries;
+        cx.global_mut::<ConsoleStore>().set_max_entries(max_entries);
+    });
+    cx.set_global(ConsoleStore::new(max_entries, settings_subscription));
+}
