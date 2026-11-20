@@ -190,3 +190,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - S26w (wire the request editor, hotspot) was dispatched from main. It is the only wire step in flight.
 - S30a (Hex/Preview) is stacked on `pustman-v1/S29b`, which is in review.
 - In flight: S27a, S37, S30d, S35b, S26w and S30a building; S32d in a fix round; S29b in review 1.
+- 2026-11-20: S32d passed (`29b3fe1`; review 1 CHANGES_REQUESTED, review 2 PASS_WITH_ISSUES; LOW #134–#135).
