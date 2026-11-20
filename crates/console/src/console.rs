@@ -15,14 +15,17 @@
 
 mod export;
 mod feed;
+mod panel;
 mod store;
 
 pub use export::export_text;
 pub use feed::{record_error, record_outcome, watch};
+pub use panel::ConsolePanel;
 pub use store::{ConsoleEntry, ConsoleLevel, ConsoleSetting, ConsoleStore};
 
-use gpui::App;
+use gpui::{App, AppContext};
 use settings::Setting;
+use workspace::Workspace;
 
 /// Install the [`ConsoleStore`] global together with its slice of the settings.
 ///
@@ -37,4 +40,16 @@ pub fn init(cx: &mut App) {
         cx.global_mut::<ConsoleStore>().set_max_entries(max_entries);
     });
     cx.set_global(ConsoleStore::new(max_entries, settings_subscription));
+    // Every workspace gets a [`ConsolePanel`] in its bottom dock (S32d). Detached: the
+    // app keeps exactly one of these observers for as long as it runs. Registration is
+    // skipped when the workspace is created outside a window update — without a window
+    // the panel's text field cannot even be built, and `Workspace::new` runs inside one.
+    cx.observe_new::<Workspace>(|workspace, window, cx| {
+        let Some(window) = window else {
+            return;
+        };
+        let panel = cx.new(|cx| ConsolePanel::new(window, cx));
+        workspace.register_panel(panel, window, cx);
+    })
+    .detach();
 }

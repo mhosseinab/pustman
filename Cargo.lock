@@ -1180,10 +1180,14 @@ dependencies = [
  "api_model",
  "gpui",
  "http_engine",
+ "pustman_actions",
  "secrets",
  "settings",
+ "text_input",
+ "ui",
  "url",
  "variables",
+ "workspace",
 ]
 
 [[package]]
