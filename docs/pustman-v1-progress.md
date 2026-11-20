@@ -93,7 +93,7 @@ Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 0 · un
 | S20 | `text_input` crate: single- and multi-line editing | **in_progress** | | | [S20a](progress/pustman-v1/steps/S20a.md) `4944955` · [S20b](progress/pustman-v1/steps/S20b.md) `1ced1cc` | LOW #69 #70 #78 |
 | S21 | `pustman_actions` + complete default keymaps (D10) | **passed** | 1 | `0ea7e26` | [S21](progress/pustman-v1/steps/S21.md) | 3 LOW → #12 #13 #14; carry-forward to S22 |
 | S22 | `pustman` binary + `workspace` shell (window, docks, panes/tabs, status bar, toasts) | **passed** | 1 | `6deb774` | [S22a](progress/pustman-v1/steps/S22a.md) `78e77d2` · [S22b](progress/pustman-v1/steps/S22b.md) `26df52b` · [S22c](progress/pustman-v1/steps/S22c.md) `6db973a` · [S22d](progress/pustman-v1/steps/S22d.md) `3db2c7a` · [S22e](progress/pustman-v1/steps/S22e.md) `6deb774` | LOW #79 #80 |
-| S23 | Tab and layout restore | pending | 0 | | |  |
+| S23 | Tab and layout restore | in_progress | | | [S23a](progress/pustman-v1/steps/S23a.md) `bf98243` | LOW #85 #86 |
 | S24 | Command palette | **passed** | | | [S24a](progress/pustman-v1/steps/S24a.md) `6cd85c6` · [S24b](progress/pustman-v1/steps/S24b.md) `092ae5e` | LOW #81–#84 |
 | S25 | M0 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off |
 | S26 | `request_editor`: URL bar, method, send/cancel, response status line | pending | 0 | | |  |
