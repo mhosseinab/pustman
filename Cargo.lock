@@ -1140,8 +1140,10 @@ name = "command_palette"
 version = "0.1.0"
 dependencies = [
  "gpui",
+ "pustman_actions",
  "text_input",
  "ui",
+ "workspace",
 ]
 
 [[package]]

@@ -18,6 +18,7 @@
 //! the picker answers to under its own [`PICKER_CONTEXT`].
 
 pub mod fuzzy;
+pub mod palette;
 pub mod picker;
 
 pub use picker::{PICKER_CONTEXT, Picker, PickerDelegate};
@@ -41,4 +42,5 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("enter", Confirm, Some(PICKER_CONTEXT)),
         KeyBinding::new("escape", Cancel, Some(PICKER_CONTEXT)),
     ]);
+    palette::init(cx);
 }
