@@ -203,3 +203,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 
 - 2026-11-20 11:15 — PLAN GAP: REQ-HTTP-03 (P0). Checked against code: enable toggles on user header rows already exist (`KeyValueTableShape::Editable`); header **value** autocomplete and per-auto-header disable have no step (S27b review 1 → #151). Decision: driver-added **S27d** (request_editor `headers.rs` + `api_model::RequestSettings` disabled-auto-headers list + `http_engine` honouring it), queued after S27c (request_editor serialization), must pass before S38.
 - 2026-11-20 — S27c PASSED: review 1 PASS_WITH_ISSUES (LOW #159, #160); merged as `e92d7e8`, VERIFY OK. S30b review 1 CHANGES_REQUESTED (1 MEDIUM: find bar not re-synced on formatter override); fix `9237a2d`, scoped review 2 running.
+- 2026-11-20 — S30b PASSED: review 2 PASS (MEDIUM fixed by `9237a2d`); merged as `556c9b7`, VERIFY OK; LOW #161, #162. S35w (wire history panel) dispatched; S27d next.
