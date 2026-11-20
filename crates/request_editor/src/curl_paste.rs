@@ -133,9 +133,11 @@ impl RequestEditor {
     }
 
     /// Make `request` this tab's request everywhere it shows: the draft, and the URL
-    /// bar, Params and Headers rebuilt from it — the same construction
+    /// bar, Params, Headers, Body and Auth rebuilt from it — the same construction
     /// [`crate::RequestEditor::new`] uses, because an import replaces the whole request
-    /// rather than mapping it field by field.
+    /// rather than mapping it field by field. A tab left holding the replaced
+    /// request's state would overwrite the imported body or auth on its next edit
+    /// (the S28a review finding this rebuild closes).
     fn replace_request(
         &mut self,
         request: HttpRequest,
@@ -153,6 +155,16 @@ impl RequestEditor {
         let headers = cx.new(|cx| Headers::new(&request, window, cx));
         self._headers_subscription = cx.subscribe_in(&headers, window, Self::on_headers_event);
         self.headers = headers;
+        let body_tab = cx.new(|cx| crate::body_tab::BodyTab::new(&request, window, cx));
+        self._body_tab_subscription = cx.subscribe_in(&body_tab, window, Self::on_body_tab_event);
+        self.body_tab = body_tab;
+        // The Auth tab keeps its parent chain: an import replaces the request in
+        // place, so the folder and collection above it are unchanged.
+        let parents = self.auth_tab.read(cx).parents().to_vec();
+        let auth_tab = cx.new(|cx| crate::auth_tab::AuthTab::new(&request, window, cx));
+        auth_tab.update(cx, |tab, cx| tab.set_parents(parents, cx));
+        self._auth_tab_subscription = cx.subscribe_in(&auth_tab, window, Self::on_auth_tab_event);
+        self.auth_tab = auth_tab;
         self.inline_error = None;
         cx.notify();
         // The paste happened in the URL field; the rebuilt bar is a new field to type

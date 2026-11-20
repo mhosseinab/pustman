@@ -1,13 +1,14 @@
 //! `request_editor` — the request tab (PRD REQ-HTTP-01..04): a [`RequestEditor`] item
 //! holding the [`HttpRequest`] draft, with the URL bar's method picker and URL field on
 //! top, the send/status area (`send`) under it, and the request tab strip (Params,
-//! Headers and Body now; later steps append) over the tab content (`params`, `headers`,
-//! `body_tab`).
+//! Headers, Body and Auth now; later steps append) over the tab content (`params`,
+//! `headers`, `body_tab`, `auth_tab`).
 //!
 //! `Decision:` the step's scope stops at the URL bar: `pending_send`, `inline_error` and
 //! the status line are declared here and filled by S26b's send work, so the send task
 //! has exactly one home to live in (replacing it cancels the in-flight request).
 
+mod auth_tab;
 mod body_tab;
 mod curl_paste;
 mod headers;
@@ -26,6 +27,7 @@ use gpui::{
 use ui::prelude::*;
 use workspace::Item;
 
+use auth_tab::{AuthTab, AuthTabEvent};
 use body_tab::{BodyTab, BodyTabEvent};
 use headers::{Headers, HeadersEvent};
 use params::{Params, ParamsEvent};
@@ -44,6 +46,9 @@ const HEADERS_TAB_INDEX: usize = 1;
 
 /// The Body tab's index in the request tab strip.
 const BODY_TAB_INDEX: usize = 2;
+
+/// The Auth tab's index in the request tab strip.
+const AUTH_TAB_INDEX: usize = 3;
 
 /// One open request: the draft the tab is editing, the URL bar that edits it, and the
 /// fields the status line area below it is drawn from (S26b).
@@ -65,6 +70,8 @@ pub struct RequestEditor {
     headers: Entity<Headers>,
     /// The Body tab: the body-mode editors (S28a).
     body_tab: Entity<BodyTab>,
+    /// The Auth tab: the auth-type editors (S28b).
+    auth_tab: Entity<AuthTab>,
     /// The request as it was before the last cURL import — what "Undo import" restores
     /// in one step (S27c). `None` while no import can be undone.
     pre_import_request: Option<HttpRequest>,
@@ -79,6 +86,7 @@ pub struct RequestEditor {
     _params_subscription: Subscription,
     _headers_subscription: Subscription,
     _body_tab_subscription: Subscription,
+    _auth_tab_subscription: Subscription,
     _tab_bar_subscription: Subscription,
 }
 
@@ -95,6 +103,8 @@ impl RequestEditor {
         let headers_subscription = cx.subscribe_in(&headers, window, Self::on_headers_event);
         let body_tab = cx.new(|cx| BodyTab::new(&request, window, cx));
         let body_tab_subscription = cx.subscribe_in(&body_tab, window, Self::on_body_tab_event);
+        let auth_tab = cx.new(|cx| AuthTab::new(&request, window, cx));
+        let auth_tab_subscription = cx.subscribe_in(&auth_tab, window, Self::on_auth_tab_event);
         let tab_bar = cx.new(TabBar::new);
         tab_bar.update(cx, |bar, cx| {
             bar.set_tabs(
@@ -112,6 +122,10 @@ impl RequestEditor {
                         SharedString::new_static("request-tab-body"),
                         SharedString::new_static("Body"),
                     ),
+                    Tab::new(
+                        SharedString::new_static("request-tab-auth"),
+                        SharedString::new_static("Auth"),
+                    ),
                 ],
                 cx,
             )
@@ -127,6 +141,7 @@ impl RequestEditor {
             params,
             headers,
             body_tab,
+            auth_tab,
             pre_import_request: None,
             pending_send: None,
             inline_error: None,
@@ -135,6 +150,7 @@ impl RequestEditor {
             _params_subscription: params_subscription,
             _headers_subscription: headers_subscription,
             _body_tab_subscription: body_tab_subscription,
+            _auth_tab_subscription: auth_tab_subscription,
             _tab_bar_subscription: tab_bar_subscription,
         }
     }
@@ -162,6 +178,11 @@ impl RequestEditor {
     /// The Body tab.
     pub fn body_tab(&self) -> &Entity<BodyTab> {
         &self.body_tab
+    }
+
+    /// The Auth tab.
+    pub fn auth_tab(&self) -> &Entity<AuthTab> {
+        &self.auth_tab
     }
 
     /// Move focus to the URL field — `request::FocusUrlBar` (Ctrl-L / Cmd-L).
@@ -281,10 +302,9 @@ impl RequestEditor {
 
     /// The Body tab changed: the draft's body follows it (REQ-HTTP-04) — the one
     /// place the body is written — and the auto headers recompute, because the body's
-    /// mode decides its Content-Type. `Known gap:` `curl_paste`'s `replace_request`
-    /// (S27c, outside this step's Edits) rebuilds the URL bar, Params and Headers but
-    /// not this tab, so an imported body is shown stale here until `replace_request`
-    /// rebuilds the Body tab too.
+    /// mode decides its Content-Type. A cURL import rebuilds this tab from the
+    /// imported request (`curl_paste`'s `replace_request`), so the next body edit
+    /// extends the imported body instead of overwriting it with stale state.
     fn on_body_tab_event(
         &mut self,
         _body_tab: &Entity<BodyTab>,
@@ -294,6 +314,23 @@ impl RequestEditor {
     ) {
         match event {
             BodyTabEvent::BodyChanged => self.draft.body = self.body_tab.read(cx).body(cx),
+        }
+        self.refresh_auto_headers(cx);
+        cx.notify();
+    }
+
+    /// The Auth tab changed: the draft's auth follows it (REQ-HTTP-06) — the one
+    /// place the auth is written — and the auto headers recompute, because the
+    /// applied auth adds headers the send pipeline generates.
+    fn on_auth_tab_event(
+        &mut self,
+        _auth_tab: &Entity<AuthTab>,
+        event: &AuthTabEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            AuthTabEvent::AuthChanged => self.draft.auth = self.auth_tab.read(cx).auth(),
         }
         self.refresh_auto_headers(cx);
         cx.notify();
@@ -346,6 +383,7 @@ impl Render for RequestEditor {
             .map(|this| match self.active_tab {
                 HEADERS_TAB_INDEX => this.child(self.headers.clone()),
                 BODY_TAB_INDEX => this.child(self.body_tab.clone()),
+                AUTH_TAB_INDEX => this.child(self.auth_tab.clone()),
                 _ => this.child(self.params.clone()),
             })
     }
@@ -360,3 +398,7 @@ pub fn init(cx: &mut App) {
 #[cfg(test)]
 #[path = "request_editor_auto_header_tests.rs"]
 mod auto_header_tests;
+
+#[cfg(test)]
+#[path = "request_editor_curl_reseed_tests.rs"]
+mod curl_reseed_tests;
