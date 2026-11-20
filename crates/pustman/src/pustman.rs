@@ -82,9 +82,9 @@ impl StartupProblems {
 }
 
 /// The app's init order (AGENTS.md): `settings → theme → ui → text_input → pustman_actions keymap →
-/// storage → workspace → command_palette → restore wiring`, one line per crate or wire step
-/// so later ones append their own. This is the binary's entry point: its local store is the
-/// one in the platform config dir.
+/// storage → workspace → command_palette → http client → request editor → restore wiring`, one
+/// line per crate or wire step so later ones append their own. This is the binary's entry point:
+/// its local store is the one in the platform config dir.
 pub fn init(cx: &mut App) {
     init_with_store(cx, StoreLocation::ConfigDir);
 }
@@ -100,7 +100,22 @@ pub fn init_with_store(cx: &mut App, store: StoreLocation) {
     open_local_store(cx, store);
     workspace::init(cx);
     command_palette::init(cx);
+    init_http_client(cx);
+    request_editor::init(cx);
     restore_wiring::init(cx);
+}
+
+/// `http_engine`: the client every request tab sends through, built on `ReqwestTransport`
+/// over the tokio runtime `gpui_tokio` owns (S26w). Installing it is this app-level
+/// wiring decision (`send`'s `Decision:`): `request_editor::init` has no transport to
+/// build a client from, and tests install one backed by `FakeTransport` instead. Nothing
+/// here can fail — `gpui_tokio::init` reports its own runtime build failure — so there is
+/// no problem to push to [`StartupProblems`].
+fn init_http_client(cx: &mut App) {
+    gpui_tokio::init(cx);
+    let transport = http_engine::ReqwestTransport::new(gpui_tokio::Tokio::handle(cx));
+    let client = cx.new(|_| http_engine::HttpClient::new(Arc::new(transport)));
+    request_editor::send::set_http_client(client, cx);
 }
 
 /// `settings`: the bundled defaults, then the user's `settings.json` watched by a
