@@ -1,12 +1,15 @@
 //! `response_viewer` — what a send comes back with, on screen: the status line
-//! (REQ-RESP-01), the body (REQ-RESP-02) and the headers table (REQ-RESP-05).
+//! (REQ-RESP-01), the body (REQ-RESP-02), the headers table (REQ-RESP-05) and, when a
+//! send failed, the error panel (REQ-RESP-08).
 //!
 //! [`ResponseView`] is the entity a host embeds (S29e puts it under the request editor).
 //! It owns the status line, the Body/Headers tabs and the two panes below them, and takes
-//! the send result through [`ResponseView::set_response`]. The input type is
-//! [`http_engine::Response`] — there is no parallel model here.
+//! the send result through [`ResponseView::set_response`] — or its failure through
+//! [`ResponseView::set_error`]. The input type is [`http_engine::Response`] — there is no
+//! parallel model here.
 
 mod body_view;
+mod error_panel;
 mod headers_view;
 mod status_line;
 
@@ -17,17 +20,23 @@ pub use status_line::StatusLine;
 use std::sync::Arc;
 
 use gpui::{
-    Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render, Subscription,
-    Window,
+    AnyElement, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render,
+    Subscription, Window,
 };
-use http_engine::Response;
+use http_engine::{Response, TransportError};
 use ui::prelude::*;
 
+use crate::error_panel::ErrorPanel;
 use crate::status_line::body_size;
 
 /// The key context the response viewer answers in. The default keymaps bind
 /// `response::Find` here (`assets/keymaps/`, REQ-RESP-03); its handler lands with find.
 const RESPONSE_VIEW_CONTEXT: &str = "ResponseViewer";
+
+/// The debug key the body pane renders under — the test hook that lets
+/// `VisualTestContext::debug_bounds` prove the body is (not) on screen (the `toast.rs`
+/// pattern). The error panel replaces it, so the two never render together.
+const BODY_PANE_SELECTOR: &str = "response-body-pane";
 
 /// The tabs across the top of the response, in order. Later steps append here (Cookies,
 /// Timeline); the bar is built from this list, so a new tab is one line and nothing else.
@@ -46,6 +55,8 @@ pub struct ResponseView {
     selected_tab: usize,
     body: Entity<BodyView>,
     headers: Entity<HeadersView>,
+    /// The failed send on screen instead of its body (REQ-RESP-08).
+    error: Option<TransportError>,
     _tab_bar_subscription: Subscription,
 }
 
@@ -61,6 +72,7 @@ impl ResponseView {
             selected_tab: BODY_TAB,
             body: cx.new(BodyView::new),
             headers: cx.new(HeadersView::new),
+            error: None,
             _tab_bar_subscription,
         }
     }
@@ -70,6 +82,7 @@ impl ResponseView {
     /// its texts — so `render` only lays out what arrived.
     pub fn set_response(&mut self, response: Response, cx: &mut Context<Self>) {
         let response = Arc::new(response);
+        self.error = None;
         self.status_line = Some(StatusLine::new(
             ElementId::from(&self.focus_handle),
             response.status,
@@ -82,6 +95,32 @@ impl ResponseView {
         self.body
             .update(cx, |body, cx| body.set_body(Arc::clone(&response), cx));
         cx.notify();
+    }
+
+    /// Show this failed send instead of a response body (REQ-RESP-08). The panel takes
+    /// the body region only: the status line and tabs keep whatever they show until the
+    /// next [`Self::set_response`] replaces both.
+    pub fn set_error(&mut self, error: TransportError, cx: &mut Context<Self>) {
+        self.error = Some(error);
+        cx.notify();
+    }
+
+    /// What the region under the tabs shows: the error panel after a failed send
+    /// (REQ-RESP-08), otherwise the selected tab's pane.
+    fn pane(&self) -> AnyElement {
+        match &self.error {
+            Some(error) => {
+                ErrorPanel::new(ElementId::from(&self.focus_handle), error).into_any_element()
+            }
+            None => match self.selected_tab {
+                HEADERS_TAB => self.headers.clone().into_any_element(),
+                _ => div()
+                    .size_full()
+                    .debug_selector(|| BODY_PANE_SELECTOR.to_owned())
+                    .child(self.body.clone())
+                    .into_any_element(),
+            },
+        }
     }
 
     /// The tab bar's events: moving the selection with the arrows or activating a tab
@@ -117,11 +156,14 @@ impl Render for ResponseView {
                 Some(status_line) => this
                     .child(status_line.clone())
                     .child(self.tab_bar.clone())
-                    .child(v_flex().flex_1().min_h_0().child(match self.selected_tab {
-                        HEADERS_TAB => self.headers.clone().into_any_element(),
-                        _ => self.body.clone().into_any_element(),
-                    })),
-                None => this.child(empty_state(cx)),
+                    .child(v_flex().flex_1().min_h_0().child(self.pane())),
+                // A failed send that never produced a response still gets its panel:
+                // with no response the body region is the whole area (REQ-RESP-08).
+                None => this.child(match &self.error {
+                    Some(error) => ErrorPanel::new(ElementId::from(&self.focus_handle), error)
+                        .into_any_element(),
+                    None => empty_state(cx).into_any_element(),
+                }),
             })
     }
 }
