@@ -45,6 +45,10 @@ const ACTIVATION_CONTEXT: &str = "Button";
 const ROW_HEIGHT_REMS: f32 = 1.75;
 const DETAILS_HEIGHT_REMS: f32 = 14.;
 const FILTER_WIDTH_REMS: f32 = 14.;
+/// Debug selectors the layout tests measure the drawn frame through.
+pub(crate) const TEXT_FILTER_SELECTOR: &str = "console-text-filter";
+pub(crate) const ENTRIES_AREA_SELECTOR: &str = "console-entries-area";
+pub(crate) const EMPTY_STATE_SELECTOR: &str = "console-empty-state";
 
 /// The Console panel: the entry list, its filters and the expanded raw view.
 pub struct ConsolePanel {
@@ -330,7 +334,8 @@ impl ConsolePanel {
             )
             .child(
                 div()
-                    .w(px_to_rems(FILTER_WIDTH_REMS))
+                    .debug_selector(|| TEXT_FILTER_SELECTOR.to_owned())
+                    .w(rems(FILTER_WIDTH_REMS))
                     .px(DynamicSpacing::Base03.rems(cx))
                     .border_1()
                     .border_color(cx.theme().colors().border)
@@ -414,19 +419,30 @@ impl Render for ConsolePanel {
             .size_full()
             .font_ui(cx)
             .child(self.render_toolbar(paused, cx))
-            .child(div().flex_1().min_h_0().overflow_hidden().map(|container| {
-                if rows.is_empty() {
-                    container.child(
-                        v_flex().flex_1().items_center().justify_center().child(
-                            Label::new("No console entries")
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
-                        ),
-                    )
-                } else {
-                    container.child(list)
-                }
-            }))
+            .child(
+                v_flex()
+                    .debug_selector(|| ENTRIES_AREA_SELECTOR.to_owned())
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .map(|container| {
+                        if rows.is_empty() {
+                            container.child(
+                                v_flex().flex_1().items_center().justify_center().child(
+                                    div()
+                                        .debug_selector(|| EMPTY_STATE_SELECTOR.to_owned())
+                                        .child(
+                                            Label::new("No console entries")
+                                                .size(LabelSize::Small)
+                                                .color(Color::Muted),
+                                        ),
+                                ),
+                            )
+                        } else {
+                            container.child(list)
+                        }
+                    }),
+            )
             .child(self.render_details(cx))
     }
 }
@@ -591,3 +607,7 @@ fn format_size(size: Option<u64>) -> String {
 #[cfg(test)]
 #[path = "panel_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "panel_layout_tests.rs"]
+mod layout_tests;

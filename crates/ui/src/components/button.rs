@@ -63,7 +63,9 @@ impl TintColor {
 
     fn border(self, cx: &App) -> Hsla {
         match self {
-            Self::Accent => cx.theme().colors().border_selected,
+            // The selected fill and accent text already mark an active toggle; an accent
+            // outline on top read as a focus ring on every active chip.
+            Self::Accent => cx.theme().colors().border_transparent,
             Self::Error => Severity::Error.border(cx),
             Self::Warning => Severity::Warning.border(cx),
             Self::Success => Severity::Success.border(cx),
