@@ -1,0 +1,33 @@
+# crates/environment_picker — the title-bar active-environment selector (PRD REQ-VAR-08):
+# a `command_palette::Picker` over the workspace's environments plus the first-class
+# "No environment" option, with the selection persisted per workspace in `storage`'s kv
+# table. The environment list is input (api_model types); this crate reads no workspace
+# files.
+
+[package]
+name = "environment_picker"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/environment_picker.rs"
+
+[dependencies]
+anyhow.workspace = true
+api_model.workspace = true
+command_palette.workspace = true
+gpui.workspace = true
+pustman_actions.workspace = true
+storage.workspace = true
+text_input.workspace = true
+ui.workspace = true
+workspace.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true
+ui = { workspace = true, features = ["test-support"] }

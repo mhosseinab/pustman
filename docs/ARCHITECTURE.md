@@ -7,7 +7,7 @@ the code disagree, the code is right and this file is a bug.
 > **Target — crates appear as steps land.** The layout below is the v1 target from
 > `docs/pustman-v1-plan.md` §3/§5 and `docs/PRD.md` §9. **Landed (S0–S25):** `api_model`,
 > `variables`, `workspace_store`, `storage`, `secrets`, `http_engine`, `pustman_actions`, `theme`,
-> `settings`, `ui`, `workspace`, `text_input`, `command_palette`, `pustman`, `console` (S32a), `history_panel` (S35a), `request_editor` (S26a). **Pending (S26–S48):**
+> `settings`, `ui`, `workspace`, `text_input`, `command_palette`, `pustman`, `console` (S32a), `history_panel` (S35a), `request_editor` (S26a), `environment_picker` (S34a). **Pending (S26–S48):**
 > every other v1 crate below (rows marked *(S26–S48)*). **Later milestones:** `websocket_client` (M4), `grpc_client` (M5), `mqtt_client` (M6).
 > Each step updates this file in the same commit as the code it adds.
 

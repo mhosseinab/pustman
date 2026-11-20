@@ -1760,6 +1760,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "environment_picker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api_model",
+ "command_palette",
+ "gpui",
+ "pustman_actions",
+ "storage",
+ "tempfile",
+ "text_input",
+ "ui",
+ "workspace",
+]
+
+[[package]]
 name = "equator"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
