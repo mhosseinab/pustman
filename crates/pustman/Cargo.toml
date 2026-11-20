@@ -21,6 +21,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 command_palette.workspace = true
+console.workspace = true
 environment_picker.workspace = true
 gpui.workspace = true
 gpui_platform.workspace = true
@@ -40,5 +41,6 @@ ui.workspace = true
 workspace.workspace = true
 
 [dev-dependencies]
+api_model.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 ui = { workspace = true, features = ["test-support"] }

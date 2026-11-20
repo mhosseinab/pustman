@@ -85,7 +85,7 @@ impl StartupProblems {
 }
 
 /// The app's init order (AGENTS.md): `settings → theme → ui → text_input → pustman_actions keymap →
-/// storage → workspace → command_palette → http client → response viewer → request editor →
+/// storage → workspace → console → command_palette → http client → response viewer → request editor →
 /// environment picker → history panel → restore wiring`, one line per crate or wire step so later
 /// ones append their own.
 /// This is the binary's entry point: its local store is the one in the platform config dir.
@@ -103,6 +103,7 @@ pub fn init_with_store(cx: &mut App, store: StoreLocation) {
     init_keymap(cx);
     open_local_store(cx, store);
     workspace::init(cx);
+    console::init(cx);
     command_palette::init(cx);
     init_http_client(cx);
     response_viewer::init(cx);
@@ -119,12 +120,31 @@ pub fn init_with_store(cx: &mut App, store: StoreLocation) {
 /// build a client from, and tests install one backed by `FakeTransport` instead. Nothing
 /// here can fail — `gpui_tokio::init` reports its own runtime build failure — so there is
 /// no problem to push to [`StartupProblems`].
+///
+/// `console` (S32w): `console::watch` records every cancellation this client reports
+/// (REQ-HTTP-12). Its [`Subscription`] lives in [`ConsoleWiring`] for the app's lifetime
+/// — dropping a subscription stops the recording.
 fn init_http_client(cx: &mut App) {
     gpui_tokio::init(cx);
     let transport = http_engine::ReqwestTransport::new(gpui_tokio::Tokio::handle(cx));
     let client = cx.new(|_| http_engine::HttpClient::new(Arc::new(transport)));
+    let subscription = console::watch(&client, cx);
+    cx.default_global::<ConsoleWiring>()
+        ._subscriptions
+        .push(subscription);
     request_editor::send::set_http_client(client, cx);
 }
+
+/// The `console` wire (S32w): the [`Subscription`]s that keep the app's Console feed
+/// alive — today the one `console::watch` returns for the app's one HTTP client. A
+/// dropped subscription stops the recording, so they live here for the app's lifetime,
+/// the same shape [`HistoryPanelWiring`] keeps its observers in.
+#[derive(Default)]
+struct ConsoleWiring {
+    _subscriptions: Vec<Subscription>,
+}
+
+impl Global for ConsoleWiring {}
 
 /// The id of the one workspace v1 has: the same string `restore_wiring::WORKSPACE_KEY`
 /// saves that window's tabs and layout under, and the picker's per-workspace selection

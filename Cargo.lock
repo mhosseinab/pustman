@@ -4946,7 +4946,9 @@ name = "pustman"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "api_model",
  "command_palette",
+ "console",
  "environment_picker",
  "gpui",
  "gpui_platform",
