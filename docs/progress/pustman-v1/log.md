@@ -214,3 +214,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-20 — S28a PASSED: review 1 PASS_WITH_ISSUES (LOW #173, #174); merged as `514fbd3`, VERIFY OK. #173 (cURL import leaves the Body tab stale) folded into the S28b brief. S28b dispatched; S36a building.
 - 2026-11-20 — S36a PASSED: review 1 PASS_WITH_ISSUES (LOW #175, #176); merged as `fd8a7de`, VERIFY OK.
 - 2026-11-20 — S28b PASSED: review 1 PASS_WITH_ISSUES (LOW #177, #178; LOW 3 reconciled in record); merged as `8e86518`. The first verify run exited 1 without output; a traced re-run gave VERIFY OK. Closed #173.
+- 2026-11-20 — S36b PASSED: review 1 PASS_WITH_ISSUES (LOW #179, #180); merged as `05b1a4f`, VERIFY OK. S36 complete.
