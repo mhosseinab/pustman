@@ -153,3 +153,5 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-20: **S16b passed → `f2ce3c0`.** History retention: storage's `prune_older_than` runs once per session from the history writer. Orchestrator review clean. PASS 1 (http_engine 129); VERIFY OK. LOW #100 #101. S16 complete. S24w and S23w are building in parallel (a small hotspot overlap that I resolve at merge).
 - 2026-11-20: **S24w passed → `7f5fa60`.** The command palette is wired into the binary's init order. Orchestrator review clean. PASS 1 (pustman 2); build OK; VERIFY OK. S25 now waits only on S23w.
 - 2026-11-20 S23w passed (4a8e46c), LOW #102 #103. Segment 2 complete; stopped at S25 (M0 sign-off, HUMAN).
+- 2026-11-20: **PLAN AMENDED (driver): S22f added.** The S25 smoke on GNOME Wayland found no way to move, resize or close the window, a doubled palette placeholder, and raw `ctrl-tab` key hints. S22f fixes all three ahead of the S25 re-smoke.
+- 2026-11-20 S22f passed (8771b0b), LOW #104 #105 #106 #107. Stopped at S25 (M0 sign-off, HUMAN): re-smoke pending.
