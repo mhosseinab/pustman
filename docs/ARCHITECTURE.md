@@ -5,32 +5,33 @@ it describes; `doc-truth-checker` samples claims against code at every promotion
 the code disagree, the code is right and this file is a bug.
 
 > **Target — crates appear as steps land.** The layout below is the v1 target from
-> `docs/pustman-v1-plan.md` §3/§5 and `docs/PRD.md` §9. **Landed (S0–S10):** `api_model`,
-> `variables`, `workspace_store`, `storage`, `secrets`. **Pending (S11–S48):** every other v1 crate
-> below. **Later milestones:** `websocket_client` (M4), `grpc_client` (M5), `mqtt_client` (M6).
+> `docs/pustman-v1-plan.md` §3/§5 and `docs/PRD.md` §9. **Landed (S0–S25):** `api_model`,
+> `variables`, `workspace_store`, `storage`, `secrets`, `http_engine`, `pustman_actions`, `theme`,
+> `settings`, `ui`, `workspace`, `text_input`, `command_palette`, `pustman`. **Pending (S26–S48):**
+> every other v1 crate below (rows marked *(S26–S48)*). **Later milestones:** `websocket_client` (M4), `grpc_client` (M5), `mqtt_client` (M6).
 > Each step updates this file in the same commit as the code it adds.
 
 ## Modules and boundaries
 
 | Module | Owns | Must not import | Entry points |
 | --- | --- | --- | --- |
-| `pustman` *(S11–S48)* | binary: `main.rs`, init order, window setup, app menus | — (top) | `crates/pustman/src/main.rs` |
+| `pustman` | binary (`main.rs` calls `pustman::init`) + library: init order, local-store wiring, restore/autosave wiring, window setup | — (top) | `pustman::init` (`crates/pustman/src/pustman.rs`) |
 | `api_model` | Request/Collection/Folder/Environment/Variable/Auth types; Postman v2.1 import/export; the shared `redact_*` helpers (D8) | IO, `gpui` | `api_model::{redact_text, redact_headers, redact_url}` |
 | `variables` | `{{var}}` resolution, scopes (narrowest wins), dynamic vars, cycle detection | `gpui` | `variables::resolve` |
 | `workspace_store` | on-disk workspace format (PRD §6.1), deterministic atomic writes, file watcher, conflict detection, item ↔ file mapping | `gpui`, UI crates | `workspace_store::{open, save_item, watch}` |
 | `storage` | SQLite local store (rusqlite, D6): history, tabs, layout, local values, cookies, kv | `gpui`, UI crates | `storage::LocalStore` |
 | `secrets` | OS keychain via `SecretStore` (`KeyringStore`, `MemorySecretStore` for tests) | `gpui`, UI crates | `secrets::SecretStore` |
-| `git` *(S11–S48)* | thin `git` CLI wrapper (`smol::process`): status, diff, commit, pull, push, branch | `gpui` | `git::*` |
-| `console` *(S11–S48)* | console entries, ring buffer, HAR export, redaction | `gpui` | `console::*` |
-| `http_engine` [GPUI] *(S11–S48)* | HTTP/GraphQL/SSE transport (reqwest on `gpui_tokio`), auth helpers, cookies, TLS, redirects, timing | — | `http_engine::Transport` |
-| `pustman_actions` *(S11–S48)* | every PRD action + default keymaps (D10); feature crates implement handlers | UI implementation crates | `pustman_actions::*` |
-| `theme`, `settings`, `ui`, `workspace`, `text_input` *(S11–S48)* | design system, theming, typed settings, shell (Pane/Dock/ModalLayer), text editing | domain crates never import these | `pub fn init(cx: &mut App)` per crate |
-| `collections_panel`, `request_editor`, `response_viewer`, `environment_picker`, `history_panel` *(S11–S48)* | the Postman screens | each other (coordinate through `workspace`) | `init(cx)` |
-| `command_palette` *(S24a)* | the reusable modal picker (`Picker<D: PickerDelegate>`) and the fuzzy scorer (`fuzzy::score`/`fuzzy::rank`) that S34a, S41b and S46 build their pickers on | `workspace`, the feature crates that depend on it | `command_palette::init` |
+| `git` *(S26–S48)* | thin `git` CLI wrapper (`smol::process`): status, diff, commit, pull, push, branch | `gpui` | `git::*` |
+| `console` *(S26–S48)* | console entries, ring buffer, HAR export, redaction | `gpui` | `console::*` |
+| `http_engine` [GPUI] | HTTP/GraphQL/SSE transport (reqwest on `gpui_tokio`), auth helpers, cookies, TLS, redirects, timing | — | `http_engine::Transport` |
+| `pustman_actions` | every PRD action + default keymaps (D10); feature crates implement handlers | UI implementation crates | `pustman_actions::*` |
+| `theme`, `settings`, `ui`, `workspace`, `text_input` | design system, theming, typed settings, shell (Pane/Dock/ModalLayer, status bar, toasts, client-side title bar and resize frame, restore/autosave), text editing | domain crates never import these | `pub fn init(cx: &mut App)` per crate |
+| `collections_panel`, `request_editor`, `response_viewer`, `environment_picker`, `history_panel` *(S26–S48)* | the Postman screens | each other (coordinate through `workspace`) | `init(cx)` |
+| `command_palette` | the reusable modal picker (`Picker<D: PickerDelegate>`) and the fuzzy scorer (`fuzzy::score`/`fuzzy::rank`) that S34a, S41b and S46 build their pickers on; the command palette modal (`palette.rs`, S24b) | the feature crates that depend on it (it imports `workspace` only for `ModalView`/`toggle_modal`) | `command_palette::init` |
 | `integration_tests` *(S37, S47)* | end-to-end proofs (redaction test S37, sharing AC S47) | — | `crates/integration_tests/tests/` |
 | later milestones | `websocket_client` (M4), `grpc_client` (M5), `mqtt_client` (M6) — same `SessionEvent` shape (PRD §9) | UI crates | `connect()` per crate |
 
-Init order in `main.rs`: `settings → theme → ui → workspace → feature crates`.
+Init order in `pustman::init_with_store` (`crates/pustman/src/pustman.rs`): `settings → theme → ui → keymap → local store → workspace → feature crates (command_palette) → restore wiring`.
 
 ## Data flow (the flows that matter)
 
@@ -78,7 +79,7 @@ Init order in `main.rs`: `settings → theme → ui → workspace → feature cr
 
 ## How to debug at 02:00
 
-- Entry point: `crates/pustman/src/main.rs` (init order above). First place to look: the Console
+- Entry point: `crates/pustman/src/main.rs` → `pustman::init` (init order above). First place to look: the Console
   (`console` crate) — every send/error lands there. First command: `cargo run -p pustman`.
 - Harness: `scripts/pustman-v1-init.sh` (toolchain + GPUI deps), `scripts/pustman-v1-test.sh <crate>
   [filter]` (fast loop), `scripts/pustman-v1-verify.sh` (merge gate), `scripts/pustman-v1-tripwire.sh`.
