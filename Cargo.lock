@@ -4878,6 +4878,7 @@ dependencies = [
  "command_palette",
  "gpui",
  "gpui_platform",
+ "image",
  "pustman_actions",
  "settings",
  "storage",

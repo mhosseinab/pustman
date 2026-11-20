@@ -36,6 +36,16 @@ fn open_workspace(cx: &mut App, startup_trace: bool, started: Instant) -> anyhow
     .detach();
 
     let bounds = Bounds::centered(None, size(px(1280.0), px(800.0)), cx);
+    let icon = match pustman::app_icon::window_icon() {
+        Ok(icon) => Some(icon),
+        Err(error) => {
+            pustman::StartupProblems::push(
+                cx,
+                format!("the app icon could not be loaded: {error}"),
+            );
+            None
+        }
+    };
     let window = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -43,6 +53,8 @@ fn open_workspace(cx: &mut App, startup_trace: bool, started: Instant) -> anyhow
                 title: Some("Pustman".into()),
                 ..Default::default()
             }),
+            app_id: Some(pustman::app_icon::APP_ID.to_owned()),
+            icon,
             ..Default::default()
         },
         move |window, cx| {

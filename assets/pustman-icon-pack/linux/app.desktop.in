@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=@APP_NAME@
+Comment=API development and testing client
+Exec=@APP_EXECUTABLE@
+Icon=@ICON_BASENAME@
+Terminal=false
+Categories=Development;Network;
+StartupNotify=true

@@ -55,6 +55,8 @@ base64 = "0.23.1"
 cookie_store = "0.22.1"
 futures = "0.3.34"
 hex = "0.4.3"
+# PNG only: decodes the bundled app icon for the X11 window (`pustman::app_icon`).
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 indexmap = { version = "2.14.2", features = ["serde"] }
 keyring = "4.2.0"
 log = "0.4.35"

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Rust API client — Exchange crab</title>
+  <desc id="desc">An orange geometric crab with two ivory outward-pointing request and response arrow claws, on a graphite rounded square. The symbol has two eye cutouts, with transparent padding outside the tile.</desc>
+  <rect id="background" x="64" y="64" width="896" height="896" rx="176" fill="#191C25"/>
+  <g id="symbol">
+    <g id="claws" fill="#FFF8EE">
+      <path id="claw-left" d="M154 360 L256 268 Q260 264 260 270 V320 H320 C362 320 396 354 396 396 V520 Q396 528 388 528 H332 Q324 528 324 520 V432 C324 417 312 405 297 405 H260 V456 Q260 462 256 458 L154 366 Q150 363 154 360 Z"/>
+      <path id="claw-right" transform="translate(1024 0) scale(-1 1)" d="M154 360 L256 268 Q260 264 260 270 V320 H320 C362 320 396 354 396 396 V520 Q396 528 388 528 H332 Q324 528 324 520 V432 C324 417 312 405 297 405 H260 V456 Q260 462 256 458 L154 366 Q150 363 154 360 Z"/>
+    </g>
+    <g id="legs" fill="none" stroke="#FF7548" stroke-width="54" stroke-linecap="round" stroke-linejoin="round">
+      <path id="leg-upper-left" d="M320 626 H264 L211 684"/>
+      <path id="leg-lower-left" d="M376 710 H294 L260 760"/>
+      <path id="leg-upper-right" d="M704 626 H760 L813 684"/>
+      <path id="leg-lower-right" d="M648 710 H730 L764 760"/>
+    </g>
+    <path id="body" fill="#FF7548" fill-rule="evenodd" d="M512 444 C396 444 304 514 304 616 C304 701 354 770 450 770 H574 C670 770 720 701 720 616 C720 514 628 444 512 444 Z M480 538 A34 34 0 1 1 412 538 A34 34 0 1 1 480 538 Z M612 538 A34 34 0 1 1 544 538 A34 34 0 1 1 612 538 Z"/>
+  </g>
+</svg>

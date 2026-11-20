@@ -3,6 +3,7 @@
 //! `main.rs` is only the window opener (docs/pustman-v1-implementation-steps.md, S22e,
 //! convention 4): a later wire step appends one line per crate to [`init_with_store`].
 
+pub mod app_icon;
 pub mod restore_wiring;
 
 use std::sync::{Arc, Mutex};

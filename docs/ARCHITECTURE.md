@@ -15,7 +15,7 @@ the code disagree, the code is right and this file is a bug.
 
 | Module | Owns | Must not import | Entry points |
 | --- | --- | --- | --- |
-| `pustman` | binary (`main.rs` calls `pustman::init`) + library: init order, local-store wiring, restore/autosave wiring, window setup | — (top) | `pustman::init` (`crates/pustman/src/pustman.rs`) |
+| `pustman` | binary (`main.rs` calls `pustman::init`) + library: init order, local-store wiring, restore/autosave wiring, window setup, app id + window icon (`app_icon`, artwork in `assets/pustman-icon-pack/`; desktop entry `scripts/install-desktop-entry.sh`, macOS bundle `scripts/bundle-macos.sh`) | — (top) | `pustman::init` (`crates/pustman/src/pustman.rs`) |
 | `api_model` | Request/Collection/Folder/Environment/Variable/Auth types; Postman v2.1 import/export; the shared `redact_*` helpers (D8) | IO, `gpui` | `api_model::{redact_text, redact_headers, redact_url}` |
 | `variables` | `{{var}}` resolution, scopes (narrowest wins), dynamic vars, cycle detection | `gpui` | `variables::resolve` |
 | `workspace_store` | on-disk workspace format (PRD §6.1), deterministic atomic writes, file watcher, conflict detection, item ↔ file mapping | `gpui`, UI crates | `workspace_store::{open, save_item, watch}` |

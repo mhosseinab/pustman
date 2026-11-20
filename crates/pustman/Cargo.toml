@@ -23,6 +23,7 @@ anyhow.workspace = true
 command_palette.workspace = true
 gpui.workspace = true
 gpui_platform.workspace = true
+image.workspace = true
 pustman_actions.workspace = true
 settings.workspace = true
 storage.workspace = true

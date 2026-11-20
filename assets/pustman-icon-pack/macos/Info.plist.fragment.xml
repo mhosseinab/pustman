@@ -1,0 +1,4 @@
+<!-- Merge these entries into your app's existing Info.plist dict. -->
+<!-- Place app-icon.icns in the application's Contents/Resources directory. -->
+<key>CFBundleIconFile</key>
+<string>app-icon</string>

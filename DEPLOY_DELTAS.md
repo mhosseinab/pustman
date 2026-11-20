@@ -17,6 +17,7 @@ done it on the build host.
 | S6 | codified | `crates/storage/migrations` — applied at app start; every migration has a down | automatic: `LocalStore::migrate()` applies them; exercised by `scripts/pustman-v1-verify.sh` (the `every_migration_has_working_down` suite) | applied(auto: full verify `VERIFY OK` at S6 merge, migrations 1 up / 1 down with working downs) |
 | S1 | codified | `.github/workflows/ci.yml` — CI on push/PR, Linux + macOS | runs on GitHub runners; applied when the human has pushed `pustman-v1/main` and reported CI green (or waived in writing) | applied(evidence: `pustman-v1/main` pushed to origin; CI run 44240566190 on `e5347fc`: verify (ubuntu-latest) success, verify (macos-latest) success) |
 | S0 | codified | `.claude/settings.json` hooks (PreToolUse protect-steps-and-tests, SessionStart progress reminder) | active in the checkout; exercised by `scripts/pustman-v1-verify.sh` and `scripts/promote-check.sh` | applied(auto: full verify `VERIFY OK (no workspace yet)` at S0 merge) |
+| app-icon | scripted | per-user Linux desktop entry + hicolor icons, so the Wayland dock/launcher show the Pustman icon (the window's app id is `pustman`) | `scripts/install-desktop-entry.sh [binary]` (default `target/release/pustman`); re-run when the binary path changes | applied(build host 2026-11-20: installed to `~/.local/share`, `desktop-file-validate` clean) |
 
 Status values: `pending` → `applied(<evidence>)` (codified: the full-verify run at merge) or
 `applied(<tag>)` (manual: done on the build host before that tag).
