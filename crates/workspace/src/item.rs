@@ -20,6 +20,13 @@ pub trait Item: Render {
     fn serialize_draft(&self, _cx: &App) -> Option<String> {
         None
     }
+
+    /// The id the workspace store keeps this item's tab under across restarts
+    /// ([`crate::Restore`], PRD REQ-UI-02). `None` marks a session-only item — its tab is
+    /// never restored (the [`crate::Welcome`] empty state lives here).
+    fn persistent_id(&self, _cx: &App) -> Option<SharedString> {
+        None
+    }
 }
 
 /// A type-erased [`Item`] handle: what [`crate::Pane`] stores one of per tab.
@@ -42,6 +49,12 @@ pub trait ItemHandle {
 
     /// The item's draft as text, for persisting open tabs.
     fn serialize_draft(&self, cx: &App) -> Option<String>;
+
+    /// The id the workspace store keeps this item's tab under across restarts; `None`
+    /// marks a session-only tab that is never restored.
+    fn persistent_id(&self, _cx: &App) -> Option<SharedString> {
+        None
+    }
 
     /// A second handle to the same item.
     fn boxed_clone(&self) -> Box<dyn ItemHandle>;
@@ -66,6 +79,10 @@ impl<T: Item> ItemHandle for Entity<T> {
 
     fn serialize_draft(&self, cx: &App) -> Option<String> {
         self.read(cx).serialize_draft(cx)
+    }
+
+    fn persistent_id(&self, cx: &App) -> Option<SharedString> {
+        self.read(cx).persistent_id(cx)
     }
 
     fn boxed_clone(&self) -> Box<dyn ItemHandle> {

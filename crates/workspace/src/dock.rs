@@ -18,6 +18,11 @@ const LEFT_DOCK_WIDTH_PX: f32 = 248.;
 /// resizable and persist their size, so until then the console sits in a 200 px strip.
 const BOTTOM_DOCK_HEIGHT_PX: f32 = 200.;
 
+/// The smallest and largest size a dock may take. A restored size is local, untrusted
+/// data (SQLite rows), so it is clamped into the range a usable dock can have.
+const MIN_DOCK_SIZE_PX: f32 = 64.;
+const MAX_DOCK_SIZE_PX: f32 = 2048.;
+
 /// Which edge of the workspace a dock is pinned to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DockPosition {
@@ -36,6 +41,15 @@ impl DockPosition {
             Self::Bottom => "bottom-dock",
         }
     }
+
+    /// The size this dock renders at until something resizes or restores another: its
+    /// width for [`DockPosition::Left`], its height for [`DockPosition::Bottom`].
+    pub fn default_size_px(self) -> f32 {
+        match self {
+            Self::Left => LEFT_DOCK_WIDTH_PX,
+            Self::Bottom => BOTTOM_DOCK_HEIGHT_PX,
+        }
+    }
 }
 
 /// One edge of the workspace: open or closed, holding the panels registered for it and
@@ -43,16 +57,19 @@ impl DockPosition {
 pub struct Dock {
     position: DockPosition,
     is_open: bool,
+    size_px: f32,
     panels: Vec<Box<dyn PanelHandle>>,
     active_panel: Option<usize>,
 }
 
 impl Dock {
-    /// A dock at `position`, open — the workspace opens with both docks visible.
+    /// A dock at `position`, open and at its default size — the workspace opens with both
+    /// docks visible.
     pub fn new(position: DockPosition, _cx: &mut Context<Self>) -> Self {
         Self {
             position,
             is_open: true,
+            size_px: position.default_size_px(),
             panels: Vec::new(),
             active_panel: None,
         }
@@ -66,6 +83,19 @@ impl Dock {
     /// Whether the dock is showing.
     pub fn is_open(&self) -> bool {
         self.is_open
+    }
+
+    /// The size this dock renders at (REQ-UI-01/04): its width for
+    /// [`DockPosition::Left`], its height for [`DockPosition::Bottom`].
+    pub fn size_px(&self) -> f32 {
+        self.size_px
+    }
+
+    /// Resize the dock (REQ-UI-01/04). A size read back from the local store is clamped
+    /// — see [`MIN_DOCK_SIZE_PX`].
+    pub fn set_size_px(&mut self, size_px: f32, cx: &mut Context<Self>) {
+        self.size_px = size_px.clamp(MIN_DOCK_SIZE_PX, MAX_DOCK_SIZE_PX);
+        cx.notify();
     }
 
     /// Show or hide the dock.
@@ -192,13 +222,13 @@ impl Render for Dock {
             .bg(colors.panel_background)
             .map(|this| match self.position {
                 DockPosition::Left => this
-                    .w(px_to_rems(LEFT_DOCK_WIDTH_PX))
+                    .w(px_to_rems(self.size_px))
                     .h_full()
                     .border_r_1()
                     .border_color(colors.border_variant),
                 DockPosition::Bottom => this
                     .w_full()
-                    .h(px_to_rems(BOTTOM_DOCK_HEIGHT_PX))
+                    .h(px_to_rems(self.size_px))
                     .border_t_1()
                     .border_color(colors.border_variant),
             })
