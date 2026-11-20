@@ -1,0 +1,1 @@
+- [Cut before redact](cut-before-redact.md) — truncation before redact_text leaks a partial secret; probe straddling the cap
