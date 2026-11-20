@@ -3,6 +3,8 @@
 //! `main.rs` is only the window opener (docs/pustman-v1-implementation-steps.md, S22e,
 //! convention 4): a later wire step appends one line per crate to [`init_with_store`].
 
+pub mod restore_wiring;
+
 use std::sync::{Arc, Mutex};
 
 use gpui::{App, AppContext, Entity, Global, WeakEntity};
@@ -17,6 +19,9 @@ pub enum StoreLocation {
     /// A private in-memory database: what tests ask for, so they never touch the user's
     /// real config dir.
     InMemory,
+    /// A store the caller opened and migrated itself: the test entry (S23w), so two
+    /// simulated launches can share one database and prove that a relaunch restores.
+    Shared(Arc<Mutex<LocalStore>>),
 }
 
 /// The app's local store, installed when its background open finishes and reachable from
@@ -76,9 +81,9 @@ impl StartupProblems {
 }
 
 /// The app's init order (AGENTS.md): `settings → theme → ui → pustman_actions keymap →
-/// storage → workspace → command_palette`, one line per crate so later wire steps append
-/// their own. This is the binary's entry point: its local store is the one in the platform
-/// config dir.
+/// storage → workspace → command_palette → restore wiring`, one line per crate or wire step
+/// so later ones append their own. This is the binary's entry point: its local store is the
+/// one in the platform config dir.
 pub fn init(cx: &mut App) {
     init_with_store(cx, StoreLocation::ConfigDir);
 }
@@ -93,6 +98,7 @@ pub fn init_with_store(cx: &mut App, store: StoreLocation) {
     open_local_store(cx, store);
     workspace::init(cx);
     command_palette::init(cx);
+    restore_wiring::init(cx);
 }
 
 /// `settings`: the bundled defaults, then the user's `settings.json` watched by a
@@ -205,6 +211,8 @@ fn open_and_migrate(location: StoreLocation) -> anyhow::Result<Arc<Mutex<LocalSt
             LocalStore::open(path)?
         }
         StoreLocation::InMemory => LocalStore::open_in_memory()?,
+        // Already open and migrated by the caller that injected it.
+        StoreLocation::Shared(shared) => return Ok(shared),
     };
     store.migrate()?;
     Ok(Arc::new(Mutex::new(store)))
