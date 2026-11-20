@@ -95,8 +95,8 @@ Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 0 · un
 | S22 | `pustman` binary + `workspace` shell (window, docks, panes/tabs, status bar, toasts) | **passed** | 1 | `6deb774` | [S22a](progress/pustman-v1/steps/S22a.md) `78e77d2` · [S22b](progress/pustman-v1/steps/S22b.md) `26df52b` · [S22c](progress/pustman-v1/steps/S22c.md) `6db973a` · [S22d](progress/pustman-v1/steps/S22d.md) `3db2c7a` · [S22e](progress/pustman-v1/steps/S22e.md) `6deb774` | LOW #79 #80 |
 | S23 | Tab and layout restore | **passed** | | `072e446` | [S23a](progress/pustman-v1/steps/S23a.md) `bf98243` · [S23b](progress/pustman-v1/steps/S23b.md) `072e446` | LOW #85 #86 #96–#99 |
 | S23w | Wire restore and autosave (driver-added, S25 prereq) | pending | 0 | | |  |
-| S24 | Command palette | **passed** | | | [S24a](progress/pustman-v1/steps/S24a.md) `6cd85c6` · [S24b](progress/pustman-v1/steps/S24b.md) `092ae5e` | LOW #81–#84 |
-| S25 | M0 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off; needs S24w + S23w |
+| S24 | Command palette | **passed** | | | [S24a](progress/pustman-v1/steps/S24a.md) `6cd85c6` · [S24b](progress/pustman-v1/steps/S24b.md) `092ae5e` · [S24w](progress/pustman-v1/steps/S24w.md) `7f5fa60` | LOW #81–#84 |
+| S25 | M0 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off; needs S23w |
 | S26 | `request_editor`: URL bar, method, send/cancel, response status line | pending | 0 | | |  |
 | S27 | Params, path variables, headers tables; cURL paste/copy | pending | 0 | | |  |
 | S28 | Body, auth and settings tabs (TLS badge) | pending | 0 | | |  |
