@@ -12,14 +12,17 @@ mod body_view;
 mod error_panel;
 mod headers_view;
 mod pretty;
+mod save_body;
 mod status_line;
 
 pub use body_view::BodyView;
 pub use headers_view::{HeaderRow, HeadersView};
+pub use save_body::write_body;
 pub use status_line::StatusLine;
 
 use std::sync::Arc;
 
+use gpui::Task;
 use gpui::{
     AnyElement, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render,
     Subscription, Window,
@@ -58,6 +61,13 @@ pub struct ResponseView {
     headers: Entity<HeadersView>,
     /// The failed send on screen instead of its body (REQ-RESP-08).
     error: Option<TransportError>,
+    /// The response on screen, kept for `response::SaveBody` and `response::CopyBody`
+    /// (REQ-RESP-07): the actions save and copy the bytes it arrived as.
+    response: Option<Arc<Response>>,
+    /// The in-flight save / copy (REQ-RESP-07). Stored so a second one replaces
+    /// (cancels) the first (AGENTS.md › Async).
+    save_task: Option<Task<()>>,
+    copy_task: Option<Task<()>>,
     _tab_bar_subscription: Subscription,
 }
 
@@ -74,6 +84,9 @@ impl ResponseView {
             body: cx.new(BodyView::new),
             headers: cx.new(HeadersView::new),
             error: None,
+            response: None,
+            save_task: None,
+            copy_task: None,
             _tab_bar_subscription,
         }
     }
@@ -84,6 +97,7 @@ impl ResponseView {
     pub fn set_response(&mut self, response: Response, cx: &mut Context<Self>) {
         let response = Arc::new(response);
         self.error = None;
+        self.response = Some(Arc::clone(&response));
         self.status_line = Some(StatusLine::new(
             ElementId::from(&self.focus_handle),
             response.status,
@@ -152,6 +166,8 @@ impl Render for ResponseView {
             .size_full()
             .min_h_0()
             .key_context(RESPONSE_VIEW_CONTEXT)
+            .on_action(cx.listener(Self::save_body))
+            .on_action(cx.listener(Self::copy_body))
             .track_focus(&self.focus_handle)
             .map(|this| match &self.status_line {
                 Some(status_line) => this

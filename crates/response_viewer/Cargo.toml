@@ -15,12 +15,15 @@ workspace = true
 path = "src/response_viewer.rs"
 
 [dependencies]
+anyhow.workspace = true
 gpui.workspace = true
 http_engine.workspace = true
 mime.workspace = true
 serde_json.workspace = true
+pustman_actions.workspace = true
 theme.workspace = true
 ui.workspace = true
+workspace.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

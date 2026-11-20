@@ -5441,13 +5441,16 @@ dependencies = [
 name = "response_viewer"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "gpui",
  "http_engine",
  "mime",
+ "pustman_actions",
  "serde_json",
  "tempfile",
  "theme",
  "ui",
+ "workspace",
 ]
 
 [[package]]
