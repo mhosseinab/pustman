@@ -155,3 +155,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-20 S23w passed (4a8e46c), LOW #102 #103. Segment 2 complete; stopped at S25 (M0 sign-off, HUMAN).
 - 2026-11-20: **PLAN AMENDED (driver): S22f added.** The S25 smoke on GNOME Wayland found no way to move, resize or close the window, a doubled palette placeholder, and raw `ctrl-tab` key hints. S22f fixes all three ahead of the S25 re-smoke.
 - 2026-11-20 S22f passed (8771b0b), LOW #104 #105 #106 #107. Stopped at S25 (M0 sign-off, HUMAN): re-smoke pending.
+- 2026-11-20 **S25 passed (M0 GO).** Human re-smoke after S22f; live keyring 1 passed. Preparing promotion release/pustman-v1-2.

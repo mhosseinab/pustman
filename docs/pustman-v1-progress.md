@@ -51,8 +51,8 @@ These run at the next human sign-off and are recorded in that sign-off's step re
 
 | Item | Owner | Due at | Status |
 |---|---|---|---|
-| E2E display scenario: S22 (shell, docks, toasts) | human | S25 | pending |
-| Live keyring: `cargo test -p secrets -- --ignored` | human | S25 | pending |
+| E2E display scenario: S22 (shell, docks, toasts) | human | S25 | done 2026-11-20 (human smoke, M0 GO; [S25](progress/pustman-v1/steps/S25.md)) |
+| Live keyring: `cargo test -p secrets -- --ignored` | human | S25 | done 2026-11-20 (1 passed, build host) |
 | E2E display scenario: S26 (send/cancel from the URL bar) | human | S38 | pending |
 | E2E display scenario: S28 (TLS badge, auth tabs) | human | S38 | pending |
 | E2E display scenario: S32 (console dock) | human | S38 | pending |
@@ -97,7 +97,7 @@ Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 0 · un
 | S22f | Window title bar and S25 smoke fixes (driver-added) | passed | 1 | 8771b0b | [S22f](progress/pustman-v1/steps/S22f.md) | LOW #104 #105 #106 #107 |
 | S23w | Wire restore and autosave (driver-added, S25 prereq) | passed | 1 | 4a8e46c | [S23w](progress/pustman-v1/steps/S23w.md) | LOW #102 #103 |
 | S24 | Command palette | **passed** | | | [S24a](progress/pustman-v1/steps/S24a.md) `6cd85c6` · [S24b](progress/pustman-v1/steps/S24b.md) `092ae5e` · [S24w](progress/pustman-v1/steps/S24w.md) `7f5fa60` | LOW #81–#84 |
-| S25 | M0 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off; ready |
+| S25 | M0 SIGN-OFF (HUMAN) | passed | 1 | e999232 | [S25](progress/pustman-v1/steps/S25.md) | human "M0 GO" after S22f re-smoke |
 | S26 | `request_editor`: URL bar, method, send/cancel, response status line | pending | 0 | | |  |
 | S27 | Params, path variables, headers tables; cURL paste/copy | pending | 0 | | |  |
 | S28 | Body, auth and settings tabs (TLS badge) | pending | 0 | | |  |
