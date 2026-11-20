@@ -194,3 +194,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-20: S26w passed (`21ebcb1`; driver review, pi slots full; LOW #136). S29b fix round 1 done (`989e10d`); review 2 dispatched.
 - 2026-11-20: S29b passed (`25cfe1e`; review 1 1 HIGH + 1 MEDIUM, review 2 PASS_WITH_ISSUES; LOW #137–#138). S37, S27a (rebased onto main as `f63825f`), S35b built; reviews dispatched. S34w dispatched (the only wire step in flight).
 - 2026-11-20: S27a passed (`e9d848e`; review 1 PASS_WITH_ISSUES; LOW #139–#140). S35b passed (`d0fdcf2`; review 1 PASS_WITH_ISSUES; LOW #141–#142). VERIFY OK after each merge.
+- 2026-11-20: S30d passed (`a179be2`; review 1 PASS; LOW #143–#146). S37 passed (`ce1b583`; review 1 PASS_WITH_ISSUES; LOW #147–#149). VERIFY OK after each merge. Decision: #141 (history-row activation; no step owned it) is folded into S35w's brief so M1 ships a working history open.
