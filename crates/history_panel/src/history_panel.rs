@@ -53,3 +53,7 @@ fn focus_history_panel(_: &Focus, cx: &mut App) {
         }
     });
 }
+
+/// Delete one entry or clear the workspace's history (PRD REQ-HIST-04): the pub
+/// operations in [`delete_entries`], with "Clear all" behind its confirm modal.
+pub mod delete_entries;

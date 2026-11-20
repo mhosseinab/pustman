@@ -124,7 +124,7 @@ impl HistoryList {
     /// Read the history under the current query and land it in the rows. A failure
     /// reaches the user as [`LOAD_FAILURE_MESSAGE`] above the list (AGENTS.md — errors
     /// are never only logged).
-    fn reload(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn reload(&mut self, cx: &mut Context<Self>) {
         let query = self.search.read(cx).text();
         let store = Arc::clone(&self.store);
         let workspace_id = self.workspace_id.clone();
