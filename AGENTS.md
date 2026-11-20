@@ -26,6 +26,7 @@ to structure something, find the equivalent in Zed and follow its shape — but 
 | Syncing Figma variables into the theme | `.agents/skills/figma-tokens-to-theme/`                  |
 | Path-scoped rules                      | `.agents/rules/`                                         |
 | Review / design agent roles            | `.agents/agents/`                                        |
+| Fixing open LOW review issues (`/lows`) | `.agents/skills/lows/` (pi workers)                     |
 
 `.agents/` is the harness-neutral source of truth. Skills follow the open `SKILL.md` format (`name` +
 `description` frontmatter). **Before editing a file, read every rule in `.agents/rules/` whose `paths:`
@@ -55,7 +56,7 @@ Claude-only pieces have pi adapters under `.pi/`:
 | `PreToolUse` protect hook | `.pi/extensions/pustman-guards/` runs the same `.claude/hooks/protect-steps-and-tests.sh` |
 | `.claude/rules/` auto-load | the same extension lists `.agents/rules/` and blocks edit/write until the matching rule is read |
 | `SessionStart(compact)` reminder | the same extension steers to the progress files after a compaction |
-| `/explain`, `/promote` | `/skill:explain`, `/skill:promote` |
+| `/explain`, `/promote`, `/lows` | `/skill:explain`, `/skill:promote`, `/skill:lows` |
 
 - Project extensions and skills load only in a trusted folder: run `/trust` once at the repo root (it
   covers the worktrees under `.claude/worktrees/`). Print mode cannot prompt; untrusted means the guards
