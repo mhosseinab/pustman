@@ -3277,6 +3277,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "integration_tests"
+version = "0.1.0"
+dependencies = [
+ "api_model",
+ "base64 0.23.1",
+ "console",
+ "gpui",
+ "http_engine",
+ "secrets",
+ "serde_json",
+ "settings",
+ "storage",
+ "tempfile",
+ "url",
+ "variables",
+ "workspace_store",
+]
+
+[[package]]
 name = "interpolate_name"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
