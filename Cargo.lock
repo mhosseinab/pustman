@@ -2760,6 +2760,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
+name = "history_panel"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui",
+ "pustman_actions",
+ "serde_json",
+ "storage",
+ "text_input",
+ "time",
+ "ui",
+ "workspace",
+]
+
+[[package]]
 name = "hkdf"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

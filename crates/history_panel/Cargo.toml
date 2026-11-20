@@ -1,0 +1,31 @@
+# crates/history_panel — the left-dock History panel (PRD §8.5): one workspace's
+# recorded sends, grouped by day and searchable (REQ-HIST-01/04), never showing request
+# or response content (REQ-HIST-03). `storage` is synchronous by design (ADR-0002), so
+# every read runs on a background task and the foreground never blocks on SQLite.
+
+[package]
+name = "history_panel"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/history_panel.rs"
+
+[dependencies]
+anyhow.workspace = true
+gpui.workspace = true
+pustman_actions.workspace = true
+storage.workspace = true
+text_input.workspace = true
+time.workspace = true
+ui.workspace = true
+workspace.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+serde_json.workspace = true
+ui = { workspace = true, features = ["test-support"] }
