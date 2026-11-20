@@ -16,6 +16,7 @@ path = "src/response_viewer.rs"
 
 [dependencies]
 anyhow.workspace = true
+api_model.workspace = true
 cookie_store.workspace = true
 gpui.workspace = true
 hex.workspace = true
@@ -33,9 +34,12 @@ ui.workspace = true
 workspace.workspace = true
 
 [dev-dependencies]
-api_model.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 image.workspace = true
+# The request-as-sent tests derive auto headers through a dry `http_engine::prepare`,
+# the narrowest public API that fills `ResolvedRequest::auto_headers` (the
+# `request_editor::headers` precedent): the store holds nothing and nothing resolves.
+secrets = { workspace = true, features = ["test-support"] }
 # The large-body test builds a `ResponseBody::Spilled` through `http_engine::SpillWriter`,
 # whose pushes are tokio futures (its temp file is `tokio::fs`); the test drives them on
 # a tokio runtime of its own.
@@ -43,3 +47,4 @@ tokio.workspace = true
 tempfile.workspace = true
 ui = { workspace = true, features = ["test-support"] }
 url.workspace = true
+variables.workspace = true

@@ -5477,6 +5477,7 @@ dependencies = [
  "mime",
  "pustman_actions",
  "regex",
+ "secrets",
  "serde_json",
  "settings",
  "storage",
@@ -5487,6 +5488,7 @@ dependencies = [
  "tokio",
  "ui",
  "url",
+ "variables",
  "workspace",
 ]
 

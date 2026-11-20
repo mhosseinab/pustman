@@ -20,6 +20,7 @@ mod hex_view;
 mod large_body;
 mod pretty;
 mod preview;
+mod request_as_sent;
 mod save_body;
 mod status_line;
 mod timeline;

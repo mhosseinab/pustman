@@ -1,6 +1,7 @@
-//! The Timeline tab: what a send took and where it went — the measured phases as bars
-//! (REQ-NET-01), the network and TLS facts behind the connection (REQ-NET-02) and every
-//! hop of the redirect chain with its response headers behind a toggle (REQ-NET-03).
+//! The Timeline tab: what a send took and where it went — the request as it went on the
+//! wire (REQ-NET-04, [`request_as_sent`]), the measured phases as bars (REQ-NET-01), the
+//! network and TLS facts behind the connection (REQ-NET-02) and every hop of the
+//! redirect chain with its response headers behind a toggle (REQ-NET-03).
 //!
 //! `Decision:` ADR-0003 decides what may appear. Only a phase the transport measured gets
 //! a bar; the four it cannot measure draw no bar at all — never a zero bar — and are named
@@ -23,11 +24,15 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use api_model::SecretValues;
 use gpui::{DefiniteLength, WeakEntity};
-use http_engine::{Certificate, NetworkInfo, RedirectHop, Response, ResponseVersion, Timings};
+use http_engine::{
+    Certificate, NetworkInfo, RedirectHop, ResolvedRequest, Response, ResponseVersion, Timings,
+};
 use ui::prelude::*;
 
 use crate::child_id;
+use crate::request_as_sent::{self, RequestAsSentRow};
 
 /// Shown for a fact nobody observed: an absent `Location`, an unmeasured hop timing.
 const ABSENT: &str = "—";
@@ -41,7 +46,7 @@ const NOT_REPORTED: &str = "not reported";
 const UNMEASURED_NOTE: &str = "Prepare, DNS lookup, TCP connect and TLS handshake: this \
     transport cannot measure them, so they are absent rather than zeroed (ADR-0003).";
 
-/// The label column of the phase and network rows. A fixed column keeps the bars and the
+/// The label column of the label-and-value rows. A fixed column keeps the bars and the
 /// values aligned row over row while the labels truncate inside it.
 const LABEL_COLUMN_PX: f32 = 144.0;
 
@@ -122,6 +127,9 @@ enum RedirectRow {
 
 /// The Timeline tab: the derived rows of one response and the list that draws them.
 pub struct TimelineTab {
+    /// The "Request as sent" record of the send (REQ-NET-04), or `None` before one was
+    /// recorded — then the section does not render at all.
+    request_as_sent: Option<Arc<Vec<RequestAsSentRow>>>,
     /// The measured phases, in waterfall order.
     phases: Arc<Vec<PhaseRow>>,
     /// The network and TLS facts of the send.
@@ -143,6 +151,7 @@ impl TimelineTab {
     /// An empty tab, waiting for a response.
     pub fn new(_cx: &mut Context<Self>) -> Self {
         Self {
+            request_as_sent: None,
             phases: Arc::new(Vec::new()),
             network: Arc::new(Vec::new()),
             hops: Arc::new(Vec::new()),
@@ -169,6 +178,37 @@ impl TimelineTab {
         cx.notify();
     }
 
+    /// Record the request as it went on the wire (REQ-NET-04): the final URL, the
+    /// method, every header and a bounded body preview, every value redacted
+    /// (`request_as_sent`). `cookie_header` is the `Cookie` header the jar applied to
+    /// the send, as `CookieJar::cookie_header_for` computed it — the transport applies
+    /// it after this request was recorded, so it is not among `request`'s headers.
+    ///
+    /// Who calls this from the send path is later wiring (`Decision:`,
+    /// [`request_as_sent`]); [`Self::set_response`] is unchanged.
+    pub fn set_request_as_sent(
+        &mut self,
+        request: &ResolvedRequest,
+        secrets: &SecretValues,
+        cookie_header: Option<String>,
+        response: &Response,
+        cx: &mut Context<Self>,
+    ) {
+        self.request_as_sent = Some(Arc::new(request_as_sent::rows(
+            request,
+            secrets,
+            cookie_header.as_deref(),
+            response,
+        )));
+        cx.notify();
+    }
+
+    /// The "Request as sent" rows the section draws — what `render` lays out and what
+    /// the tests assert on. Empty until [`Self::set_request_as_sent`] records one.
+    pub fn request_as_sent_rows(&self) -> &[RequestAsSentRow] {
+        self.request_as_sent.as_deref().map_or(&[], Vec::as_slice)
+    }
+
     /// The phase rows the section draws — what `render` lays out and what the tests
     /// assert on.
     pub fn phase_rows(&self) -> &[PhaseRow] {
@@ -188,6 +228,37 @@ impl TimelineTab {
         }
         self.rows = Arc::new(redirect_rows(&self.hops, &self.expanded));
         cx.notify();
+    }
+
+    /// The "Request as sent" section (REQ-NET-04): the final URL, the method, every
+    /// header and a bounded body preview (`request_as_sent`), in its own virtualized
+    /// list — the header rows are user data and can be many. The list shares the tab's
+    /// free height with the redirect list.
+    ///
+    /// `Decision:` the section sits at the top of the tab: the request is the story the
+    /// phases, the network facts and the redirects tell afterwards. With no record it
+    /// renders nothing at all, so the tab stays the S31a timeline until the send path
+    /// calls [`Self::set_request_as_sent`].
+    fn request_as_sent_section(&self, base: &ElementId, cx: &App) -> Option<AnyElement> {
+        let rows = Arc::clone(self.request_as_sent.as_ref()?);
+        let key_rows = Arc::clone(&rows);
+        let key_base = base.clone();
+        let render_base = base.clone();
+        Some(
+            v_flex()
+                .w_full()
+                .flex_1()
+                .min_h_0()
+                .gap(DynamicSpacing::Base02.rems(cx))
+                .child(section_heading("Request as sent"))
+                .child(VirtualList::new(
+                    child_id(base, "request-as-sent-rows"),
+                    rows.len(),
+                    move |index| request_row_id(&key_rows, &key_base, index),
+                    move |index, _window, cx| render_request_row(&rows, &render_base, index, cx),
+                ))
+                .into_any_element(),
+        )
     }
 
     /// The phases section: one row per measured phase, the bars, and the note that names
@@ -272,6 +343,7 @@ impl Render for TimelineTab {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // One base id per entity, so two viewers in one frame never share element ids.
         let base = ElementId::from(("timeline-tab", cx.entity_id()));
+        let request_as_sent = self.request_as_sent_section(&base, cx);
         let phases = self.phases_section(cx);
         let network = self.network_section(&base, cx);
         let redirects = self.redirects_section(&base, cx);
@@ -280,6 +352,7 @@ impl Render for TimelineTab {
             .px(DynamicSpacing::Base04.rems(cx))
             .py(DynamicSpacing::Base03.rems(cx))
             .gap(DynamicSpacing::Base06.rems(cx))
+            .children(request_as_sent)
             .child(phases)
             .child(network)
             .child(redirects)
@@ -602,6 +675,70 @@ fn expand_toggle(
         })
 }
 
+/// One "Request as sent" row's stable element id: its place in the record and its
+/// label. The record is rebuilt only when a new send is recorded, so these never shift
+/// under a live list (`Decision:`, [`request_as_sent`]).
+fn request_row_id(rows: &[RequestAsSentRow], base: &ElementId, index: usize) -> ElementId {
+    match rows.get(index) {
+        Some(row) => child_id(base, format!("request-row-{index}-{}", row.label)),
+        None => child_id(base, format!("request-row-{index}")),
+    }
+}
+
+/// One "Request as sent" row: its label and the redacted value beside it — truncated,
+/// with the full value in a tooltip — and, for a header the body mode generated on its
+/// own, the `auto` mark.
+fn render_request_row(
+    rows: &[RequestAsSentRow],
+    base: &ElementId,
+    index: usize,
+    cx: &App,
+) -> AnyElement {
+    let Some(row) = rows.get(index) else {
+        return div().into_any_element();
+    };
+    let row_id = request_row_id(rows, base, index);
+    h_flex()
+        .w_full()
+        .items_center()
+        .gap(DynamicSpacing::Base04.rems(cx))
+        .px(DynamicSpacing::Base04.rems(cx))
+        .py(DynamicSpacing::Base02.rems(cx))
+        .border_b_1()
+        .border_color(cx.theme().colors().border_variant)
+        .child(label_cell(row.label.clone()))
+        .child(cell(child_id(&row_id, "value"), row.value.clone(), cx))
+        .map(|this| {
+            if row.auto {
+                this.child(auto_mark())
+            } else {
+                this
+            }
+        })
+        .into_any_element()
+}
+
+/// The `auto` mark beside a header the body mode generated on its own (REQ-HTTP-03).
+/// `ui`'s `Badge` is text-first, so the mark says what it is instead of only tinting
+/// (`REQ-NFR-06`).
+fn auto_mark() -> impl IntoElement {
+    Badge::new("auto")
+}
+
+/// The label column of a label-and-value row (phase, network fact or request row).
+fn label_cell(text: SharedString) -> impl IntoElement {
+    div()
+        .flex_none()
+        .w(px_to_rems(LABEL_COLUMN_PX))
+        .min_w_0()
+        .child(
+            Label::new(text)
+                .size(LabelSize::Small)
+                .color(Color::Muted)
+                .truncate(),
+        )
+}
+
 /// One measured phase: its label, its bar and the time beside it. A measured phase draws
 /// its bar; a phase the transport did not measure has no row and draws nothing.
 fn render_phase(row: &PhaseRow, cx: &App) -> impl IntoElement {
@@ -610,18 +747,7 @@ fn render_phase(row: &PhaseRow, cx: &App) -> impl IntoElement {
         .w_full()
         .items_center()
         .gap(DynamicSpacing::Base04.rems(cx))
-        .child(
-            div()
-                .flex_none()
-                .w(px_to_rems(LABEL_COLUMN_PX))
-                .min_w_0()
-                .child(
-                    Label::new(row.label.clone())
-                        .size(LabelSize::Small)
-                        .color(Color::Muted)
-                        .truncate(),
-                ),
-        )
+        .child(label_cell(row.label.clone()))
         .child(
             div()
                 .flex_1()
@@ -658,18 +784,7 @@ fn render_info_row(row: &InfoRow, base: &ElementId, cx: &App) -> impl IntoElemen
         .w_full()
         .items_center()
         .gap(DynamicSpacing::Base04.rems(cx))
-        .child(
-            div()
-                .flex_none()
-                .w(px_to_rems(LABEL_COLUMN_PX))
-                .min_w_0()
-                .child(
-                    Label::new(row.label.clone())
-                        .size(LabelSize::Small)
-                        .color(Color::Muted)
-                        .truncate(),
-                ),
-        )
+        .child(label_cell(row.label.clone()))
         .child(
             div()
                 .id(child_id(&row_id, "value"))
