@@ -19,6 +19,7 @@ api_model.workspace = true
 gpui.workspace = true
 http_engine.workspace = true
 pustman_actions.workspace = true
+response_viewer.workspace = true
 secrets.workspace = true
 serde_json.workspace = true
 text_input.workspace = true

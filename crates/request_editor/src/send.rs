@@ -3,14 +3,18 @@
 //! `request::Send` (Ctrl/Cmd-Enter) sends through [`HttpClient::send`] and stores the
 //! task in `RequestEditor::pending_send`: replacing it cancels the request before it,
 //! exactly as AGENTS.md prescribes for a dropped `Task`. `request::Cancel` (Escape)
-//! drops the task and aborts the connection. What the send produced lands in the status
-//! line — code, reason, time and size — and a failure lands inline under the URL bar as
-//! the transport's own [`TransportError::user_message`] and
+//! drops the task and aborts the connection. What the send produced lands in the
+//! [`response_viewer::ResponseView`] embedded below the request panes (S29e) — its own
+//! status line and body — while the editor keeps the [`StatusLine`] facts computed from
+//! the response so `RequestEditor::status_line()` still reports them. A failure lands
+//! inline under the URL bar as the transport's own [`TransportError::user_message`] and
 //! [`TransportError::suggested_fix`], verbatim, never re-worded here (AGENTS.md — errors
-//! reach the user). A TLS failure's inline display additionally offers "Disable
-//! verification for this request" (REQ-HTTP-10): it pins `verify_tls` off on this
-//! request's draft and sends again, with the warning badge beside Send for as long as
-//! the override is on. No global setting is ever changed from here.
+//! reach the user), and in the embedded viewer's error panel — one wording, shown both
+//! where the send happened and where responses live. A TLS failure's inline display
+//! additionally offers "Disable verification for this request" (REQ-HTTP-10): it pins
+//! `verify_tls` off on this request's draft and sends again, with the warning badge
+//! beside Send for as long as the override is on. No global setting is ever changed
+//! from here.
 //!
 //! `Decision:` the editor sends through the [`RequestClient`] global instead of holding
 //! a client of its own: `new_request`'s app-level handler constructs `RequestEditor` and
@@ -39,8 +43,10 @@ pub const SEND_BUTTON_SELECTOR: &str = "send-button";
 /// Test hook: the same button while a request is in flight, when it reads "Cancel".
 pub const CANCEL_BUTTON_SELECTOR: &str = "cancel-button";
 
-/// Test hook: the status line under the URL bar.
-pub const STATUS_LINE_SELECTOR: &str = "status-line";
+/// Test hook: the status line — now the embedded [`response_viewer::ResponseView`]'s
+/// own (S29e moved the rendering out of the editor). Re-exported so `send`'s callers
+/// and tests keep exactly one key for the one status line on screen.
+pub use response_viewer::STATUS_LINE_SELECTOR;
 
 /// Test hook: the inline failure under the URL bar.
 pub const INLINE_ERROR_SELECTOR: &str = "inline-error";
@@ -83,9 +89,11 @@ impl InlineError {
     }
 }
 
-/// What the status line shows for the last response: the code, the reason phrase, the
-/// total time and the body size (REQ-RESP-01). A fact the transport did not measure is
-/// [`None`] and renders as "—", never estimated.
+/// The facts of the last response, as `RequestEditor::status_line()` reports them: the
+/// code, the reason phrase, the total time and the body size (REQ-RESP-01). The
+/// rendering lives in `response_viewer`'s own status line now (S29e); these facts stay
+/// so the accessor keeps working. A fact the transport did not measure is [`None`] and
+/// renders as "—", never estimated.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StatusLine {
     pub status: u16,
@@ -115,39 +123,6 @@ fn body_size(body: &ResponseBody) -> Option<u64> {
     }
 }
 
-/// The semantic the status code's class is drawn in (the brief's mapping: 2xx success,
-/// 3xx info, 4xx warning, 5xx error). The theme's semantic tokens only — the meaning is
-/// also spelled out by the code and reason text next to it, never carried by color
-/// alone.
-fn status_class_color(status: u16) -> Color {
-    match status {
-        100..=199 | 300..=399 => Color::Info,
-        200..=299 => Color::Success,
-        400..=499 => Color::Warning,
-        _ => Color::Error,
-    }
-}
-
-/// The total time as the status line spells it: the sub-second range in milliseconds.
-fn format_time(total: Option<Duration>) -> String {
-    match total {
-        None => String::from("—"),
-        Some(total) if total < Duration::from_secs(1) => format!("{} ms", total.as_millis()),
-        Some(total) => format!("{:.2} s", total.as_secs_f64()),
-    }
-}
-
-/// The size as the status line spells it. No formatter existed in `ui` or `http_engine`
-/// when this landed (both were searched), so this is the one place that formats bytes.
-fn format_size(size: Option<u64>) -> String {
-    match size {
-        None => String::from("—"),
-        Some(bytes) if bytes < 1_000 => format!("{bytes} B"),
-        Some(bytes) if bytes < 1_000_000 => format!("{:.1} kB", bytes as f64 / 1_000.),
-        Some(bytes) => format!("{:.1} MB", bytes as f64 / 1_000_000.),
-    }
-}
-
 impl RequestEditor {
     /// Whether a send is still in flight — what the Send button renders "Cancel" from.
     pub fn is_sending(&self) -> bool {
@@ -159,7 +134,7 @@ impl RequestEditor {
         self.inline_error.as_ref()
     }
 
-    /// What the status line shows for the last response, if a send has completed.
+    /// The facts of the last response, if a send has completed.
     pub fn status_line(&self) -> Option<&StatusLine> {
         self.status_line.as_ref()
     }
@@ -268,18 +243,25 @@ impl RequestEditor {
     }
 
     /// Show `error` inline where the send happened: both texts verbatim (AGENTS.md —
-    /// errors reach the user). A TLS failure keeps its offer form in `tls_offer_error`,
-    /// so "Disable verification for this request" renders for it — and, because the
-    /// shown error must be that very failure, never for another error that replaces
-    /// `inline_error` outside a send.
+    /// errors reach the user). The same failure also lands in the embedded
+    /// [`response_viewer::ResponseView`]'s error panel (S29e), so it is visible both
+    /// where the send happened and where responses live — one wording, two places.
+    /// A TLS failure keeps its offer form in `tls_offer_error`, so "Disable
+    /// verification for this request" renders for it — and, because the shown error
+    /// must be that very failure, never for another error that replaces `inline_error`
+    /// outside a send.
     fn show_transport_error(&mut self, error: &TransportError, cx: &mut Context<Self>) {
         let inline = InlineError::from_transport(error);
         self.tls_offer_error = matches!(error, TransportError::Tls { .. }).then(|| inline.clone());
         self.inline_error = Some(inline);
+        self.response_view
+            .update(cx, |view, cx| view.set_error(error.clone(), cx));
         cx.notify();
     }
 
-    /// The send ended: record the response in the status line, or the failure inline.
+    /// The send ended: the response goes to the embedded
+    /// [`response_viewer::ResponseView`] (and its facts to `status_line()`), or the
+    /// failure shows inline and in the viewer's error panel.
     fn finish_send(&mut self, result: Result<Response, TransportError>, cx: &mut Context<Self>) {
         self.pending_send = None;
         match result {
@@ -287,6 +269,8 @@ impl RequestEditor {
                 self.status_line = Some(StatusLine::from_response(&response));
                 self.inline_error = None;
                 self.tls_offer_error = None;
+                self.response_view
+                    .update(cx, |view, cx| view.set_response(response, cx));
             }
             // A cancelled or replaced send is not a failure to report (REQ-HTTP-12).
             Err(TransportError::Cancelled) => {}
@@ -296,7 +280,9 @@ impl RequestEditor {
     }
 
     /// Everything under the URL bar: the inline failure first — where the send happened
-    /// — then the status line and the Send/Cancel button.
+    /// — then the Send/Cancel button. The response's own status line is the embedded
+    /// [`response_viewer::ResponseView`]'s (S29e); only a "Sending…" note stays here,
+    /// beside the button.
     pub(super) fn render_send_area(&self, cx: &mut Context<Self>) -> AnyElement {
         v_flex()
             .gap(DynamicSpacing::Base02.rems(cx))
@@ -308,18 +294,26 @@ impl RequestEditor {
             .child(
                 h_flex()
                     .gap(DynamicSpacing::Base03.rems(cx))
-                    .justify_between()
+                    .justify_end()
                     .min_w_0()
-                    .child(self.render_status(cx))
-                    .child(
-                        h_flex()
-                            .gap(DynamicSpacing::Base03.rems(cx))
-                            .items_center()
-                            .children(self.render_tls_badge(cx))
-                            .child(self.render_send_button(cx)),
-                    ),
+                    .items_center()
+                    .children(self.render_sending(cx))
+                    .children(self.render_tls_badge(cx))
+                    .child(self.render_send_button(cx)),
             )
             .into_any_element()
+    }
+
+    /// "Sending…" beside the button while a request is in flight — the one piece of
+    /// send state this row still shows (the response's facts are the viewer's status
+    /// line now, S29e).
+    fn render_sending(&self, _cx: &App) -> Option<AnyElement> {
+        self.is_sending().then(|| {
+            Label::new(SharedString::new_static("Sending…"))
+                .size(LabelSize::Small)
+                .color(Color::Muted)
+                .into_any_element()
+        })
     }
 
     /// The failure under the URL bar: what happened, what to do about it, and — for
@@ -425,50 +419,6 @@ impl RequestEditor {
                 )
                 .into_any_element(),
         )
-    }
-
-    /// The status line: code (colored by class), reason, total time and size; "Sending…"
-    /// while a request is in flight.
-    fn render_status(&self, cx: &mut Context<Self>) -> AnyElement {
-        let content = match (&self.status_line, self.is_sending()) {
-            (_, true) => Label::new(SharedString::new_static("Sending…"))
-                .size(LabelSize::Small)
-                .color(Color::Muted)
-                .into_any_element(),
-            (Some(line), false) => h_flex()
-                .gap(DynamicSpacing::Base03.rems(cx))
-                .min_w_0()
-                .child(
-                    Label::new(SharedString::from(line.status.to_string()))
-                        .size(LabelSize::Small)
-                        .color(status_class_color(line.status)),
-                )
-                .child(
-                    Label::new(SharedString::from(line.reason.clone()))
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
-                )
-                .child(
-                    Label::new(SharedString::from(format_time(line.total)))
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
-                )
-                .child(
-                    Label::new(SharedString::from(format_size(line.size)))
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
-                )
-                .into_any_element(),
-            (None, false) => Label::new(SharedString::new_static("No response yet"))
-                .size(LabelSize::Small)
-                .color(Color::Hint)
-                .into_any_element(),
-        };
-        div()
-            .min_w_0()
-            .debug_selector(|| STATUS_LINE_SELECTOR.to_string())
-            .child(content)
-            .into_any_element()
     }
 
     /// The Send button — "Cancel" while a request is in flight, with the keystroke that

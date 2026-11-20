@@ -54,6 +54,12 @@ const RESPONSE_VIEW_CONTEXT: &str = "ResponseViewer";
 /// pattern). The error panel replaces it, so the two never render together.
 const BODY_PANE_SELECTOR: &str = "response-body-pane";
 
+/// The debug key the status line renders under — the test hook that proves a response's
+/// status line is on screen. It renders only while the view holds a response, so finding
+/// it also proves one arrived. `request_editor` re-exports this key for its embedded-view
+/// tests (S29e).
+pub const STATUS_LINE_SELECTOR: &str = "status-line";
+
 /// The tabs across the top of the response, in order. Later steps append here (Cookies,
 /// Timeline); the bar is built from this list, so a new tab is one line and nothing else.
 const TAB_TITLES: [&str; 4] = ["Body", "Headers", "Cookies", "Timeline"];
@@ -198,7 +204,11 @@ impl Render for ResponseView {
             .track_focus(&self.focus_handle)
             .map(|this| match &self.status_line {
                 Some(status_line) => this
-                    .child(status_line.clone())
+                    .child(
+                        div()
+                            .debug_selector(|| STATUS_LINE_SELECTOR.to_owned())
+                            .child(status_line.clone()),
+                    )
                     .child(self.tab_bar.clone())
                     .child(v_flex().flex_1().min_h_0().child(self.pane())),
                 // A failed send that never produced a response still gets its panel:
