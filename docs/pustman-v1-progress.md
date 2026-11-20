@@ -61,7 +61,7 @@ These run at the next human sign-off and are recorded in that sign-off's step re
 
 ## Window
 
-Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 0 · unapplied deltas: 0 (cap 3 / 16). SEGMENT 2 (S11–S24) IN FLIGHT.
+Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 34 (S11–S24 sub-steps + S22f) · unapplied deltas: 0 (cap 3 / 16). SEGMENT 2 DONE; `release/pustman-v1-2` candidate `999746d` is NOT PROMOTABLE (flag rate 62%, doc-truth process FAIL) — awaiting the human's ruling.
 
 ## Status
 
@@ -80,7 +80,7 @@ Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 0 · un
 | S8 | `workspace_store` watcher: external changes and problems | passed | 1 | `c10350a` | [S8](steps/S8.md) | row corrected 2026-11-19 (merged before release/pustman-v1-1) |
 | S9 | Postman v2.1/v2.0 import, v2.1 export, environment/globals import | passed | 1 | (see git) | [S9](steps/S9.md) | 2 review rounds, 2 fix cycles; R2 PASS_WITH_ISSUES ×2 (both recommend merge); `PASS 8` |
 | S10 | cURL import and export | passed | 1 | `55ca3da` | [S10](steps/S10.md) | row corrected 2026-11-19 (merged before release/pustman-v1-1) |
-| G-DEPS | Install GPUI system libraries, CI push, then promote `release/pustman-v1-1` | pending | – | | | HUMAN gate; 1/3 libraries installed, 2/3 CI green (run 44240566190); 3/3 promote open |
+| G-DEPS | Install GPUI system libraries, CI push, then promote `release/pustman-v1-1` | passed | – | | | HUMAN gate; 1/3 libraries installed, 2/3 CI green (run 44240566190), 3/3 `release/pustman-v1-1` promoted |
 | S11 | `http_engine` core: transport trait, fake, error taxonomy, send/cancel | **passed** | 2 | `f8846db` | [S11](progress/pustman-v1/steps/S11.md) | 3 MEDIUM fixed: fmt false-claim, URL userinfo leak, Debug secret leak |
 | S12 | `ReqwestTransport`: settings, manual redirects, TLS toggle, timing spike (D2) | **passed** | 5 | `5f1a12d` | [S12](progress/pustman-v1/steps/S12.md) | M1 → #31 (medium); LOW #30 #32 #33 #34 #48 #49 |
 | S13 | Send pipeline: variable resolution, auth (Basic/Bearer/API key), unresolved secrets | **passed** | | | [S13a](progress/pustman-v1/steps/S13a.md) `64d0014` · [S13b](progress/pustman-v1/steps/S13b.md) `4bb7e1d` · [S13c](progress/pustman-v1/steps/S13c.md) `6535a70` | LOW #43–#47 #59 #60 |
@@ -159,4 +159,4 @@ Each entry is a fact a later step must know, with its source record linked.
 
 | Tag | SHA | Steps | promote-check | Build | Smoke (Linux / macOS) | Brief |
 |---|---|---|---|---|---|---|
-| `release/pustman-v1-1` | `6620061` | S0–S10 | PROMOTABLE 9/9 | none (domain-only, D11) | none (domain-only, D11) | [brief](briefs/release/pustman-v1-1.md) |
+| `release/pustman-v1-1` | `6620061` | S0–S10 | PROMOTABLE 9/9 | none (domain-only, D11) | none (domain-only, D11) | [brief](briefs/release-pustman-v1-1.md) |

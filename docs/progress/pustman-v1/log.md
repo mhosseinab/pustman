@@ -156,3 +156,10 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-20: **PLAN AMENDED (driver): S22f added.** The S25 smoke on GNOME Wayland found no way to move, resize or close the window, a doubled palette placeholder, and raw `ctrl-tab` key hints. S22f fixes all three ahead of the S25 re-smoke.
 - 2026-11-20 S22f passed (8771b0b), LOW #104 #105 #106 #107. Stopped at S25 (M0 sign-off, HUMAN): re-smoke pending.
 - 2026-11-20 **S25 passed (M0 GO).** Human re-smoke after S22f; live keyring 1 passed. Preparing promotion release/pustman-v1-2.
+- 2026-11-20: **`release/pustman-v1-2` checks → NOT PROMOTABLE at `999746d`.**
+  - The doc-truth check at `345a9aa` refuted three claims, fixed by `019923c` (a docs-only catch-up). The re-check refuted the init signatures and found that `text_input::init` was never called, so every text field's editing keys were unbound in the app.
+  - Fixed test-first in `999746d`; the wire test was red, then green, and the full verify passed.
+  - promote-check `999746d`: items 1–7 and 9 PASS; item 8 waits on doc-truth.
+  - Doc-truth `999746d`: all 5 claims confirmed. It is still FAIL only because the docs-only commit `019923c` breaks the ships-with-code rule.
+  - Brief `docs/briefs/release-pustman-v1-2.md`: flag rate 21/34 = 62% (> 20%).
+  - Also wrote the missing S18 step record, fixed the dead -1 brief link and marked G-DEPS passed.
