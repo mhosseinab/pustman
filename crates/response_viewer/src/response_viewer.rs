@@ -1,5 +1,6 @@
 //! `response_viewer` — what a send comes back with, on screen: the status line
-//! (REQ-RESP-01), the body (REQ-RESP-02), the headers table (REQ-RESP-05) and, when a
+//! (REQ-RESP-01), the body (REQ-RESP-02), the headers table (REQ-RESP-05), the cookies
+//! table (REQ-RESP-02) and, when a
 //! send failed, the error panel (REQ-RESP-08).
 //!
 //! [`ResponseView`] is the entity a host embeds (S29e puts it under the request editor).
@@ -9,6 +10,7 @@
 //! parallel model here.
 
 mod body_view;
+mod cookies_tab;
 mod error_panel;
 mod headers_view;
 mod hex_view;
@@ -18,6 +20,7 @@ mod save_body;
 mod status_line;
 
 pub use body_view::BodyView;
+pub use cookies_tab::{CookiesTab, ParsedCookie};
 pub use headers_view::{HeaderRow, HeadersView};
 pub use save_body::write_body;
 pub use status_line::StatusLine;
@@ -46,11 +49,13 @@ const BODY_PANE_SELECTOR: &str = "response-body-pane";
 
 /// The tabs across the top of the response, in order. Later steps append here (Cookies,
 /// Timeline); the bar is built from this list, so a new tab is one line and nothing else.
-const TAB_TITLES: [&str; 2] = ["Body", "Headers"];
+const TAB_TITLES: [&str; 3] = ["Body", "Headers", "Cookies"];
 /// Where the body renders.
 const BODY_TAB: usize = 0;
 /// Where the headers table renders.
 const HEADERS_TAB: usize = 1;
+/// Where the cookies table renders.
+const COOKIES_TAB: usize = 2;
 
 /// The response region: status line on top, tabs, and the selected pane below.
 pub struct ResponseView {
@@ -61,6 +66,7 @@ pub struct ResponseView {
     selected_tab: usize,
     body: Entity<BodyView>,
     headers: Entity<HeadersView>,
+    cookies: Entity<CookiesTab>,
     /// The failed send on screen instead of its body (REQ-RESP-08).
     error: Option<TransportError>,
     /// The response on screen, kept for `response::SaveBody` and `response::CopyBody`
@@ -85,6 +91,7 @@ impl ResponseView {
             selected_tab: BODY_TAB,
             body: cx.new(BodyView::new),
             headers: cx.new(HeadersView::new),
+            cookies: cx.new(CookiesTab::new),
             error: None,
             response: None,
             save_task: None,
@@ -109,6 +116,8 @@ impl ResponseView {
         ));
         self.headers
             .update(cx, |headers, cx| headers.set_headers(&response.headers, cx));
+        self.cookies
+            .update(cx, |cookies, cx| cookies.set_headers(&response.headers, cx));
         self.body
             .update(cx, |body, cx| body.set_body(Arc::clone(&response), cx));
         cx.notify();
@@ -131,6 +140,7 @@ impl ResponseView {
             }
             None => match self.selected_tab {
                 HEADERS_TAB => self.headers.clone().into_any_element(),
+                COOKIES_TAB => self.cookies.clone().into_any_element(),
                 _ => div()
                     .size_full()
                     .debug_selector(|| BODY_PANE_SELECTOR.to_owned())

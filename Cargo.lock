@@ -5464,6 +5464,7 @@ name = "response_viewer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cookie_store",
  "gpui",
  "hex",
  "http_engine",
@@ -5473,6 +5474,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "theme",
+ "time",
  "ui",
  "workspace",
 ]
