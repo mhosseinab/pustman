@@ -17,6 +17,7 @@ mod error_panel;
 mod find;
 mod headers_view;
 mod hex_view;
+mod large_body;
 mod pretty;
 mod preview;
 mod save_body;

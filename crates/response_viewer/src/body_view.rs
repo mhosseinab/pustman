@@ -11,13 +11,16 @@
 //! An in-memory body splits when it is set — one cheap pass, bounded by the spill limit.
 //! A body that streamed or spilled to disk ([`http_engine::ResponseBody::File`],
 //! [`http_engine::ResponseBody::Spilled`]) is read on a background task instead: the
-//! foreground never touches the disk, and the pane says so until the lines land.
+//! foreground never touches the disk, and the pane says so until the lines land. A body
+//! over `request.response_pretty_limit_mb` opens Raw with a banner instead of being
+//! pretty-printed ([`crate::large_body`], REQ-RESP-06).
 //!
 //! Hex ([`crate::hex_view`]) dumps the body's raw bytes as `offset | hex | ascii` rows,
 //! and Preview ([`crate::preview`]) shows images from those bytes and HTML as safe text.
 //! Both draw from the same cached bytes the text modes draw from.
 
 use std::borrow::Cow;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use gpui::{
@@ -25,14 +28,17 @@ use gpui::{
     Subscription, Task, UniformListScrollHandle, Window, anchored, deferred,
 };
 use http_engine::{Header, Response, ResponseBody};
+use settings::Setting;
 use ui::components::context_menu::ContextMenuEvent;
 use ui::prelude::*;
 
 use crate::child_id;
 use crate::find::{FindBar, FindEvent, FindMatch};
 use crate::hex_view::{HexRows, HexView};
+use crate::large_body::{self, LargeBodyBanner, LargeBodyNotice, ResponseViewerSetting};
 use crate::pretty::{FormatError, Formatter};
 use crate::preview::{PreviewContent, PreviewPane};
+use crate::status_line::body_size;
 
 /// The height of one formatter control (a [`ButtonSize::Medium`]) in pixels at the
 /// default scale: the override menu is anchored just under it.
@@ -105,6 +111,10 @@ pub struct BodyView {
     loading: bool,
     /// Reading a file-backed body failed; shown instead of the lines.
     error: Option<SharedString>,
+    /// The large-body fallback in effect (REQ-RESP-06, [`crate::large_body`]): the body
+    /// is over the pretty limit, so Raw shows and the banner above the lines names the
+    /// limit and offers the body's file.
+    large_body: Option<LargeBodyNotice>,
     /// The in-flight disk read. Stored so replacing the body cancels it: a stale load
     /// must never overwrite a newer response (AGENTS.md › Async).
     load_task: Option<Task<()>>,
@@ -136,6 +146,9 @@ impl BodyView {
     /// An empty pane, waiting for a response, showing bodies Pretty first (what Postman
     /// opens on).
     pub fn new(cx: &mut Context<Self>) -> Self {
+        // The pane reads `request.response_pretty_limit_mb` (REQ-RESP-06); registering
+        // here makes the read safe however the host orders its settings init.
+        ResponseViewerSetting::register(cx);
         let mode_bar = cx.new(|cx| TabBar::new(cx).with_tabs(mode_tabs(cx.entity_id())));
         let _mode_bar_subscription = cx.subscribe(&mode_bar, Self::on_mode_bar_event);
         Self {
@@ -152,6 +165,7 @@ impl BodyView {
             lossy: false,
             loading: false,
             error: None,
+            large_body: None,
             load_task: None,
             format_task: None,
             preview_task: None,
@@ -174,6 +188,7 @@ impl BodyView {
         self.format_task = None;
         self.preview_task = None;
         self.error = None;
+        self.large_body = None;
         self.lossy = false;
         self.loading = false;
         self.text = Arc::from("");
@@ -185,6 +200,12 @@ impl BodyView {
         let content_type = content_type(&response.headers);
         self.detected = Formatter::detect(content_type);
         self.content_type = content_type.map(Arc::from);
+        // The large-body fallback (REQ-RESP-06) decides before anything formats: a
+        // body whose size is already known goes to Raw here, a `File` body once its
+        // read has measured it (the load below).
+        let limit_mb = large_body::pretty_limit_mb(cx);
+        let file_path = large_body::file_path(&response.body);
+        self.apply_large_body_fallback(body_size(&response.body), limit_mb, file_path.clone(), cx);
         match &response.body {
             ResponseBody::Bytes(bytes) => {
                 self.bytes = Arc::new(bytes.clone());
@@ -215,6 +236,15 @@ impl BodyView {
                         view.loading = false;
                         match outcome {
                             Ok((bytes, text, lines, lossy)) => {
+                                // A `File` body's size is only known once it is read:
+                                // the same fallback applies here, before any formatter
+                                // is handed the huge body.
+                                view.apply_large_body_fallback(
+                                    u64::try_from(bytes.len()).ok(),
+                                    limit_mb,
+                                    file_path,
+                                    cx,
+                                );
                                 view.bytes = bytes;
                                 view.text = text;
                                 view.lines = Arc::new(lines);
@@ -257,6 +287,44 @@ impl BodyView {
         self.refresh_preview(cx);
         self.refresh_find(cx);
         cx.notify();
+    }
+
+    /// The large-body fallback (REQ-RESP-06): when `size` says the body is over
+    /// `limit_mb`, the pane shows Raw instead of formatting a huge body and keeps the
+    /// banner ([`LargeBodyNotice`]) above the lines. It applies once per body — a mode
+    /// the user picks afterwards stands — and a size that cannot be measured keeps the
+    /// normal flow.
+    fn apply_large_body_fallback(
+        &mut self,
+        size: Option<u64>,
+        limit_mb: u64,
+        file_path: Option<PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.large_body.is_some() {
+            return;
+        }
+        let Some(size) = size else {
+            return;
+        };
+        if !large_body::exceeds_pretty_limit(size, limit_mb) {
+            return;
+        }
+        self.large_body = Some(LargeBodyNotice::new(limit_mb, file_path));
+        self.set_mode(BodyMode::Raw, cx);
+    }
+
+    /// Reveal the large body's file in the system file manager (REQ-RESP-06): the
+    /// banner button's whole job. The path stays out of logs and element ids (PRD §7).
+    fn reveal_large_body_file(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self
+            .large_body
+            .as_ref()
+            .and_then(LargeBodyNotice::file_path)
+        else {
+            return;
+        };
+        cx.reveal_path(path);
     }
 
     /// Open the find bar over the lines (REQ-RESP-03). It is created on first use and
@@ -335,6 +403,19 @@ impl BodyView {
     /// The Raw mode lines: the decoded text exactly, one entry per line.
     pub fn lines(&self) -> &[SharedString] {
         &self.lines
+    }
+
+    /// The mode the pane draws in — what the large-body fallback switches to Raw.
+    #[cfg(test)]
+    pub(crate) fn mode(&self) -> BodyMode {
+        self.mode
+    }
+
+    /// The large-body fallback in effect (REQ-RESP-06): [`Some`] while the body on
+    /// screen is over the pretty limit — the banner's state and its reveal target.
+    #[cfg(test)]
+    pub(crate) fn large_body(&self) -> Option<&LargeBodyNotice> {
+        self.large_body.as_ref()
     }
 
     /// The lines the pane draws in the current mode: the formatter's output in Pretty
@@ -647,6 +728,14 @@ impl Render for BodyView {
             )
             .map(|this| match &self.format_error {
                 Some(message) => this.child(note(message.clone(), cx)),
+                None => this,
+            })
+            .map(|this| match self.large_body.clone() {
+                Some(notice) => this.child(
+                    LargeBodyBanner::new(child_id(&base, "large-body"), &notice).on_reveal(
+                        cx.listener(|this, _event, _window, cx| this.reveal_large_body_file(cx)),
+                    ),
+                ),
                 None => this,
             })
             .map(|this| match self.mode {
