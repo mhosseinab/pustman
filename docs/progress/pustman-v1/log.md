@@ -177,3 +177,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-20: S32b passed (`68e868a`, review 1 PASS_WITH_ISSUES; LOW #113–#115).
 - 2026-11-20: S26a passed (`ed1e69d`, review 1 PASS_WITH_ISSUES; LOW #116–#117).
 - 2026-11-20: S34a passed (`d7928d5`, review 1 PASS_WITH_ISSUES; LOW #118–#121). S26b dispatched.
+- 2026-11-20: S29a passed (`771ce60`, review 1 PASS_WITH_ISSUES; LOW #122–#123). S32c built (`b4b6658`), review 1 dispatched; S34b dispatched; S26b hit a provider content filter, resumed.
