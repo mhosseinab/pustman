@@ -101,7 +101,7 @@ Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending)
 | S26 | `request_editor`: URL bar, method, send/cancel, response status line | in_progress | | | [S26a](progress/pustman-v1/steps/S26a.md), [S26b](progress/pustman-v1/steps/S26b.md), [S26w](progress/pustman-v1/steps/S26w.md) | S26a, S26b, S26w (`21ebcb1`) passed; S27a building |
 | S27 | Params, path variables, headers tables; cURL paste/copy | pending | 0 | | |  |
 | S28 | Body, auth and settings tabs (TLS badge) | pending | 0 | | |  |
-| S29 | `response_viewer`: Pretty/Raw body, headers, error panel | in_progress | | | [S29a](progress/pustman-v1/steps/S29a.md), [S29c](progress/pustman-v1/steps/S29c.md) | S29a, S29c passed; S29b building |
+| S29 | `response_viewer`: Pretty/Raw body, headers, error panel | in_progress | | | [S29a](progress/pustman-v1/steps/S29a.md), [S29b](progress/pustman-v1/steps/S29b.md), [S29c](progress/pustman-v1/steps/S29c.md) | S29a, S29b (`25cfe1e`), S29c passed |
 | S30 | Response: Hex, Preview, Find, save/copy, large bodies, Cookies tab | pending | 0 | | |  |
 | S31 | Timeline tab: phases, network info, redirect chain, resolved request as sent | pending | 0 | | |  |
 | S32 | `console` crate (bottom dock) | in_progress | | | [S32a](progress/pustman-v1/steps/S32a.md), [S32b](progress/pustman-v1/steps/S32b.md), [S32c](progress/pustman-v1/steps/S32c.md), [S32d](progress/pustman-v1/steps/S32d.md) | S32a–S32d passed; S32w next (wire) |
