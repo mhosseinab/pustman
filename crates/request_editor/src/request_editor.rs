@@ -1,6 +1,6 @@
 //! `request_editor` — the request tab (PRD REQ-HTTP-01..04): a [`RequestEditor`] item
 //! holding the [`HttpRequest`] draft, with the URL bar's method picker and URL field on
-//! top and the status line area under it.
+//! top, and the send/status area (`send`) under it.
 //!
 //! `Decision:` the step's scope stops at the URL bar: `pending_send`, `inline_error` and
 //! the status line are declared here and filled by S26b's send work, so the send task
@@ -8,6 +8,7 @@
 
 mod method;
 mod new_request;
+pub mod send;
 pub mod url_bar;
 
 use api_model::HttpRequest;
@@ -18,6 +19,7 @@ use gpui::{
 use ui::prelude::*;
 use workspace::Item;
 
+use send::{InlineError, StatusLine};
 use url_bar::{UrlBar, UrlBarEvent};
 
 /// The key context the editor answers the keyboard in; `assets/keymaps/` binds
@@ -34,13 +36,13 @@ pub struct RequestEditor {
     /// and then its undo leave the tab clean.
     saved: HttpRequest,
     url_bar: Entity<UrlBar>,
-    /// S26b's send task is stored here: replacing it cancels the in-flight request
-    /// (dropping a `Task` cancels it). Nothing reads it until send lands.
-    #[allow(dead_code)]
+    /// The send task (S26b): replacing it cancels the request in flight, because
+    /// dropping a `Task` cancels it.
     pending_send: Option<Task<()>>,
-    /// S26b's inline error, shown under the URL bar. Nothing reads it until send lands.
-    #[allow(dead_code)]
-    inline_error: Option<String>,
+    /// Why the last send failed, shown under the URL bar.
+    inline_error: Option<InlineError>,
+    /// What the status line shows for the last response.
+    status_line: Option<StatusLine>,
     _url_bar_subscription: Subscription,
 }
 
@@ -58,6 +60,7 @@ impl RequestEditor {
             url_bar,
             pending_send: None,
             inline_error: None,
+            status_line: None,
             _url_bar_subscription: url_bar_subscription,
         }
     }
@@ -110,16 +113,19 @@ impl Item for RequestEditor {
 }
 
 impl Render for RequestEditor {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .id(ElementId::from(&self.focus_handle))
             .key_context(REQUEST_EDITOR_CONTEXT)
             .track_focus(&self.focus_handle)
+            .on_action(cx.listener(Self::handle_send))
+            .on_action(cx.listener(Self::handle_cancel))
             .size_full()
             .min_w_0()
             .child(self.url_bar.clone())
-        // The status line area lands here in S26b: status, reason, time and size, plus
-        // the `inline_error` message — drawn under the URL bar, where the send happened.
+            // Under the URL bar, where the send happened: the inline failure and then
+            // the status line with the Send/Cancel button.
+            .child(self.render_send_area(cx))
     }
 }
 
