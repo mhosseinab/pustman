@@ -172,3 +172,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
   - 34 step records got a "shipped in" line. Segment 3 (S26–S37) starts.
 - 2026-11-20: Segment 3 dispatched: S26a, S29a, S32a, S34a (pi `mimo-v2.6-pro`, four disjoint new crates).
 - 2026-11-20: App icon wired (`5868102`): window app id `pustman` + X11 icon, `scripts/install-desktop-entry.sh` (installed on the build host), `scripts/bundle-macos.sh` (unverified, no macOS host). S32a built (`f85b822`), review 1 dispatched; S35a dispatched into the freed slot.
+- 2026-11-20: Release procedure now packages the app icon (`c31e3b5`, promote skill step 3). S32a merged `f01121f` (review 1 PASS; LOW #108, #109).

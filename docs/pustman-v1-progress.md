@@ -104,7 +104,7 @@ Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending)
 | S29 | `response_viewer`: Pretty/Raw body, headers, error panel | in_progress | | | | S29a building |
 | S30 | Response: Hex, Preview, Find, save/copy, large bodies, Cookies tab | pending | 0 | | |  |
 | S31 | Timeline tab: phases, network info, redirect chain, resolved request as sent | pending | 0 | | |  |
-| S32 | `console` crate (bottom dock) | in_progress | | | | S32a in review (`f85b822`) |
+| S32 | `console` crate (bottom dock) | in_progress | | | [S32a](progress/pustman-v1/steps/S32a.md) | S32a passed (`f01121f`); S32b next |
 | S33 | Variable highlighting, autocomplete, hover, pre-send warning | pending | 0 | | |  |
 | S34 | `environment_picker` + quick-look | in_progress | | | | S34a building |
 | S35 | `history_panel` | in_progress | | | | S35a building |
