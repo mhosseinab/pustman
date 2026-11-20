@@ -86,7 +86,7 @@ Last tag: `release/pustman-v1-1` @ `6620061` · unpromoted passed steps: 0 · un
 | S13 | Send pipeline: variable resolution, auth (Basic/Bearer/API key), unresolved secrets | **passed** | | | [S13a](progress/pustman-v1/steps/S13a.md) `64d0014` · [S13b](progress/pustman-v1/steps/S13b.md) `4bb7e1d` · [S13c](progress/pustman-v1/steps/S13c.md) `6535a70` | LOW #43–#47 #59 #60 |
 | S14 | Request bodies, file refs, auto headers, large response spill | **passed** | | | [S14a](progress/pustman-v1/steps/S14a.md) `1241183` · [S14b](progress/pustman-v1/steps/S14b.md) `1cf147b` · [S14c](progress/pustman-v1/steps/S14c.md) `96dc3e8` | LOW #26–#29 #35 #50 #66 #67 |
 | S15 | Cookie jar per workspace | **in_progress** | | | [S15a](progress/pustman-v1/steps/S15a.md) `a560082` · [S15b](progress/pustman-v1/steps/S15b.md) `dd5d48f` | LOW #51–#53 #61 |
-| S16 | History recording with redaction, 1 MB cap, retention | in_progress | 4 | [S16a](progress/pustman-v1/steps/S16a.md) `131c73a` | #87 #88 #89 #90 |  |
+| S16 | History recording with redaction, 1 MB cap, retention | **in_progress** | | | [S16a](progress/pustman-v1/steps/S16a.md) `131c73a` | LOW #87–#90 |
 | S17 | `settings` crate | **passed** | 3 | `47b2dc6` | [S17](progress/pustman-v1/steps/S17.md) | split into 3 chunks after 3 denied dispatches; 2 LOW → #15 #16 |
 | S18 | `theme` crate with bundled light and dark themes | **passed** | 2 | `2fedd34` | [S18](progress/pustman-v1/steps/S18.md) | 1 MEDIUM fixed; 3 LOW → #17 #18 #19 |
 | S19 | `ui` design-system crate: tokens and base components | **passed** | | | [S19a](progress/pustman-v1/steps/S19a.md) `dab4417` · [S19b](progress/pustman-v1/steps/S19b.md) `61a6209` · [S19c](progress/pustman-v1/steps/S19c.md) `c37855a` | LOW #54–#58, #62–#65 |
