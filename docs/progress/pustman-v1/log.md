@@ -184,3 +184,9 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-20: S34b passed (`dd8e4ce`, review 1 PASS_WITH_ISSUES; LOW #130–#131). S35c built (`c1a7876`), review 1 dispatched.
 - 2026-11-20: S29b built (`09ac86d`), review 1 dispatched; S30d dispatched into the freed slot. `/lows` skill committed (`774b97c`).
 - 2026-11-20: S35c passed (`d32857d`, review 1 PASS; LOW #132–#133). S35b dispatched.
+
+## 2026-11-20 — slots raised to 6; S26w and S30a dispatched
+- The human raised the worker slots from 4 to 6. Worktree builds are capped at `jobs = 3` (`.claude/worktrees/pustman-v1/.cargo/config.toml`, gitignored).
+- S26w (wire the request editor, hotspot) was dispatched from main. It is the only wire step in flight.
+- S30a (Hex/Preview) is stacked on `pustman-v1/S29b`, which is in review.
+- In flight: S27a, S37, S30d, S35b, S26w and S30a building; S32d in a fix round; S29b in review 1.
