@@ -20,6 +20,7 @@
 mod body;
 mod client;
 mod cookie_persistence;
+mod cookie_transport;
 mod cookies;
 mod error;
 mod file_ref;
@@ -79,6 +80,10 @@ mod body_encoding_tests;
 #[cfg(test)]
 #[path = "body_test_support.rs"]
 mod body_test_support;
+
+#[cfg(test)]
+#[path = "cookie_test_support.rs"]
+mod cookie_test_support;
 
 #[cfg(test)]
 #[path = "debug_redaction_tests.rs"]

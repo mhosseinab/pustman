@@ -27,6 +27,8 @@ use reqwest::header::{
 use url::Url;
 
 use crate::body::user_header_is_set;
+use crate::cookie_transport;
+use crate::cookies::CookieJar;
 use crate::error::TransportError;
 use crate::request::{
     self, Header, MultipartField, MultipartValue, RequestBody, ResolvedRequest, SendSettings,
@@ -49,6 +51,10 @@ pub struct ReqwestTransport {
     /// How much of a response body stays in memory before the rest spills to a temp
     /// file (REQ-RESP-06).
     spill_limit: usize,
+    /// The workspace cookie jar this transport applies and captures against, hop by hop
+    /// (REQ-HTTP-08, `cookie_transport.rs`). `None` — the default — sends no cookies
+    /// and captures none.
+    cookie_jar: Option<Arc<Mutex<CookieJar>>>,
 }
 
 impl ReqwestTransport {
@@ -61,6 +67,7 @@ impl ReqwestTransport {
             handle,
             clients: Arc::new(Mutex::new(HashMap::new())),
             spill_limit: DEFAULT_SPILL_LIMIT,
+            cookie_jar: None,
         }
     }
 
@@ -69,6 +76,16 @@ impl ReqwestTransport {
     /// then this builder is how a send gets a different one (tests use a tiny limit).
     pub fn with_spill_limit(mut self, limit: usize) -> Self {
         self.spill_limit = limit;
+        self
+    }
+
+    /// The same transport, applying and capturing cookies through `jar` — one workspace's
+    /// shared [`CookieJar`] (REQ-HTTP-08), held the way `cookie_persistence` holds its
+    /// store (`Arc<Mutex<_>>`). Every hop of a send consults it before going out and
+    /// stores the hop's `Set-Cookie` after coming back, redirects included; reqwest's own
+    /// cookie store stays off.
+    pub fn with_cookie_jar(mut self, jar: Arc<Mutex<CookieJar>>) -> Self {
+        self.cookie_jar = Some(jar);
         self
     }
 }
@@ -85,10 +102,11 @@ impl Transport for ReqwestTransport {
         let key = ClientKey::for_settings(&request.settings);
         let handle = self.handle.clone();
         let spill_limit = self.spill_limit;
+        let cookie_jar = self.cookie_jar.clone();
         async move {
             let task = handle.spawn(async move {
                 let client = client_for(&clients, key)?;
-                execute(client, request, spill_limit).await
+                execute(client, request, spill_limit, cookie_jar).await
             });
             match AbortOnDrop::new(task).join().await {
                 Ok(outcome) => outcome,
@@ -143,7 +161,10 @@ fn build_client(key: ClientKey) -> Result<reqwest::Client, TransportError> {
     // `Policy::none()` is what makes the redirect handling manual: the chain is walked
     // in `execute`, so every hop is recorded (REQ-NET-03). `tls_info(true)` attaches the
     // negotiated TLS version and the peer certificate to each response, which is all
-    // `network_info` can read (REQ-NET-02, ADR-0003).
+    // `network_info` can read (REQ-NET-02, ADR-0003). No `.cookie_store(true)`: reqwest's
+    // own cookie store stays off, because the jar is applied by hand per hop — redirect
+    // hops included — and the `Cookie` header actually sent is part of the request record
+    // (REQ-HTTP-08, REQ-NET-04, `cookie_transport.rs`).
     let mut builder = reqwest::Client::builder()
         .timeout(key.timeout)
         .tls_info(true)
@@ -173,6 +194,7 @@ async fn execute(
     client: reqwest::Client,
     request: ResolvedRequest,
     spill_limit: usize,
+    cookie_jar: Option<Arc<Mutex<CookieJar>>>,
 ) -> Result<Response, TransportError> {
     let settings = request.settings;
     let mut method = request.method;
@@ -182,7 +204,20 @@ async fn execute(
     let mut body = request.body;
     let mut chain: Vec<RedirectHop> = Vec::new();
 
+    // Cookies are a per-send choice (REQ-HTTP-09 `disable_cookie_jar`): no jar lookup,
+    // no capture. Every hop is a request of its own, so a jar with cookies applies and
+    // captures per hop — that is what makes a redirect hop a full cookie exchange
+    // (REQ-HTTP-08), never only the first request.
+    let jar = cookie_jar
+        .as_ref()
+        .filter(|_jar| !settings.disable_cookie_jar);
+    let mut applied_cookie: Option<Header> = None;
+
     loop {
+        if let Some(jar) = jar {
+            applied_cookie =
+                cookie_transport::apply_cookie_header(&mut headers, applied_cookie, &url, jar);
+        }
         let hop_started = Instant::now();
         let hop = exchange(
             &client,
@@ -196,6 +231,9 @@ async fn execute(
         )
         .await?;
         let timing = hop_started.elapsed();
+        if let Some(jar) = jar {
+            cookie_transport::capture_cookies(jar, &url, &hop.headers);
+        }
 
         if !settings.follow_redirects {
             return Ok(final_response(hop, chain));
