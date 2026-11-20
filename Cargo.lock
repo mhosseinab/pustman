@@ -2789,8 +2789,11 @@ name = "history_panel"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "api_model",
  "gpui",
  "pustman_actions",
+ "request_editor",
+ "serde",
  "serde_json",
  "storage",
  "text_input",
