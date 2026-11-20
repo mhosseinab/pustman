@@ -108,7 +108,7 @@ Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending)
 | S33 | Variable highlighting, autocomplete, hover, pre-send warning | pending | 0 | | |  |
 | S34 | `environment_picker` + quick-look | passed | | | [S34a](progress/pustman-v1/steps/S34a.md), [S34b](progress/pustman-v1/steps/S34b.md), [S34w](progress/pustman-v1/steps/S34w.md) | S34a (`d7928d5`), S34b (`dd8e4ce`), S34w (`2f0c3ed`) passed |
 | S35 | `history_panel` | passed | | | [S35a](progress/pustman-v1/steps/S35a.md), [S35b](progress/pustman-v1/steps/S35b.md), [S35c](progress/pustman-v1/steps/S35c.md), [S35d](progress/pustman-v1/steps/S35d.md), [S35w](progress/pustman-v1/steps/S35w.md) | S35a (`cb0be4c`), S35b (`d0fdcf2`), S35c (`d32857d`), S35d (`2f1ca4d`, driver-added; closes #141) passed; S35w (`d738c28`) passed — all sub-steps merged |
-| S36 | Manage Cookies dialog | pending | 0 | | |  |
+| S36 | Manage Cookies dialog | in_progress | | #175, #176 | [S36a](progress/pustman-v1/steps/S36a.md) | S36a (`fd8a7de`) passed; S36b next |
 | S37 | Redaction NFR test (integration) | passed | 1 | | [S37](progress/pustman-v1/steps/S37.md) | S37 (`ce1b583`) passed |
 | S38 | M1 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off |
 | S39 | `collections_panel`: tree | pending | 0 | | |  |
