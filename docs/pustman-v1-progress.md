@@ -106,7 +106,7 @@ Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending)
 | S31 | Timeline tab: phases, network info, redirect chain, resolved request as sent | pending | 0 | | |  |
 | S32 | `console` crate (bottom dock) | in_progress | | | [S32a](progress/pustman-v1/steps/S32a.md), [S32b](progress/pustman-v1/steps/S32b.md), [S32c](progress/pustman-v1/steps/S32c.md) | S32a, S32b, S32c passed; S32d building |
 | S33 | Variable highlighting, autocomplete, hover, pre-send warning | pending | 0 | | |  |
-| S34 | `environment_picker` + quick-look | in_progress | | | [S34a](progress/pustman-v1/steps/S34a.md) | S34a passed (`d7928d5`); S34b next |
+| S34 | `environment_picker` + quick-look | in_progress | | | [S34a](progress/pustman-v1/steps/S34a.md), [S34b](progress/pustman-v1/steps/S34b.md) | S34a (`d7928d5`), S34b (`dd8e4ce`) passed; S34w next |
 | S35 | `history_panel` | in_progress | | | [S35a](progress/pustman-v1/steps/S35a.md) | S35a passed (`cb0be4c`); S35b/S35c next |
 | S36 | Manage Cookies dialog | pending | 0 | | |  |
 | S37 | Redaction NFR test (integration) | pending | 0 | | |  |
