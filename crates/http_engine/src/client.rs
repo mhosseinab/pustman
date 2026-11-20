@@ -12,8 +12,9 @@ use variables::{DynamicValues, ScopeKind, ScopeStack};
 
 use crate::body::resolve_body_files;
 use crate::error::TransportError;
+use crate::history::{HistoryDraft, HistoryRecorder};
 use crate::pipeline::{PipelineError, Warning};
-use crate::prepare::prepare;
+use crate::prepare::{Prepared, prepare};
 use crate::request::ResolvedRequest;
 use crate::request_auth::AppliedAuth;
 use crate::response::Response;
@@ -86,9 +87,16 @@ pub struct HttpClient {
     /// `send` or `cancel` replaces it; [`HttpClient::is_sending`] reports whether it is
     /// still running.
     pending_send: Option<Task<()>>,
+    /// The history row the in-flight [`HttpClient::send_request`] leaves when it ends
+    /// before its own work can record it (PRD REQ-HIST-01: every send is recorded).
+    /// `None` for a send that records nothing.
+    pending_history: Option<Arc<HistoryDraft>>,
     /// The root [`send_request`] resolves body file references against (REQ-HTTP-05).
     /// `None` keeps them as they are, which is what [`HttpClient::send`] does too.
     workspace_root: Option<PathBuf>,
+    /// Where [`HttpClient::send_request`] records history. `None` records nothing, which
+    /// is what [`HttpClient::send`] does too: it carries no pre-resolution request.
+    history: Option<HistoryRecorder>,
 }
 
 impl HttpClient {
@@ -97,7 +105,9 @@ impl HttpClient {
         Self {
             transport,
             pending_send: None,
+            pending_history: None,
             workspace_root: None,
+            history: None,
         }
     }
 
@@ -105,6 +115,13 @@ impl HttpClient {
     /// a relative one stays inside it and an absolute one is kept as it is.
     pub fn set_workspace_root(&mut self, root: PathBuf) {
         self.workspace_root = Some(root);
+    }
+
+    /// Record every [`HttpClient::send_request`] through `recorder` from the next send on
+    /// (PRD §8.5). [`HttpClient::send`] records nothing: it has no pre-resolution
+    /// request to store.
+    pub fn set_history(&mut self, recorder: HistoryRecorder) {
+        self.history = Some(recorder);
     }
 
     /// Whether a send is still in flight.
@@ -154,7 +171,14 @@ impl HttpClient {
     ) -> Task<Result<SendOutcome, PipelineError>> {
         let transport = self.transport.clone();
         let workspace_root = self.workspace_root.clone();
-        self.drive_send(
+        let draft = self
+            .history
+            .as_ref()
+            .and_then(|recorder| recorder.draft(&input.request));
+        // The send's work and this entity share the one draft (an `Arc`): its gate keeps
+        // the send to one row however the two writers race.
+        let recorded = draft.clone();
+        let task = self.drive_send(
             cx,
             move || async move {
                 let SendInput {
@@ -168,27 +192,72 @@ impl HttpClient {
                 // every field and the auth (REQ-VAR-05).
                 let mut dynamic = DynamicValues::new();
                 let ancestors: Vec<&Auth> = ancestors.iter().collect();
-                let mut prepared = prepare(
+                match prepare(
                     &request,
                     &ancestors,
                     &scopes,
                     secrets.as_ref(),
                     secret_key.as_ref(),
                     &mut dynamic,
-                )?;
-                if let Some(root) = &workspace_root {
-                    prepared.resolved.body = resolve_body_files(prepared.resolved.body, root)?;
+                ) {
+                    Err(error) => {
+                        // No secret was substituted before preparation failed, so the
+                        // empty set redacts the pre-resolution request (history.rs).
+                        if let Some(draft) = &recorded {
+                            draft.record_error(&request, &error, &SecretValues::new());
+                        }
+                        Err(error)
+                    }
+                    Ok(prepared) => {
+                        let Prepared {
+                            mut resolved,
+                            warnings,
+                            auth,
+                            secrets_used,
+                        } = prepared;
+                        if let Some(root) = &workspace_root {
+                            resolved.body = match resolve_body_files(resolved.body, root) {
+                                Ok(body) => body,
+                                Err(error) => {
+                                    let error = PipelineError::Transport(error);
+                                    if let Some(draft) = &recorded {
+                                        draft.record_error(&request, &error, &secrets_used);
+                                    }
+                                    return Err(error);
+                                }
+                            };
+                        }
+                        // The history row is written before the outcome reaches the
+                        // caller: the caller's task resolves only once it is stored.
+                        match transport.send(resolved).await {
+                            Ok(response) => {
+                                if let Some(draft) = &recorded {
+                                    draft.record_response(&request, &response, &secrets_used);
+                                }
+                                Ok(SendOutcome {
+                                    response,
+                                    warnings,
+                                    auth,
+                                    secrets_used,
+                                })
+                            }
+                            Err(error) => {
+                                let error = PipelineError::Transport(error);
+                                if let Some(draft) = &recorded {
+                                    draft.record_error(&request, &error, &secrets_used);
+                                }
+                                Err(error)
+                            }
+                        }
+                    }
                 }
-                let response = transport.send(prepared.resolved).await?;
-                Ok(SendOutcome {
-                    response,
-                    warnings: prepared.warnings,
-                    auth: prepared.auth,
-                    secrets_used: prepared.secrets_used,
-                })
             },
             Err(PipelineError::Transport(TransportError::Cancelled)),
-        )
+        );
+        // Set alongside the new pending task, after `drive_send` recorded the send it
+        // replaced (a replaced send is a cancellation).
+        self.pending_history = draft;
+        task
     }
 
     /// The one cancel/replace/oneshot pipeline behind both send shapes: cancel the send in
@@ -229,6 +298,13 @@ impl HttpClient {
     fn cancel_pending(&mut self, cx: &mut Context<HttpClient>) {
         let was_sending = self.is_sending();
         self.pending_send = None;
+        let draft = self.pending_history.take();
+        // The dropped task can no longer record its own row, so the cancelled row is
+        // written on a detached task of its own (REQ-HIST-01 records every send).
+        if was_sending && let Some(draft) = draft {
+            cx.background_spawn(async move { draft.record_cancelled() })
+                .detach();
+        }
         if was_sending {
             cx.emit(SendEvent::Cancelled);
         }

@@ -141,6 +141,45 @@ impl SecretValues {
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
+
+    /// The length in bytes of the longest kept secret, and `0` when nothing is kept. A
+    /// caller that reads a bounded window of untrusted text reads this many bytes past
+    /// its cut, so every secret the cut could split is read whole.
+    pub fn max_len(&self) -> usize {
+        self.values.iter().map(String::len).max().unwrap_or(0)
+    }
+
+    /// The longest prefix of `text` no kept secret can straddle the end of: every
+    /// occurrence of every secret that touches the returned prefix lies entirely inside
+    /// it. The tail of a bounded window can hold the unmasked start of an occurrence
+    /// whose rest lies beyond the window — redacting the window then keeps that fragment
+    /// in the clear — so that tail is cut here, before [`redact_text`]. The cut can
+    /// cascade: after it, the new end must not straddle either. It can cost detail and
+    /// never correctness.
+    pub fn straddle_free_prefix<'a>(&self, text: &'a str) -> &'a str {
+        let mut end = text.len();
+        loop {
+            let mut straddle = 0;
+            for secret in &self.values {
+                let longest = secret.len().saturating_sub(1).min(end);
+                for length in (1..=longest).rev() {
+                    // `get` also enforces char boundaries on both sides: a match that
+                    // splits a character is no occurrence and cuts nothing.
+                    if text
+                        .get(end - length..end)
+                        .is_some_and(|tail| secret.get(..length) == Some(tail))
+                    {
+                        straddle = straddle.max(length);
+                        break;
+                    }
+                }
+            }
+            if straddle == 0 {
+                return text.get(..end).unwrap_or_default();
+            }
+            end -= straddle;
+        }
+    }
 }
 
 impl Default for SecretValues {
@@ -714,3 +753,7 @@ fn hex_digit(byte: u8) -> Option<u8> {
 #[cfg(test)]
 #[path = "redact_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "redact_prefix_tests.rs"]
+mod prefix_tests;

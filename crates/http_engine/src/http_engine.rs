@@ -23,6 +23,7 @@ mod cookie_persistence;
 mod cookies;
 mod error;
 mod file_ref;
+mod history;
 mod pipeline;
 mod prepare;
 mod request;
@@ -41,6 +42,7 @@ pub use cookie_persistence::{load_jar, save_jar};
 pub use cookies::{CookieEntry, CookieError, CookieJar};
 pub use error::TransportError;
 pub use file_ref::resolve_file_ref;
+pub use history::{HISTORY_BODY_LIMIT, HistoryDraft, HistoryRecorder};
 pub use pipeline::{PipelineError, Warning, resolve_request};
 pub use prepare::{Prepared, prepare};
 pub use request::{

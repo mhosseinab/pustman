@@ -76,14 +76,10 @@ pub fn apply_auth(
             {
                 return incomplete;
             }
-            let credentials = format!("{username}:{password}");
             set_header(
                 resolved,
                 "Authorization",
-                format!(
-                    "Basic {}",
-                    base64::engine::general_purpose::STANDARD.encode(credentials.as_bytes())
-                ),
+                format!("Basic {}", basic_credentials(&username, &password)),
             );
             AppliedAuth::Applied
         }
@@ -127,6 +123,14 @@ pub fn apply_auth(
 /// goes through `resolve`.
 fn resolved_field(resolve: &impl Fn(&str) -> String, field: Option<String>) -> String {
     field.as_deref().map(resolve).unwrap_or_default()
+}
+
+/// The `Basic` credential the `Authorization` header carries: `base64(user:pass)`
+/// (RFC 7617). One implementation, shared with `prepare`: a server that echoes request
+/// headers returns exactly this string, so `prepare` registers it among the send's
+/// secrets and the echo is masked everywhere the send is redacted.
+pub(crate) fn basic_credentials(username: &str, password: &str) -> String {
+    base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"))
 }
 
 /// The shared "a configured field resolved to empty" check behind every

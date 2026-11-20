@@ -42,6 +42,9 @@ gpui_tokio.workspace = true
 # its `TokioIo` adapter.
 hyper.workspace = true
 hyper-util = { workspace = true, features = ["client-legacy", "tokio"] }
+# A failed history write logs one fixed message and nothing else: the error text behind
+# it can quote the row it failed on (PRD §7, REQ-HIST-01).
+log.workspace = true
 # The Mozilla Public Suffix List parser behind the cookie jar's public-suffix rejection
 # (RFC 6265 §5.3 step 5); the same `publicsuffix::List` type cookie_store takes.
 publicsuffix.workspace = true

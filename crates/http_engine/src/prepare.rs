@@ -26,7 +26,7 @@ use crate::body;
 use crate::error::TransportError;
 use crate::pipeline::{PipelineError, Warning, resolve_request};
 use crate::request::ResolvedRequest;
-use crate::request_auth::{AppliedAuth, apply_auth};
+use crate::request_auth::{AppliedAuth, apply_auth, basic_credentials};
 
 /// One request, ready for the transport.
 ///
@@ -153,8 +153,27 @@ pub fn prepare(
         &resolved.url,
         &resolved.headers,
     );
-    let secrets_used =
-        SecretValues::from_values(secrets_fetched.into_iter().map(|(_name, value)| value));
+    let mut secret_values: Vec<String> = secrets_fetched
+        .into_iter()
+        .map(|(_name, value)| value)
+        .collect();
+    if auth == AppliedAuth::Applied
+        && let EffectiveAuth::Basic { username, password } = &effective
+    {
+        // A server that echoes request headers (httpbin `/headers`) puts the Basic
+        // credential's base64 form in its body; the resolved username and password
+        // never match that derived string, so the exact string the auth sends is
+        // registered too and its echo is masked everywhere the send is redacted.
+        let resolved = |field: &Option<String>| {
+            field
+                .as_deref()
+                .and_then(|template| auth_texts.get(template))
+                .cloned()
+                .unwrap_or_default()
+        };
+        secret_values.push(basic_credentials(&resolved(username), &resolved(password)));
+    }
+    let secrets_used = SecretValues::from_values(secret_values);
     Ok(Prepared {
         resolved,
         warnings,
