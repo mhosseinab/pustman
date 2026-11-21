@@ -529,7 +529,7 @@ impl RequestEditor {
     }
 
     /// The Send button — "Cancel" while a request is in flight, with the keystroke that
-    /// does the same thing spelled out next to the label.
+    /// does the same thing spelled out in its tooltip.
     fn render_send_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let in_flight = self.is_sending();
         let label = self.send_button_label();
@@ -540,16 +540,13 @@ impl RequestEditor {
                 ButtonStyle::Filled
             })
             .size(ButtonSize::Large)
-            .key_binding(if in_flight {
-                KeyBinding::for_action(&request::Cancel)
+            // The keystroke lives in the tooltip, not on the button: a key chip on the
+            // filled accent background is unreadable.
+            .tooltip(if in_flight {
+                Tooltip::for_action("Cancel the request in flight", &request::Cancel)
             } else {
-                KeyBinding::for_action(&request::Send)
+                Tooltip::for_action("Send this request", &request::Send)
             })
-            .tooltip(Tooltip::text(if in_flight {
-                SharedString::new_static("Cancel the request in flight")
-            } else {
-                SharedString::new_static("Send this request")
-            }))
             .on_click(cx.listener(|this, _event, _window, cx| {
                 if this.is_sending() {
                     this.cancel_send(cx);

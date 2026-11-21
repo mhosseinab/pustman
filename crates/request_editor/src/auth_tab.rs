@@ -64,6 +64,12 @@ use crate::variable_highlight;
 /// scale: a picker menu is anchored just under it (`body_tab`).
 const CONTROL_HEIGHT_PX: f32 = 28.;
 
+/// The name column's width in pixels: fits "Username"/"Password" with room to spare.
+const NAME_COLUMN_WIDTH_PX: f32 = 96.;
+
+/// The form's widest extent in rems: past it a field only grows emptier.
+const FORM_MAX_WIDTH_REMS: f32 = 40.;
+
 /// Test hook: the inherited-source line under the type picker.
 pub const INHERITED_SOURCE_SELECTOR: &str = "auth-inherited-source";
 
@@ -606,7 +612,7 @@ impl AuthTab {
                         self.api_key_location.unwrap_or(ApiKeyLocation::Header),
                     )),
                 )
-                .size(ButtonSize::Default)
+                .size(ButtonSize::Medium)
                 .end_icon(Icon::new(IconName::ChevronDown).size(IconSize::Small))
                 .tooltip(Tooltip::text("Where the API key is sent"))
                 .focus_handle(self.location_focus_handle.clone())
@@ -648,73 +654,73 @@ impl AuthTab {
             .into_any_element()
     }
 
-    /// The active type's editor.
-    fn render_type_content(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// The active type's form rows under the type row: a note in the control column
+    /// for a type with nothing to edit, otherwise one row per field.
+    fn render_type_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let note = |text: &'static str| {
+            vec![form_row(
+                None,
+                muted_note(text).into_any_element(),
+                None,
+                cx,
+            )]
+        };
         match self.auth_type {
-            AuthType::Inherit => muted_note(
+            AuthType::Inherit => note(
                 "This request uses the auth its folder or collection sets — the source \
                  is named above.",
-            )
-            .into_any_element(),
-            AuthType::None => muted_note(
+            ),
+            AuthType::None => note(
                 "This request is sent without credentials: no Authorization header is \
                  added to the send.",
-            )
-            .into_any_element(),
-            AuthType::Basic => v_flex()
-                .gap(DynamicSpacing::Base03.rems(cx))
-                .child(self.render_field(
-                    SharedString::new_static("Username"),
-                    &self.basic_username_input,
+            ),
+            AuthType::Basic => vec![
+                self.render_field("username", "Username", &self.basic_username_input, cx),
+                self.render_field("password", "Password", &self.basic_password_input, cx),
+            ],
+            AuthType::Bearer => {
+                vec![self.render_field("token", "Token", &self.bearer_token_input, cx)]
+            }
+            AuthType::ApiKey => vec![
+                self.render_field("key", "Key", &self.api_key_name_input, cx),
+                self.render_field("value", "Value", &self.api_key_value_input, cx),
+                form_row(
+                    Some(("location", "Add to")),
+                    self.render_location_control(cx),
+                    None,
                     cx,
-                ))
-                .child(self.render_field(
-                    SharedString::new_static("Password"),
-                    &self.basic_password_input,
-                    cx,
-                ))
-                .into_any_element(),
-            AuthType::Bearer => v_flex()
-                .gap(DynamicSpacing::Base03.rems(cx))
-                .child(self.render_field(
-                    SharedString::new_static("Token"),
-                    &self.bearer_token_input,
-                    cx,
-                ))
-                .into_any_element(),
-            AuthType::ApiKey => v_flex()
-                .gap(DynamicSpacing::Base03.rems(cx))
-                .child(self.render_field(
-                    SharedString::new_static("Key"),
-                    &self.api_key_name_input,
-                    cx,
-                ))
-                .child(self.render_field(
-                    SharedString::new_static("Value"),
-                    &self.api_key_value_input,
-                    cx,
-                ))
-                .child(self.render_location_control(cx))
-                .into_any_element(),
-            AuthType::Unsupported => muted_note(
+                ),
+            ],
+            AuthType::Unsupported => note(
                 "This auth uses a type Pustman does not edit yet (for example Digest or \
                  OAuth 2.0). It is kept exactly as imported until you choose a type above.",
-            )
-            .into_any_element(),
+            ),
         }
     }
 
-    /// One labelled field: the label over its stored input.
+    /// One labelled field: its name in the name column, its framed input in the
+    /// control column.
     fn render_field(
         &self,
-        label: SharedString,
+        key: &'static str,
+        label: &'static str,
         input: &Entity<TextInput>,
         cx: &App,
-    ) -> impl IntoElement {
-        v_flex()
-            .gap(DynamicSpacing::Base01.rems(cx))
-            .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
+    ) -> AnyElement {
+        // A column, not a centred row: the input has no width of its own, so it takes
+        // the frame's width only when the cross axis stretches it.
+        let field = v_flex()
+            .w_full()
+            .h(px_to_rems(CONTROL_HEIGHT_PX))
+            .justify_center()
+            .min_w_0()
+            .border_1()
+            .border_color(cx.theme().colors().border)
+            .rounded_sm()
+            .px(DynamicSpacing::Base06.rems(cx))
             .child(input.clone())
+            .into_any_element();
+        form_row(Some((key, label)), field, None, cx)
     }
 
     /// The REQ-VAR-SHARE-03 hint under the fields: a nudge, never a block.
@@ -745,18 +751,83 @@ impl AuthTab {
 
 impl Render for AuthTab {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let type_row = form_row(
+            Some(("type", "Type")),
+            self.render_type_control(cx),
+            // Only Inherit takes its auth from a parent; for any other type the
+            // source line would name a chain the send never reads.
+            (self.auth_type == AuthType::Inherit).then(|| self.render_inherited_source(cx)),
+            cx,
+        );
+        let hint = self.secret_hint.then(|| {
+            form_row(
+                None,
+                self.render_secret_hint(cx).into_any_element(),
+                None,
+                cx,
+            )
+        });
+        let rows = self.render_type_rows(cx);
         v_flex()
             .id(ElementId::Name(SharedString::new_static("auth-tab")))
             .size_full()
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .gap(DynamicSpacing::Base04.rems(cx))
-            .child(self.render_type_control(cx))
-            .child(self.render_inherited_source(cx))
-            .child(self.render_type_content(cx))
-            .children(self.secret_hint.then(|| self.render_secret_hint(cx)))
+            .overflow_y_scroll()
+            .child(
+                v_flex()
+                    .w_full()
+                    .max_w(rems(FORM_MAX_WIDTH_REMS))
+                    .gap(DynamicSpacing::Base06.rems(cx))
+                    .py(DynamicSpacing::Base06.rems(cx))
+                    .child(type_row)
+                    .children(rows)
+                    .children(hint),
+            )
     }
+}
+
+/// One form row: the name (if any) in the fixed name column, vertically centred on the
+/// control, and the control — with an optional line under it — in the control column,
+/// so every row of the tab lines up like the Settings tab.
+fn form_row(
+    name: Option<(&'static str, &'static str)>,
+    control: AnyElement,
+    under: Option<AnyElement>,
+    cx: &App,
+) -> AnyElement {
+    let label = h_flex()
+        .flex_none()
+        .w(px_to_rems(NAME_COLUMN_WIDTH_PX))
+        .h(px_to_rems(CONTROL_HEIGHT_PX))
+        .items_center()
+        .children(name.map(|(key, text)| {
+            div()
+                .debug_selector(move || format!("auth-label-{key}"))
+                .child(Label::new(SharedString::new_static(text)).color(Color::Muted))
+        }));
+    let control = match name {
+        Some((key, _)) => div()
+            .debug_selector(move || format!("auth-control-{key}"))
+            .child(control)
+            .into_any_element(),
+        None => control,
+    };
+    h_flex()
+        .items_start()
+        .min_w_0()
+        .gap(DynamicSpacing::Base08.rems(cx))
+        .child(label)
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap(DynamicSpacing::Base02.rems(cx))
+                .child(control)
+                .children(under),
+        )
+        .into_any_element()
 }
 
 /// One stored, tab-reachable field: a single-line [`TextInput`] reporting edits back
@@ -850,3 +921,7 @@ fn floating_menu(menu: &Option<Entity<ContextMenu>>, cx: &App) -> Option<AnyElem
 #[cfg(test)]
 #[path = "auth_tab_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "auth_tab_layout_tests.rs"]
+mod layout_tests;
