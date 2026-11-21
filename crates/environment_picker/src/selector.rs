@@ -36,8 +36,10 @@ use workspace::Workspace;
 mod tests;
 
 /// The label of the first-class "No environment" option: picking it clears the stored
-/// selection (pack screen S07's "No active environment" state).
-const NO_ENVIRONMENT_LABEL: &str = "No environment";
+/// selection (pack screen S07's "No active environment" state). It is also what the
+/// status bar's active-environment readout shows while none is active — one concept, one
+/// string.
+pub const NO_ENVIRONMENT_LABEL: &str = "No environment";
 
 /// The one message a failed selection write shows (AGENTS.md: errors reach the user,
 /// never only a log) — what the user should know: the choice is real for this session.
@@ -152,6 +154,13 @@ impl EnvironmentSelector {
     /// contract: a failed write becomes an error toast on the workspace.
     fn select(&mut self, choice: Option<ItemId>, cx: &mut Context<Picker<Self>>) {
         self.active = choice;
+        // The confirmed choice replaces what the installed inputs carry, so the status
+        // bar's active-environment readout and this picker's own preselection follow the
+        // user instead of going stale (REQ-VAR-08). Inputs installed only after a choice
+        // is made are not overwritten here.
+        if cx.has_global::<SelectorInputs>() {
+            cx.global_mut::<SelectorInputs>().active = choice;
+        }
         cx.notify();
         let key = selection_key(&self.workspace_id);
         let store = Arc::clone(&self.store);
