@@ -29,9 +29,8 @@ impl Pane {
         self.push_tab(Box::new(item), Some(observer), cx);
     }
 
-    /// Open a new tab (`NewTab`). Until the request editor lands, the new tab is a
-    /// [`Welcome`] item — the empty-state item doubles as the placeholder tab content
-    /// (Decision).
+    /// Open a [`Welcome`] tab: what `NewTab` falls back to when no crate answers
+    /// `NewRequest` (see `Workspace::new_tab`).
     pub fn new_tab(&mut self, cx: &mut Context<Self>) {
         let welcome = cx.new(Welcome::new);
         self.add_tab_item(welcome, cx);

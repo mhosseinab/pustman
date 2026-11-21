@@ -35,7 +35,7 @@ use gpui::{
     App, Context, Decorations, Entity, FocusHandle, Focusable, ParentElement, Render, Window,
 };
 use pustman_actions::workspace::{
-    CloseTab, NewTab, NextTab, PreviousTab, ToggleConsole, ToggleSidebar,
+    CloseTab, NewRequest, NewTab, NextTab, PreviousTab, ToggleConsole, ToggleSidebar,
 };
 use ui::prelude::*;
 
@@ -109,9 +109,15 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Open a new tab in the center pane (REQ-UI-02).
-    fn new_tab(&mut self, _: &NewTab, _window: &mut Window, cx: &mut Context<Self>) {
-        self.center_pane.update(cx, |pane, cx| pane.new_tab(cx));
+    /// Open a new tab in the center pane (REQ-UI-02). A tab is a request, so in the app
+    /// this hands over to whichever crate answers `NewRequest` (`request_editor`, which
+    /// this crate cannot depend on); without one, the pane opens a Welcome tab.
+    fn new_tab(&mut self, _: &NewTab, window: &mut Window, cx: &mut Context<Self>) {
+        if cx.is_action_available(&NewRequest) {
+            window.dispatch_action(Box::new(NewRequest), cx);
+        } else {
+            self.center_pane.update(cx, |pane, cx| pane.new_tab(cx));
+        }
     }
 
     /// Close the active tab in the center pane (REQ-UI-02).
