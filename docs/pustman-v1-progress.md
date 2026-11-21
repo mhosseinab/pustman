@@ -61,7 +61,7 @@ These run at the next human sign-off and are recorded in that sign-off's step re
 
 ## Window
 
-Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending) · unpromoted passed steps: S26–S37 (12 plan steps, 42 sub-step commits) · unapplied deltas: 0 (cap 3 / 16). Segment 3 reopened: S33e + S33w (driver-added) must pass before S38 M1 SIGN-OFF (HUMAN), which covers the E2E display checks S26/S28/S32 and then the human "go" for tag `release/pustman-v1-3`.
+Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending) · unpromoted passed steps: S26–S37 (12 plan steps, 42 sub-step commits) · unapplied deltas: 0 (cap 3 / 16). Segment 3 complete (S33e + S33w passed). Next gate: S38 M1 SIGN-OFF (HUMAN), which covers the E2E display checks S26/S28/S32 and then the human "go" for tag `release/pustman-v1-3`.
 
 ## Status
 
@@ -106,7 +106,7 @@ Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending)
 | S31 | Timeline tab: phases, network info, redirect chain, resolved request as sent | passed | | #171, #172, #184 | [S31a](progress/pustman-v1/steps/S31a.md), [S31b](progress/pustman-v1/steps/S31b.md) | S31a, S31b (`2987446`) passed |
 | S32 | `console` crate (bottom dock) | passed | `64fd088` | #166, #167 | [S32a](progress/pustman-v1/steps/S32a.md), [S32b](progress/pustman-v1/steps/S32b.md), [S32c](progress/pustman-v1/steps/S32c.md), [S32d](progress/pustman-v1/steps/S32d.md), [S32w](progress/pustman-v1/steps/S32w.md) | S32a–S32w passed; completed sends not yet logged (#167) |
 | S33 | Variable highlighting, autocomplete, hover, pre-send warning | passed | 0 | #188–#195 | [S33a](progress/pustman-v1/steps/S33a.md), [S33b](progress/pustman-v1/steps/S33b.md), [S33c](progress/pustman-v1/steps/S33c.md), [S33d](progress/pustman-v1/steps/S33d.md) | S33a (`344875f`), S33b (`b17a5fe`), S33c (`4c51d60`), S33d (`56f1ae8`) passed |
-| S33e | Send through the full pipeline with the editor's scopes (driver-added, S38 prereq) | pending | 0 | | |  |
+| S33e | Send through the full pipeline with the editor's scopes (driver-added, S38 prereq) | passed | 1 | 8865478 | [S33e](progress/pustman-v1/steps/S33e.md) | LOW #197 #198 |
 | S33w | Wire history recording into the app's HTTP client (driver-added, S38 prereq) | passed | 1 | fa5ae26 | [S33w](progress/pustman-v1/steps/S33w.md) | LOW #196 |
 | S34 | `environment_picker` + quick-look | passed | | | [S34a](progress/pustman-v1/steps/S34a.md), [S34b](progress/pustman-v1/steps/S34b.md), [S34w](progress/pustman-v1/steps/S34w.md) | S34a (`d7928d5`), S34b (`dd8e4ce`), S34w (`2f0c3ed`) passed |
 | S35 | `history_panel` | passed | | | [S35a](progress/pustman-v1/steps/S35a.md), [S35b](progress/pustman-v1/steps/S35b.md), [S35c](progress/pustman-v1/steps/S35c.md), [S35d](progress/pustman-v1/steps/S35d.md), [S35w](progress/pustman-v1/steps/S35w.md) | S35a (`cb0be4c`), S35b (`d0fdcf2`), S35c (`d32857d`), S35d (`2f1ca4d`, driver-added; closes #141) passed; S35w (`d738c28`) passed — all sub-steps merged |
