@@ -21,6 +21,7 @@ use variables::ScopeStack;
 use crate::method;
 use crate::variable_autocomplete::VariableAutocomplete;
 use crate::variable_highlight;
+use crate::variable_hover::VariableHover;
 
 /// The height of one method control (a [`ButtonSize::Medium`]) in pixels at the default
 /// scale: the dropdown is anchored just under it.
@@ -68,6 +69,10 @@ pub struct UrlBar {
     /// The `{{variable}}` autocomplete behind the URL field (REQ-VAR-04): the popover
     /// under the input, driven from the input's edits (`variable_autocomplete`).
     autocomplete: Entity<VariableAutocomplete>,
+    /// The `{{variable}}` hover behind the URL field (REQ-VAR-03): the value and scope
+    /// popover over a highlighted placeholder (`variable_hover`). It wraps the
+    /// autocomplete, so the one attach point over the field hosts both affordances.
+    hover: Entity<VariableHover>,
     _url_subscription: Subscription,
 }
 
@@ -83,8 +88,12 @@ impl UrlBar {
         // in the tab order right after the method control.
         url_input.read(cx).focus_handle(cx).tab_stop(true);
         let url_subscription = cx.subscribe_in(&url_input, window, Self::on_url_event);
-        // The `{{variable}}` popover completes this field (REQ-VAR-04).
+        // The `{{variable}}` popover completes this field (REQ-VAR-04), and the hover
+        // over a highlighted placeholder wraps it (REQ-VAR-03).
         let autocomplete = cx.new(|cx| VariableAutocomplete::new(url_input.clone(), window, cx));
+        let hover = cx.new(|cx| {
+            VariableHover::new(url_input.clone(), autocomplete.clone().into(), window, cx)
+        });
         let bar = Self {
             method,
             url_input,
@@ -96,6 +105,7 @@ impl UrlBar {
             custom_error: None,
             scopes: Arc::new(ScopeStack::new()),
             autocomplete,
+            hover,
             _url_subscription: url_subscription,
         };
         bar.refresh_highlights(cx);
@@ -108,10 +118,14 @@ impl UrlBar {
     }
 
     /// Store the scopes the URL highlights against and re-highlight it (REQ-VAR-03);
-    /// the autocomplete offers their names (REQ-VAR-04).
+    /// the autocomplete offers their names (REQ-VAR-04) and the hover reads their
+    /// values (REQ-VAR-03).
     pub fn set_scopes(&mut self, scopes: Arc<ScopeStack>, cx: &mut Context<Self>) {
         self.autocomplete.update(cx, |autocomplete, cx| {
             autocomplete.set_scopes(scopes.clone(), cx);
+        });
+        self.hover.update(cx, |hover, cx| {
+            hover.set_scopes(scopes.clone(), cx);
         });
         self.scopes = scopes;
         self.refresh_highlights(cx);
@@ -121,6 +135,12 @@ impl UrlBar {
     /// and later fields reach into.
     pub fn autocomplete(&self) -> &Entity<VariableAutocomplete> {
         &self.autocomplete
+    }
+
+    /// The `{{variable}}` hover behind the URL field (REQ-VAR-03) — what tests and the
+    /// editor's secret wiring reach into.
+    pub fn hover(&self) -> &Entity<VariableHover> {
+        &self.hover
     }
 
     /// Re-highlight the URL against the current scopes.
@@ -393,7 +413,7 @@ impl Render for UrlBar {
                             .border_color(cx.theme().colors().border)
                             .rounded_sm()
                             .px(DynamicSpacing::Base04.rems(cx))
-                            .child(self.autocomplete.clone()),
+                            .child(self.hover.clone()),
                     ), // S26b's Send button lands at the end of this row.
             )
             .children(

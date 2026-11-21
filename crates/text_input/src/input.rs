@@ -1112,7 +1112,11 @@ impl TextInput {
     /// The caret offset under a mouse position, through the shaped line from the last
     /// paint. Before the first paint there is no geometry to hit, so the caret goes to
     /// the text start.
-    fn index_for_mouse_position(&self, position: Point<Pixels>) -> usize {
+    ///
+    /// Public as a read-only accessor for callers that hit-test the field's text from
+    /// outside the field (the request editor's variable hover uses it to learn which
+    /// placeholder the pointer is over); it changes nothing.
+    pub fn index_for_mouse_position(&self, position: Point<Pixels>) -> usize {
         if self.state.is_empty() {
             return 0;
         }

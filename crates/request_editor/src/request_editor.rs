@@ -25,6 +25,7 @@ mod unresolved_warning;
 pub mod url_bar;
 pub mod variable_autocomplete;
 mod variable_highlight;
+mod variable_hover;
 
 use api_model::{HttpRequest, RequestSettings};
 use gpui::{

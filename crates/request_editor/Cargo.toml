@@ -31,4 +31,5 @@ workspace.workspace = true
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
 http_engine = { workspace = true, features = ["test-support"] }
+secrets = { workspace = true, features = ["test-support"] }
 ui = { workspace = true, features = ["test-support"] }
