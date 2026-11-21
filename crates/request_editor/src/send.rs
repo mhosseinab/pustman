@@ -1,9 +1,19 @@
 //! Sending the request this tab edits, and cancelling it (PRD REQ-HTTP-12, REQ-RESP-01).
 //!
-//! `request::Send` (Ctrl/Cmd-Enter) sends through [`HttpClient::send`] and stores the
-//! task in `RequestEditor::pending_send`: replacing it cancels the request before it,
-//! exactly as AGENTS.md prescribes for a dropped `Task`. `request::Cancel` (Escape)
-//! drops the task and aborts the connection. What the send produced lands in the
+//! `request::Send` (Ctrl/Cmd-Enter) sends through [`HttpClient::send_request`] and
+//! stores the task in `RequestEditor::pending_send`: replacing it cancels the request
+//! before it, exactly as AGENTS.md prescribes for a dropped `Task`. `request::Cancel`
+//! (Escape) drops the task and aborts the connection.
+//!
+//! The send is the full pipeline (S33e): the draft resolves against the editor's own
+//! scopes — `RequestEditor`'s `scopes`, the very stack the fields highlight and hover
+//! against — the Auth tab's auth applies, referenced secrets come from the keychain
+//! through the editor's `variable_hover` `SecretSources`, and the client records
+//! history. One variable set feeds the highlighting, the pre-send check and the request
+//! on the wire. Every finished send records exactly one Console outcome and every
+//! failed send one Console Error entry (REQ-CON-01, REQ-CON-04); a cancelled send
+//! records none here, because `console::watch` in the binary already records it
+//! (REQ-HTTP-12) — never a second write. What the send produced lands in the
 //! [`response_viewer::ResponseView`] embedded below the request panes (S29e) — its own
 //! status line and body — while the editor keeps the [`StatusLine`] facts computed from
 //! the response so `RequestEditor::status_line()` still reports them. A failure lands
@@ -24,14 +34,15 @@
 //! `FakeTransport`. `request_editor::init` cannot install one either: the transport is
 //! an app-level wiring decision.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
-use api_model::SecretValues;
-use console::{ConsoleStore, record_outcome};
+use api_model::HttpRequest;
+use console::{ConsoleStore, record_error, record_outcome};
 use gpui::{App, Context, Entity, Global, Role, Window};
 use http_engine::{
-    AppliedAuth, HttpClient, PipelineError, ResolvedRequest, Response, ResponseBody, SendOutcome,
-    TransportError, Warning, resolve_request,
+    HttpClient, PipelineError, Response, ResponseBody, SendInput, SendOutcome, TransportError,
+    resolve_request,
 };
 use pustman_actions::request;
 use ui::prelude::*;
@@ -193,8 +204,9 @@ impl RequestEditor {
     }
 
     /// Send the draft; `send_unresolved` names the one caller that means "anyway".
-    /// Environments are not wired into the editor yet, so the draft resolves against no
-    /// variables: unresolved names stay literal and go out as they are (REQ-VAR-07).
+    /// The pre-send check and the send resolve against the same `self.scopes`, so the
+    /// bar only ever holds names really unresolved against the editor's scopes, and
+    /// those names stay literal and go out as they are (REQ-VAR-07).
     fn begin_send(&mut self, cx: &mut Context<Self>, send_unresolved: bool) {
         let Some(client) = cx
             .try_global::<RequestClient>()
@@ -208,29 +220,43 @@ impl RequestEditor {
             cx.notify();
             return;
         };
-        let (resolved, warnings) =
-            match resolve_request(&self.draft, &ScopeStack::new(), &mut DynamicValues::new()) {
-                Ok(resolved) => resolved,
-                Err(error) => {
-                    self.fail_send(&error, cx);
-                    return;
-                }
-            };
+        // What the send carries is also what a failure's Console entry names.
+        let sent = self.draft.clone();
+        let warnings = match resolve_request(&self.draft, &self.scopes, &mut DynamicValues::new()) {
+            Ok((_, warnings)) => warnings,
+            Err(error) => {
+                self.fail_send(&sent, &error, cx);
+                return;
+            }
+        };
         if !send_unresolved && let Some(names) = unresolved_names(&warnings) {
             self.unresolved_warning = Some(UnresolvedWarning::new(names.to_vec()));
             cx.notify();
             return;
         }
         self.unresolved_warning = None;
-        let sent_request = resolved.clone();
-        let send_task = client.update(cx, |client, cx| client.send(resolved, cx));
+        let input = SendInput {
+            request: sent.clone(),
+            // The Auth tab's parent chain, nearest first — `prepare`'s own contract —
+            // so the wire carries exactly the effective auth the tab previews. It is
+            // empty in M1: nothing calls `AuthTab::set_parents` outside tests yet.
+            ancestors: self
+                .auth_tab
+                .read(cx)
+                .parents()
+                .iter()
+                .map(|(_, auth)| auth.clone())
+                .collect(),
+            scopes: scopes_for_send(&self.scopes),
+            secrets: self.secret_sources.store.clone(),
+            secret_key: self.secret_sources.key_of.clone(),
+        };
+        let send_task = client.update(cx, |client, cx| client.send_request(input, cx));
         self.inline_error = None;
         self.tls_offer_error = None;
         self.pending_send = Some(cx.spawn(async move |this, cx| {
             let result = send_task.await;
-            let landed = this.update(cx, |editor, cx| {
-                editor.finish_send(result, sent_request, warnings, cx)
-            });
+            let landed = this.update(cx, |editor, cx| editor.finish_send(result, sent, cx));
             if landed.is_err() {
                 // Handled: the tab closed while the request was in flight; there is no
                 // status line left to write to.
@@ -253,10 +279,20 @@ impl RequestEditor {
         cx.notify();
     }
 
-    /// A send that never reached the transport failed while being prepared: show why
-    /// inline, exactly as a transport failure is shown.
-    fn fail_send(&mut self, error: &PipelineError, cx: &mut Context<Self>) {
+    /// A send that failed before or at the transport: one Console Error entry
+    /// (REQ-CON-01/04) and the failure shown inline, exactly as a transport failure is
+    /// shown. This is the one place a failed send lands and the one place its Console
+    /// entry is written — [`console::feed`]'s [`record_error`] does the redacting.
+    /// `sent` is the request as the send had it, for the entry's summary line.
+    ///
+    /// `Decision:` the write keeps the [`ConsoleStore`]-global guard of the warned-send
+    /// write it replaces: a host that has not installed the console store (an editor
+    /// test without `console::init`) records nothing rather than crashing the send path.
+    fn fail_send(&mut self, sent: &HttpRequest, error: &PipelineError, cx: &mut Context<Self>) {
         self.pending_send = None;
+        if cx.try_global::<ConsoleStore>().is_some() {
+            record_error(Some(sent), error, cx);
+        }
         match error {
             PipelineError::Transport(error) => self.show_transport_error(error, cx),
             // `ResolveError` carries no `suggested_fix` of its own (its `Display` names
@@ -291,29 +327,32 @@ impl RequestEditor {
 
     /// The send ended: the response goes to the embedded
     /// [`response_viewer::ResponseView`] (and its facts to `status_line()`), or the
-    /// failure shows inline and in the viewer's error panel. A send that carried
-    /// warnings carries them into the Console too (REQ-VAR-07) — the outcome is their
-    /// one write.
+    /// failure shows inline and in the viewer's error panel through [`Self::fail_send`].
+    /// Either way this is the send's one Console write (REQ-CON-01): a finished send's
+    /// [`record_outcome`] carries its warnings into the Console with it (REQ-VAR-07),
+    /// and a failed send's entry comes from [`Self::fail_send`].
     fn finish_send(
         &mut self,
-        result: Result<Response, TransportError>,
-        sent_request: ResolvedRequest,
-        warnings: Vec<Warning>,
+        result: Result<SendOutcome, PipelineError>,
+        sent: HttpRequest,
         cx: &mut Context<Self>,
     ) {
         self.pending_send = None;
         match result {
-            Ok(response) => {
-                self.status_line = Some(StatusLine::from_response(&response));
+            Ok(outcome) => {
+                self.status_line = Some(StatusLine::from_response(&outcome.response));
                 self.inline_error = None;
                 self.tls_offer_error = None;
-                log_warned_outcome(&sent_request, &response, &warnings, cx);
+                if cx.try_global::<ConsoleStore>().is_some() {
+                    record_outcome(&outcome, cx);
+                }
                 self.response_view
-                    .update(cx, |view, cx| view.set_response(response, cx));
+                    .update(cx, |view, cx| view.set_response(outcome.response, cx));
             }
-            // A cancelled or replaced send is not a failure to report (REQ-HTTP-12).
-            Err(TransportError::Cancelled) => {}
-            Err(error) => self.show_transport_error(&error, cx),
+            // A cancelled or replaced send is not a failure to report (REQ-HTTP-12) and
+            // records nothing here: `console::watch` in the binary already records it.
+            Err(PipelineError::Transport(TransportError::Cancelled)) => {}
+            Err(error) => self.fail_send(&sent, &error, cx),
         }
         cx.notify();
     }
@@ -505,36 +544,32 @@ impl RequestEditor {
     }
 }
 
-/// Hand a finished send that carries warnings to the Console (REQ-VAR-07: "sending
-/// anyway is logged in the Console"; REQ-CON-04) through `console::feed`'s
-/// [`record_outcome`] — the warning travels with the send's outcome, and this is the one
-/// and only Console write, never a second one beside it.
-///
-/// `Decision:` only warned sends record here. Every-send recording is the console feed's
-/// own wiring (`record_outcome` is its API), and this send path applies no auth and
-/// resolves against no scopes — so the outcome reports `AppliedAuth::None` and an empty
-/// redaction set, exactly as the request went out. A host that has not installed the
-/// console store (an editor test without `console::init`) records nothing rather than
-/// crashing the send path.
-fn log_warned_outcome(
-    request: &ResolvedRequest,
-    response: &Response,
-    warnings: &[Warning],
-    cx: &mut App,
-) {
-    if warnings.is_empty() || cx.try_global::<ConsoleStore>().is_none() {
-        return;
+/// The editor's scopes as the owned [`ScopeStack`] one [`SendInput`] takes: the send
+/// runs on the background executor and takes the stack by value, while the editor keeps
+/// sharing its own (an `Arc`) with every field. The rebuild is the shape
+/// `http_engine::prepare` itself uses (`scopes_with_secrets`): copy the scopes and, with
+/// them, the local values — which resolution reads only by variable key
+/// (`ScopeStack::find`), so nothing a send can observe is lost (S33e).
+fn scopes_for_send(scopes: &ScopeStack) -> ScopeStack {
+    let mut local_values = BTreeMap::new();
+    for scope in scopes.scopes() {
+        for variable in &scope.variables {
+            if let Some(value) = scopes.local_value(&variable.key) {
+                local_values.insert(variable.key.clone(), value.to_string());
+            }
+        }
     }
-    let outcome = SendOutcome {
-        request: request.clone(),
-        response: response.clone(),
-        warnings: warnings.to_vec(),
-        auth: AppliedAuth::None,
-        secrets_used: SecretValues::new(),
-    };
-    record_outcome(&outcome, cx);
+    let mut owned = ScopeStack::with_local_values(local_values);
+    for scope in scopes.scopes() {
+        owned.push(scope.kind, scope.variables.clone());
+    }
+    owned
 }
 
 #[cfg(test)]
 #[path = "send_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "send_pipeline_tests.rs"]
+mod pipeline_tests;

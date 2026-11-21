@@ -165,6 +165,10 @@ impl RequestEditor {
         auth_tab.update(cx, |tab, cx| tab.set_parents(parents, cx));
         self._auth_tab_subscription = cx.subscribe_in(&auth_tab, window, Self::on_auth_tab_event);
         self.auth_tab = auth_tab;
+        // The rebuilt fields hold empty scopes until the editor's own are pushed into
+        // them again — `{{variables}}` must keep resolving against one set everywhere
+        // (S33e).
+        self.refresh_highlights(cx);
         self.inline_error = None;
         cx.notify();
         // The paste happened in the URL field; the rebuilt bar is a new field to type

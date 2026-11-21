@@ -94,7 +94,10 @@ const POPOVER_WIDTH_PX: f32 = 320.;
 /// only the caller knows the workspace and scope ids). The default has neither — a store that has
 /// nothing and a key for nothing — so a secret hovers as "unset" and no code path can
 /// reach the OS keychain before the app wires its stores (a keychain read can prompt,
-/// macOS). The later wiring step fills both through the same setter.
+/// macOS). The later wiring step fills both through the same setter. `Clone` because
+/// two consumers share it: the editor keeps one copy for the send (`send`'s
+/// `SendInput`, S33e) and hands the hover its own.
+#[derive(Clone)]
 pub struct SecretSources {
     /// The keychain the reveal's background task reads.
     pub store: Arc<dyn SecretStore>,
@@ -644,8 +647,11 @@ impl RequestEditor {
     /// Where a hovered secret's value comes from (REQ-VAR-03): the store the reveal
     /// reads and the one door to its keychain key ([`SecretSources`]). The later wiring
     /// step provides the workspace and scope ids the same way. Until this is called
-    /// nothing can reach the OS keychain and a secret hovers as "unset".
+    /// nothing can reach the OS keychain and a secret hovers as "unset". The editor
+    /// keeps its own copy of the sources for the send (`send`'s `SendInput`, S33e) and
+    /// hands the hover the one it reads.
     pub fn set_secret_sources(&mut self, sources: SecretSources, cx: &mut Context<Self>) {
+        self.secret_sources = sources.clone();
         let hover = self.url_bar.read(cx).hover().clone();
         hover.update(cx, |hover, cx| hover.set_secret_sources(sources, cx));
     }

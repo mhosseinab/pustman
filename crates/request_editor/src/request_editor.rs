@@ -44,6 +44,7 @@ use send::{InlineError, StatusLine};
 use settings_tab::{SettingChange, SettingsTab, SettingsTabEvent};
 use unresolved_warning::UnresolvedWarning;
 use url_bar::{UrlBar, UrlBarEvent};
+use variable_hover::SecretSources;
 
 /// The key context the editor answers the keyboard in; `assets/keymaps/` binds
 /// `request::Send`, `request::Cancel` and `request::FocusUrlBar` against it.
@@ -120,6 +121,11 @@ pub struct RequestEditor {
     /// `variable_highlight` owns the API around it (`set_scopes`), shared with the
     /// field modules as an `Arc` because `ScopeStack` is not `Clone`.
     scopes: std::sync::Arc<variables::ScopeStack>,
+    /// Where the send's secret values come from (`variable_hover`'s [`SecretSources`]):
+    /// the store `http_engine::SendInput` reads and the one door to a secret's keychain
+    /// key. The default reads nothing, which is the M1 behaviour; `set_secret_sources`
+    /// fills it — and the hover's own copy — when the secret stores are wired (S43w).
+    secret_sources: SecretSources,
     _url_bar_subscription: Subscription,
     _params_subscription: Subscription,
     _headers_subscription: Subscription,
@@ -199,6 +205,7 @@ impl RequestEditor {
             split_focus: cx.focus_handle().tab_stop(true),
             split_fraction: response_split::DEFAULT_SPLIT_FRACTION,
             scopes: std::sync::Arc::new(variables::ScopeStack::new()),
+            secret_sources: SecretSources::default(),
             _url_bar_subscription: url_bar_subscription,
             _params_subscription: params_subscription,
             _headers_subscription: headers_subscription,

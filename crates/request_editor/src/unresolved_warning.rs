@@ -3,19 +3,21 @@
 //! names, offers "Send anyway" and can be dismissed. The check re-runs on every draft
 //! edit and every send (`recheck_unresolved`), so the bar always names what the request
 //! has *now* — a fixed variable takes it down and a new one brings it back. The warning
-//! also travels with the send's outcome into the Console (`send`'s `log_warned_outcome`
-//! via `console::feed`): one write, never a second one beside it.
+//! also travels with the send's outcome into the Console (`send`'s `record_outcome` via
+//! `console::feed`): one write, never a second one beside it.
 //!
-//! `Decision:` the bar's names come from `resolve_request` with the same empty
-//! [`ScopeStack`] the send resolves with — wiring the editor's environment scopes is not
-//! this step's job, and the check must agree with the very send it guards. Cmd/Ctrl-Enter
+//! `Decision:` the bar's names come from `resolve_request` against the editor's own
+//! scopes (`RequestEditor`'s `scopes`) — the very stack the send resolves with (S33e),
+//! so the check always agrees with the send it guards. Nothing outside tests calls
+//! `RequestEditor::set_scopes` until the M2 environment wire (S43w), so that stack is
+//! empty in practice and every name is unresolved — the truth today. Cmd/Ctrl-Enter
 //! while the bar shows re-checks and shows the bar again; only the bar's own "Send anyway"
 //! sends with unresolved names.
 
 use gpui::{AnyElement, Context, Window};
 use http_engine::{Warning, resolve_request};
 use ui::prelude::*;
-use variables::{DynamicValues, ScopeStack};
+use variables::DynamicValues;
 
 use crate::RequestEditor;
 
@@ -92,19 +94,20 @@ impl RequestEditor {
 
     /// Re-run the pre-send check on the draft as it is now (REQ-VAR-07): an edit or a
     /// send re-checks, so the bar lists the names the request has after the change — or
-    /// disappears once the change resolved them. A draft that does not resolve at all
-    /// (an unparseable URL mid-edit, a variable cycle) has no warning to show: the send
-    /// itself reports that failure when the user tries it.
+    /// disappears once the change resolved them. The check resolves against the editor's
+    /// scopes — the same stack the send uses (S33e) — so only names really unresolved
+    /// raise the bar. A draft that does not resolve at all (an unparseable URL mid-edit,
+    /// a variable cycle) has no warning to show: the send itself reports that failure
+    /// when the user tries it.
     pub(super) fn recheck_unresolved(&mut self, cx: &mut Context<Self>) {
-        let checked =
-            match resolve_request(&self.draft, &ScopeStack::new(), &mut DynamicValues::new()) {
-                Ok((_, warnings)) => {
-                    unresolved_names(&warnings).map(|names| UnresolvedWarning::new(names.to_vec()))
-                }
-                // A request that cannot resolve has no names to warn about; `begin_send`
-                // turns the failure into the inline error it deserves.
-                Err(_) => None,
-            };
+        let checked = match resolve_request(&self.draft, &self.scopes, &mut DynamicValues::new()) {
+            Ok((_, warnings)) => {
+                unresolved_names(&warnings).map(|names| UnresolvedWarning::new(names.to_vec()))
+            }
+            // A request that cannot resolve has no names to warn about; `begin_send`
+            // turns the failure into the inline error it deserves.
+            Err(_) => None,
+        };
         if checked != self.unresolved_warning {
             self.unresolved_warning = checked;
             cx.notify();

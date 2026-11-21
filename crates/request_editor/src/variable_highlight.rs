@@ -14,15 +14,16 @@
 //! existing tokens; no token is added). The hover that shows a value (masked, with a
 //! reveal toggle) is S33c's work, not this module's.
 //!
-//! `Decision:` nothing calls [`RequestEditor::set_scopes`] yet — the environment
-//! picker (S34) owns the active scopes and wires them here. Until then the stack is
-//! empty and every name is unresolved, which is the truth: no scope resolves them. A
-//! whole-request replacement (the cURL import's `replace_request`) rebuilds the field
-//! entities with the empty default, so the `set_scopes` wiring must push the scopes
-//! again after a replacement.
+//! `Decision:` nothing outside tests calls [`RequestEditor::set_scopes`] yet — the M2
+//! environment wire (S43w) owns the active scopes and pushes them here. Until then the
+//! stack is empty and every name is unresolved, which is the truth: no scope resolves
+//! them. A whole-request replacement (the cURL import's `replace_request`) rebuilds the
+//! field entities with the empty default, so `curl_paste` pushes the editor's scopes
+//! into the rebuilt fields again (S33e) — the editor's own stack survives a replacement
+//! and the fields must follow it.
 //!
-//! `Decision:` the send path resolves against its own [`ScopeStack`] for now (`send`,
-//! S33d's file) — highlighting is display-only and never feeds a send.
+//! `Decision:` the send resolves against these very scopes (`send`, S33e): highlighting,
+//! the pre-send check and the request on the wire all read one variable set.
 //!
 
 use std::sync::Arc;
@@ -101,9 +102,11 @@ impl RequestEditor {
     }
 
     /// Push the current scopes into every field; each one re-highlights what it
-    /// edits. Never called from `render` — highlights are computed when state
-    /// changes (AGENTS.md › GPUI).
-    fn refresh_highlights(&self, cx: &mut Context<Self>) {
+    /// edits. Called when the scopes change and after a whole-request replacement
+    /// rebuilds the fields (`curl_paste`'s `replace_request`, S33e), which would
+    /// otherwise hold the empty default. Never called from `render` — highlights are
+    /// computed when state changes (AGENTS.md › GPUI).
+    pub(super) fn refresh_highlights(&self, cx: &mut Context<Self>) {
         let scopes = self.scopes.clone();
         self.url_bar
             .update(cx, |bar, cx| bar.set_scopes(scopes.clone(), cx));
