@@ -11,7 +11,7 @@ use gpui::{
 };
 use theme::ActiveTheme;
 
-use crate::components::behavior::{Clickable, Disableable, Toggleable};
+use crate::components::behavior::{Clickable, Disableable, Toggleable, VisibleOnHover};
 use crate::components::button::{ClickHandler, IconButton};
 use crate::components::label::{Label, LabelSize};
 use crate::components::toggle::ToggleState;
@@ -153,6 +153,12 @@ impl Tab {
     pub fn label(&self) -> &SharedString {
         &self.label
     }
+
+    /// The tab's identity in the frame: the root of the selectors its chrome is found
+    /// under ([`gpui::VisualTestContext::debug_bounds`]).
+    pub(crate) fn selector(&self) -> String {
+        self.id.to_string()
+    }
 }
 
 impl Toggleable for Tab {
@@ -172,11 +178,15 @@ impl Disableable for Tab {
 impl RenderOnce for Tab {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let label = self.label.clone();
-        // Test hooks: `VisualTestContext::debug_bounds` finds this tab and its close
-        // button under these keys.
-        let selector = self.id.to_string();
+        // Test hooks: `VisualTestContext::debug_bounds` finds this tab and its chrome
+        // under these keys.
+        let selector = self.selector();
         let close_selector = format!("{selector}-close");
+        let dot_selector = format!("{selector}-dot");
         let underline_selector = format!("{selector}-underline");
+        // The row hover that swaps the trailing slot's two glyphs: a dirty tab shows its
+        // dot at rest and its close × while the pointer rests on the tab (#214).
+        let hover_group = SharedString::from(format!("{selector}-hover"));
         let tooltip_text = if self.dirty {
             SharedString::from(format!("{label} — unsaved changes"))
         } else {
@@ -202,6 +212,16 @@ impl RenderOnce for Tab {
                     )
                     .size(crate::components::button::ButtonSize::Compact)
                     .icon_size(IconSize::XSmall)
+                    // The × is drawn only where the strip offers it: on the active tab,
+                    // or where the pointer rests (#214). On a dirty tab the dot has the
+                    // slot at rest, so there the × is out of the frame until hover swaps
+                    // them; a clean tab's slot keeps its hit target while its × is faded
+                    // out, so a click that lands before the reveal still closes.
+                    .map(|button| match (self.dirty, active) {
+                        (true, _) => button.visible_on_hover(hover_group.clone()),
+                        (false, true) => button,
+                        (false, false) => button.faded_until_hovered(hover_group.clone()),
+                    })
                     .on_click({
                         let on_close = on_close.clone();
                         move |event, window, cx| on_close(event, window, cx)
@@ -213,6 +233,7 @@ impl RenderOnce for Tab {
         h_flex()
             .id(self.id)
             .debug_selector(|| selector)
+            .group(hover_group.clone())
             .font_ui(cx)
             .role(Role::Tab)
             .aria_label(tooltip_text.clone())
@@ -278,9 +299,19 @@ impl RenderOnce for Tab {
                 if self.dirty {
                     this.child(
                         div()
+                            .debug_selector(move || dot_selector)
                             .size(px_to_rems(DIRTY_DOT_PX))
                             .rounded_full()
-                            .bg(colors.text_accent),
+                            .bg(colors.text_accent)
+                            .map(|this| {
+                                if self.on_close.is_some() && !disabled {
+                                    // The close × takes the dot's place while the tab is
+                                    // hovered (#214): one glyph at a time, never both.
+                                    this.group_hover(hover_group.clone(), |style| style.invisible())
+                                } else {
+                                    this
+                                }
+                            }),
                     )
                 } else {
                     this
