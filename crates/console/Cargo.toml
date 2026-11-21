@@ -30,5 +30,7 @@ gpui = { workspace = true, features = ["test-support"] }
 # to this crate's tests: dev-dependencies unify features with the test build.
 http_engine = { workspace = true, features = ["test-support"] }
 secrets = { workspace = true, features = ["test-support"] }
+# The cancelled-history-row ordering test records through a real `LocalStore`.
+storage.workspace = true
 ui = { workspace = true, features = ["test-support"] }
 variables.workspace = true

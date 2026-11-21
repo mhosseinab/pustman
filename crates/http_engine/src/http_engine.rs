@@ -38,7 +38,7 @@ mod test_server;
 mod test_support;
 mod transport;
 
-pub use client::{HttpClient, SecretKeyLookup, SendEvent, SendInput, SendOutcome};
+pub use client::{HttpClient, SecretKeyLookup, SendEvent, SendIdentity, SendInput, SendOutcome};
 pub use cookie_persistence::{load_jar, save_jar};
 pub use cookies::{CookieEntry, CookieError, CookieJar};
 pub use error::TransportError;
