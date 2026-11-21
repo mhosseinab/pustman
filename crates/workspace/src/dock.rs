@@ -8,6 +8,7 @@
 //! a closed dock renders nothing at all, so the shell lays out around it.
 
 use gpui::{AnyView, Context, IntoElement, ParentElement, Render, Window, div};
+use std::cmp::Ordering;
 use ui::prelude::*;
 
 use crate::panel::PanelHandle;
@@ -144,6 +145,31 @@ impl Dock {
                 }
             }
         }
+        cx.notify();
+    }
+
+    /// Drop the entry registered under `panel_id`, if this dock holds one: the other
+    /// half of moving a panel to another dock by re-registering its id there (S22c
+    /// review) — without it, this dock keeps an entry for a panel that now lives
+    /// elsewhere. The selection follows the entry out: the panel that takes its slot
+    /// becomes active, or the dock empties.
+    pub fn remove_panel(&mut self, panel_id: &str, cx: &mut Context<Self>) {
+        let index = match self
+            .panels
+            .iter()
+            .position(|registered| registered.panel_id(cx) == panel_id)
+        {
+            Some(index) => index,
+            None => return,
+        };
+        self.panels.remove(index);
+        self.active_panel = self
+            .active_panel
+            .and_then(|active| match active.cmp(&index) {
+                Ordering::Less => Some(active),
+                Ordering::Equal => Some(index.min(self.panels.len().checked_sub(1)?)),
+                Ordering::Greater => Some(active - 1),
+            });
         cx.notify();
     }
 
