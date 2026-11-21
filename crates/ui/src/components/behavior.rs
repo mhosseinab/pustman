@@ -47,9 +47,15 @@ pub trait FixedWidth {
     fn full_width(self) -> Self;
 }
 
-/// A control that is revealed when its row is hovered — and stays reachable by keyboard
-/// through the row's context menu.
+/// A control that is revealed when its row is hovered.
 pub trait VisibleOnHover {
-    /// Show this control only while `group` (the row's `.group(...)`) is hovered.
+    /// Out of the frame — no hit target, no tab stop — until `group` (the row's
+    /// `.group(...)`) is hovered: for a control the row shows in this one's place at rest.
     fn visible_on_hover(self, group: SharedString) -> Self;
+
+    /// Faded out until `group` (the row's `.group(...)`) is hovered, or the control takes
+    /// keyboard focus: the slot keeps its hit target and tab order while the glyph is
+    /// hidden, so a click that lands before the reveal still works and the focus ring is
+    /// visible where it lands.
+    fn faded_until_hovered(self, group: SharedString) -> Self;
 }

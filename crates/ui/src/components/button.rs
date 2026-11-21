@@ -453,6 +453,17 @@ pub enum IconButtonShape {
     Rounded,
 }
 
+/// How an [`IconButton`] is hidden until the row around it is hovered.
+#[derive(Clone, Debug)]
+enum HoverReveal {
+    /// Out of the frame — no hit target, no tab stop — until the row is hovered: for a
+    /// control the row shows in this one's place at rest.
+    Hidden(SharedString),
+    /// Faded out until the row is hovered or the button takes keyboard focus: the slot
+    /// keeps its hit target and tab order while the glyph is hidden.
+    Faded(SharedString),
+}
+
 /// An icon-only button. Its [`Tooltip`] is mandatory — it is the button's discoverable
 /// name *and* its accessible label, so an icon button can never ship without one.
 #[derive(Clone, IntoElement)]
@@ -470,7 +481,7 @@ pub struct IconButton {
     tab_index: Option<isize>,
     on_click: Option<ClickHandler>,
     cursor_style: CursorStyle,
-    hover_group: Option<SharedString>,
+    hover_reveal: Option<HoverReveal>,
 }
 
 impl std::fmt::Debug for IconButton {
@@ -500,7 +511,7 @@ impl IconButton {
             tab_index: None,
             on_click: None,
             cursor_style: CursorStyle::PointingHand,
-            hover_group: None,
+            hover_reveal: None,
         }
     }
 
@@ -571,7 +582,12 @@ impl Disableable for IconButton {
 
 impl VisibleOnHover for IconButton {
     fn visible_on_hover(mut self, group: SharedString) -> Self {
-        self.hover_group = Some(group);
+        self.hover_reveal = Some(HoverReveal::Hidden(group));
+        self
+    }
+
+    fn faded_until_hovered(mut self, group: SharedString) -> Self {
+        self.hover_reveal = Some(HoverReveal::Faded(group));
         self
     }
 }
@@ -643,16 +659,20 @@ impl RenderOnce for IconButton {
                 None => this,
             })
             .focus_visible(|style_refinement| {
-                style_refinement.border_color(cx.theme().colors().border_focused)
+                let style_refinement =
+                    style_refinement.border_color(cx.theme().colors().border_focused);
+                // Keyboard focus reveals a faded button: the ring must be visible where
+                // it lands.
+                if matches!(self.hover_reveal, Some(HoverReveal::Faded(_))) {
+                    style_refinement.opacity(1.)
+                } else {
+                    style_refinement
+                }
             })
             .when_some(self.tab_index, |this, index| this.tab_index(index))
             // No hover balloon while the tooltip says the control's own popover is
             // open (#265).
             .when(!tooltip.is_hidden(), |this| this.tooltip(tooltip.builder()))
-            .map(|this| match &self.hover_group {
-                Some(group) => this.invisible().group_hover(group.clone(), |s| s.visible()),
-                None => this,
-            })
             .child(glyph)
             .map(|this| {
                 if disabled {
@@ -678,6 +698,17 @@ impl RenderOnce for IconButton {
                             }
                         })
                 }
+            })
+            // The reveal last, so a hidden button stays hidden whatever the disabled
+            // branch set above it.
+            .map(|this| match &self.hover_reveal {
+                Some(HoverReveal::Hidden(group)) => {
+                    this.invisible().group_hover(group.clone(), |s| s.visible())
+                }
+                Some(HoverReveal::Faded(group)) => this
+                    .opacity(0.)
+                    .group_hover(group.clone(), |s| s.opacity(1.)),
+                None => this,
             })
     }
 }

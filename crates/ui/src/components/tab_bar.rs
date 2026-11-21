@@ -6,8 +6,9 @@
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, ClickEvent, Context, ElementId, EventEmitter, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled, Window,
+    AnyElement, App, ClickEvent, Context, ElementId, EventEmitter, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled,
+    Window, div,
 };
 use theme::ActiveTheme;
 
@@ -24,6 +25,9 @@ pub(crate) const TAB_BAR_CONTEXT: &str = "TabBar";
 
 /// The height of the request tab row: the redesign pack's `layout.requestTabs`, 40 px.
 const TAB_BAR_HEIGHT_PX: f32 = 40.;
+
+/// The hairline between two tabs the strip does not highlight (#214).
+const TAB_SEPARATOR_PX: f32 = 1.;
 
 /// Test hook for the rounded track a segmented bar draws its chips in.
 pub const SEGMENTED_TRACK_SELECTOR: &str = "tab-bar-segmented-track";
@@ -186,6 +190,35 @@ impl Render for TabBar {
         let focus_handle = self.focus_handle.clone();
         let style = self.style;
         let colors = cx.theme().colors();
+        let mut children: Vec<AnyElement> = Vec::with_capacity(self.tabs.len() * 2);
+        for (index, tab) in self.tabs.iter().enumerate() {
+            // Between two tabs the strip does not highlight, a hairline marks where one
+            // ends and the next begins (#214). Beside the active tab the highlight's own
+            // edge already delimits it, and the strip starts without one.
+            if style == TabStyle::Pane && index > 0 && index != selected && index - 1 != selected {
+                children.push(
+                    div()
+                        .debug_selector({
+                            let selector = format!("{}-separator", tab.selector());
+                            move || selector
+                        })
+                        .w(px_to_rems(TAB_SEPARATOR_PX))
+                        .flex_none()
+                        .my(DynamicSpacing::Base08.rems(cx))
+                        .bg(colors.border_variant)
+                        .into_any_element(),
+                );
+            }
+            children.push(
+                tab.clone()
+                    .style(style)
+                    .toggle_state(index == selected)
+                    .on_activated(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                        this.activate_tab(index, cx);
+                    }))
+                    .into_any_element(),
+            );
+        }
         h_flex()
             .id(ElementId::from(&focus_handle))
             .font_ui(cx)
@@ -213,14 +246,7 @@ impl Render for TabBar {
             .on_action(cx.listener(Self::select_next))
             .on_action(cx.listener(Self::select_previous))
             .on_action(cx.listener(Self::activate))
-            .children(self.tabs.iter().enumerate().map(|(index, tab)| {
-                tab.clone()
-                    .style(style)
-                    .toggle_state(index == selected)
-                    .on_activated(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                        this.activate_tab(index, cx);
-                    }))
-            }))
+            .children(children)
     }
 }
 
@@ -239,3 +265,7 @@ mod section_tests;
 #[cfg(test)]
 #[path = "tab_bar_segmented_tests.rs"]
 mod segmented_tests;
+
+#[cfg(test)]
+#[path = "tab_bar_chrome_tests.rs"]
+mod chrome_tests;
