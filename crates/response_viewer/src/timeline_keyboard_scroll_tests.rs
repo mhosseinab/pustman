@@ -130,7 +130,7 @@ fn test_tabbing_to_a_hop_scrolls_it_into_view(cx: &mut TestAppContext) {
     // shrink to nothing and no hop is a tab stop at all, so the tab walk is proven on a
     // tab with a scrollable redirect list (`timeline_tests.rs`'s window).
     cx.update(init_test);
-    let (view, mut cx) = cx.add_window_view(|_, cx| TimelineTab::new(cx));
+    let (view, cx) = cx.add_window_view(|_, cx| TimelineTab::new(cx));
     view.update(cx, |view, cx| view.set_response(&long_response(), cx));
     draw_window(cx);
     let focus = view.read_with(cx, |view, cx| view.focus_handle(cx));
@@ -152,15 +152,15 @@ fn test_tabbing_to_a_hop_scrolls_it_into_view(cx: &mut TestAppContext) {
         source: ScrollSource::Pointer,
     });
     cx.run_until_parked();
-    draw_window(&mut cx);
+    draw_window(cx);
 
     let rows_before: Vec<Option<Bounds<Pixels>>> = (0..30)
         .map(|hop| cx.debug_bounds(leak(format!("timeline-hop-{hop}"))))
         .collect();
 
-    press_key(&mut cx, "tab");
+    press_key(cx, "tab");
     cx.run_until_parked();
-    draw_window(&mut cx);
+    draw_window(cx);
 
     let focused_hop = cx.update(|window, cx| {
         view.read(cx)
