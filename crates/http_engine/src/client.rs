@@ -1,10 +1,11 @@
 //! The GPUI entity that owns an in-flight send (PRD REQ-HTTP-12).
 
+use std::fmt;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use api_model::{Auth, HttpRequest, SecretValues};
+use api_model::{Auth, HttpRequest, Method, SecretValues};
 use futures::channel::oneshot;
 use gpui::{AppContext, Context, EventEmitter, Task};
 use secrets::{SecretKey, SecretStore};
@@ -15,6 +16,7 @@ use crate::error::TransportError;
 use crate::history::{HistoryDraft, HistoryRecorder};
 use crate::pipeline::{PipelineError, Warning};
 use crate::prepare::{Prepared, prepare};
+use crate::redacted_url;
 use crate::request::ResolvedRequest;
 use crate::request_auth::AppliedAuth;
 use crate::response::Response;
@@ -69,13 +71,63 @@ pub struct SendOutcome {
     pub secrets_used: SecretValues,
 }
 
-/// What happened to a send [`HttpClient`] was driving.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SendEvent {
-    /// The in-flight send was dropped before it finished: [`HttpClient::cancel`], or a
-    /// newer [`HttpClient::send`] or [`HttpClient::send_request`] replaced it. It is never
-    /// retried, and the Console records "Cancelled" (REQ-HTTP-12).
-    Cancelled,
+/// Which send a [`SendEvent`] is about: the request's method and URL as the caller sent
+/// it, so the Console entry the event becomes names its own send, however entries land in
+/// order (S33o: a replaced send's cancellation is emitted after its history row, and can
+/// land after the new send's entry).
+#[derive(Clone, PartialEq, Eq)]
+pub struct SendIdentity {
+    /// The request's method.
+    pub method: Method,
+    /// The request's URL as it may be named: the pre-resolution text where the send
+    /// resolves `{{variables}}` itself ([`HttpClient::send_request`] — exactly what
+    /// `record_error` records), and only the scheme where the URL is resolved text
+    /// ([`HttpClient::send`]) — the resolved URL carries secret values, a webhook token
+    /// lives in the path (PRD §7) — which is the `redacted_url` form [`fmt::Debug`]
+    /// follows too.
+    pub url: String,
+}
+
+impl fmt::Debug for SendIdentity {
+    /// Print no URL: it may carry secret values (PRD §7) — the same reason
+    /// [`ResolvedRequest`]'s `Debug` prints no values.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SendIdentity")
+            .field("method", &self.method)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What happened to a send [`HttpClient`] was driving, and which send it was.
+#[derive(Clone, Debug)]
+pub struct SendEvent {
+    /// The send this is about. `None` only in [`SendEvent::Cancelled`], which names no
+    /// send.
+    pub send: Option<SendIdentity>,
+}
+
+impl SendEvent {
+    /// "A send was cancelled", naming no send: the token a subscriber compares against
+    /// to ask what happened (`event == SendEvent::Cancelled`).
+    // Lower case like the enum variant this replaces, so the token keeps reading as the
+    // event's name.
+    #[allow(non_upper_case_globals)]
+    pub const Cancelled: Self = Self { send: None };
+}
+
+impl PartialEq for SendEvent {
+    /// Events compare by what happened, never by which send it happened to: there is one
+    /// kind of occurrence — a cancellation — so [`SendEvent::Cancelled`] is equal to
+    /// every cancellation whatever it names, and two events naming different sends are
+    /// unequal. `Eq` is deliberately not implemented: the name-less token is equal to
+    /// every cancellation, which is not transitive. Which send is read from
+    /// [`SendEvent::send`].
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.send, &other.send) {
+            (Some(this), Some(other)) => this == other,
+            _ => true,
+        }
+    }
 }
 
 impl EventEmitter<SendEvent> for HttpClient {}
@@ -96,6 +148,9 @@ pub struct HttpClient {
     /// before its own work can record it (PRD REQ-HIST-01: every send is recorded).
     /// `None` for a send that records nothing.
     pending_history: Option<Arc<HistoryDraft>>,
+    /// Which send is in flight: what the [`SendEvent`] naming it carries when the send
+    /// is dropped (REQ-HTTP-12). `None` when no send is pending.
+    pending_identity: Option<SendIdentity>,
     /// The root [`send_request`] resolves body file references against (REQ-HTTP-05).
     /// `None` keeps them as they are, which is what [`HttpClient::send`] does too.
     workspace_root: Option<PathBuf>,
@@ -111,6 +166,7 @@ impl HttpClient {
             transport,
             pending_send: None,
             pending_history: None,
+            pending_identity: None,
             workspace_root: None,
             history: None,
         }
@@ -147,9 +203,18 @@ impl HttpClient {
         request: ResolvedRequest,
         cx: &mut Context<HttpClient>,
     ) -> Task<Result<Response, TransportError>> {
+        // The request is resolved text by the time `send` sees it, and the resolved URL
+        // carries secret values (PRD §7: a webhook token lives in the path), so the
+        // identity keeps only the printable form: a cancelled send's Console entry names
+        // the method and the scheme, never URL text the caller resolved.
+        let identity = SendIdentity {
+            method: request.method.clone(),
+            url: redacted_url(&request.url),
+        };
         let transport = self.transport.clone();
         self.drive_send(
             cx,
+            identity,
             move || transport.send(request),
             Err(TransportError::Cancelled),
         )
@@ -180,11 +245,18 @@ impl HttpClient {
             .history
             .as_ref()
             .and_then(|recorder| recorder.draft(&input.request));
+        // The send names itself in the [`SendEvent`] a cancellation becomes: the method
+        // and URL as the caller sent it, placeholders and all (REQ-HTTP-12).
+        let identity = SendIdentity {
+            method: input.request.method.clone(),
+            url: input.request.url.clone(),
+        };
         // The send's work and this entity share the one draft (an `Arc`): its gate keeps
         // the send to one row however the two writers race.
         let recorded = draft.clone();
         let task = self.drive_send(
             cx,
+            identity,
             move || async move {
                 let SendInput {
                     request,
@@ -277,6 +349,7 @@ impl HttpClient {
     fn drive_send<T, Work, MakeWork>(
         &mut self,
         cx: &mut Context<HttpClient>,
+        identity: SendIdentity,
         make_work: MakeWork,
         cancelled: T,
     ) -> Task<T>
@@ -286,6 +359,7 @@ impl HttpClient {
         MakeWork: FnOnce() -> Work,
     {
         self.cancel_pending(cx);
+        self.pending_identity = Some(identity);
         let work = make_work();
         let (sender, receiver) = oneshot::channel();
         self.pending_send = Some(cx.background_spawn(async move {
@@ -303,14 +377,16 @@ impl HttpClient {
         self.cancel_pending(cx);
     }
 
-    /// Drop the in-flight task and tell subscribers it is gone. With a history row to
-    /// write, [`SendEvent::Cancelled`] is emitted only after that row is stored: the
-    /// Console entry it becomes and the History panel's re-read of the database run on
-    /// this event (S33o), and neither may land before the row exists.
+    /// Drop the in-flight task and tell subscribers it is gone, with the event naming
+    /// the send it was (REQ-HTTP-12). With a history row to write, the [`SendEvent`] is
+    /// emitted only after that row is stored: the Console entry it becomes and the
+    /// History panel's re-read of the database run on this event (S33o), and neither may
+    /// land before the row exists.
     fn cancel_pending(&mut self, cx: &mut Context<HttpClient>) {
         let was_sending = self.is_sending();
         self.pending_send = None;
         let draft = self.pending_history.take();
+        let send = self.pending_identity.take();
         // The dropped task can no longer record its own row, so the cancelled row is
         // written on a background task of its own (REQ-HIST-01 records every send) and
         // the event follows it — never blocking the foreground on SQLite.
@@ -318,7 +394,7 @@ impl HttpClient {
             cx.spawn(async move |this, cx| {
                 cx.background_spawn(async move { draft.record_cancelled() })
                     .await;
-                let emitted = this.update(cx, |_, cx| cx.emit(SendEvent::Cancelled));
+                let emitted = this.update(cx, |_, cx| cx.emit(SendEvent { send }));
                 if emitted.is_err() {
                     // Handled: the client entity was dropped while the row was being
                     // written; there is nobody left to tell.
@@ -327,7 +403,7 @@ impl HttpClient {
             .detach();
         } else if was_sending {
             // Nothing is written, so there is nothing to order the event after.
-            cx.emit(SendEvent::Cancelled);
+            cx.emit(SendEvent { send });
         }
     }
 }
@@ -339,3 +415,7 @@ mod tests;
 #[cfg(test)]
 #[path = "cancel_order_tests.rs"]
 mod cancel_order_tests;
+
+#[cfg(test)]
+#[path = "send_identity_tests.rs"]
+mod send_identity_tests;

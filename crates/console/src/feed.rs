@@ -122,25 +122,33 @@ pub fn record_error(request: Option<&HttpRequest>, error: &PipelineError, cx: &m
 /// Watch `client` and record every cancellation as an entry (REQ-HTTP-12). The caller
 /// stores the returned [`Subscription`]; dropping it stops the recording.
 pub fn watch(client: &Entity<HttpClient>, cx: &mut App) -> Subscription {
-    cx.subscribe(client, |_, event: &SendEvent, cx| match event {
-        SendEvent::Cancelled => {
-            // The event carries no request, so the entry names no method or URL; the
-            // summary line falls back to the protocol (REQ-CON-01).
-            ConsoleStore::push(
-                cx,
-                ConsoleEntry {
-                    level: ConsoleLevel::Warning,
-                    protocol: PROTOCOL.to_string(),
-                    method: None,
-                    url: String::new(),
-                    status: None,
-                    time: None,
-                    size: None,
-                    raw_request: String::new(),
-                    raw_response: "Cancelled".to_string(),
-                },
-            );
-        }
+    cx.subscribe(client, |_, event: &SendEvent, cx| {
+        // The entry names its own send from the event's identity (S33o: a replaced
+        // send's cancellation is emitted after its history row is written, so the entry
+        // can land after the new send's). The URL is redacted exactly as [`record_error`]
+        // redacts one — the empty secret set masks userinfo and credential shapes — over
+        // the URL as the send captured it: pre-resolution text where the send resolves
+        // `{{variables}}` itself, and the scheme alone where the URL is resolved text
+        // (`http_engine`'s capture rule: the resolved URL carries secret values).
+        let secrets = SecretValues::new();
+        let (method, url) = match &event.send {
+            Some(send) => (Some(send.method.clone()), redact_url(&send.url, &secrets)),
+            None => (None, String::new()),
+        };
+        ConsoleStore::push(
+            cx,
+            ConsoleEntry {
+                level: ConsoleLevel::Warning,
+                protocol: PROTOCOL.to_string(),
+                method,
+                url,
+                status: None,
+                time: None,
+                size: None,
+                raw_request: String::new(),
+                raw_response: "Cancelled".to_string(),
+            },
+        );
     })
 }
 
@@ -296,3 +304,7 @@ fn response_size(response: &Response) -> Option<u64> {
 #[cfg(test)]
 #[path = "feed_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "feed_order_tests.rs"]
+mod feed_order_tests;
