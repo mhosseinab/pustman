@@ -26,9 +26,12 @@
 
 use std::time::Duration;
 
+use api_model::SecretValues;
+use console::{ConsoleStore, record_outcome};
 use gpui::{App, Context, Entity, Global, Role, Window};
 use http_engine::{
-    HttpClient, PipelineError, Response, ResponseBody, TransportError, resolve_request,
+    AppliedAuth, HttpClient, PipelineError, ResolvedRequest, Response, ResponseBody, SendOutcome,
+    TransportError, Warning, resolve_request,
 };
 use pustman_actions::request;
 use ui::prelude::*;
@@ -36,6 +39,7 @@ use variables::{DynamicValues, ScopeStack};
 
 use crate::RequestEditor;
 use crate::settings_tab::SettingChange;
+use crate::unresolved_warning::{UnresolvedWarning, unresolved_names};
 
 /// Test hook: the button that sends the request, when nothing is in flight.
 pub const SEND_BUTTON_SELECTOR: &str = "send-button";
@@ -170,8 +174,28 @@ impl RequestEditor {
     }
 
     /// Send the draft. The send task lands in `pending_send`, so a send while one is
-    /// still in flight replaces — and so cancels — the request before it.
+    /// still in flight replaces — and so cancels — the request before it. A draft that
+    /// would use unresolved variables is held back instead: the warning bar lists them
+    /// and "Send anyway" is the only way past it (REQ-VAR-07).
     pub fn start_send(&mut self, cx: &mut Context<Self>) {
+        self.begin_send(cx, false);
+    }
+
+    /// The warning bar's "Send anyway" (REQ-VAR-07): send with the unresolved names left
+    /// literal — the bar's explicit choice, never a keystroke. The bar goes with the
+    /// send, and the warning travels with the outcome into the Console.
+    pub(super) fn send_anyway(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.unresolved_warning = None;
+        self.begin_send(cx, true);
+        // The button this click landed on is gone with the bar; a keyboard user's focus
+        // must not disappear with it.
+        window.focus(&self.focus_handle, cx);
+    }
+
+    /// Send the draft; `send_unresolved` names the one caller that means "anyway".
+    /// Environments are not wired into the editor yet, so the draft resolves against no
+    /// variables: unresolved names stay literal and go out as they are (REQ-VAR-07).
+    fn begin_send(&mut self, cx: &mut Context<Self>, send_unresolved: bool) {
         let Some(client) = cx
             .try_global::<RequestClient>()
             .map(|client| client.0.clone())
@@ -184,23 +208,29 @@ impl RequestEditor {
             cx.notify();
             return;
         };
-        // Environments are not wired into the editor yet, so the draft resolves against
-        // no variables: unresolved names stay literal and are sent as they are
-        // (REQ-VAR-07). The warnings a later step surfaces are dropped here on purpose.
-        let resolved =
+        let (resolved, warnings) =
             match resolve_request(&self.draft, &ScopeStack::new(), &mut DynamicValues::new()) {
-                Ok((resolved, _warnings)) => resolved,
+                Ok(resolved) => resolved,
                 Err(error) => {
                     self.fail_send(&error, cx);
                     return;
                 }
             };
+        if !send_unresolved && let Some(names) = unresolved_names(&warnings) {
+            self.unresolved_warning = Some(UnresolvedWarning::new(names.to_vec()));
+            cx.notify();
+            return;
+        }
+        self.unresolved_warning = None;
+        let sent_request = resolved.clone();
         let send_task = client.update(cx, |client, cx| client.send(resolved, cx));
         self.inline_error = None;
         self.tls_offer_error = None;
         self.pending_send = Some(cx.spawn(async move |this, cx| {
             let result = send_task.await;
-            let landed = this.update(cx, |editor, cx| editor.finish_send(result, cx));
+            let landed = this.update(cx, |editor, cx| {
+                editor.finish_send(result, sent_request, warnings, cx)
+            });
             if landed.is_err() {
                 // Handled: the tab closed while the request was in flight; there is no
                 // status line left to write to.
@@ -261,14 +291,23 @@ impl RequestEditor {
 
     /// The send ended: the response goes to the embedded
     /// [`response_viewer::ResponseView`] (and its facts to `status_line()`), or the
-    /// failure shows inline and in the viewer's error panel.
-    fn finish_send(&mut self, result: Result<Response, TransportError>, cx: &mut Context<Self>) {
+    /// failure shows inline and in the viewer's error panel. A send that carried
+    /// warnings carries them into the Console too (REQ-VAR-07) — the outcome is their
+    /// one write.
+    fn finish_send(
+        &mut self,
+        result: Result<Response, TransportError>,
+        sent_request: ResolvedRequest,
+        warnings: Vec<Warning>,
+        cx: &mut Context<Self>,
+    ) {
         self.pending_send = None;
         match result {
             Ok(response) => {
                 self.status_line = Some(StatusLine::from_response(&response));
                 self.inline_error = None;
                 self.tls_offer_error = None;
+                log_warned_outcome(&sent_request, &response, &warnings, cx);
                 self.response_view
                     .update(cx, |view, cx| view.set_response(response, cx));
             }
@@ -464,6 +503,36 @@ impl RequestEditor {
             .child(button)
             .into_any_element()
     }
+}
+
+/// Hand a finished send that carries warnings to the Console (REQ-VAR-07: "sending
+/// anyway is logged in the Console"; REQ-CON-04) through `console::feed`'s
+/// [`record_outcome`] — the warning travels with the send's outcome, and this is the one
+/// and only Console write, never a second one beside it.
+///
+/// `Decision:` only warned sends record here. Every-send recording is the console feed's
+/// own wiring (`record_outcome` is its API), and this send path applies no auth and
+/// resolves against no scopes — so the outcome reports `AppliedAuth::None` and an empty
+/// redaction set, exactly as the request went out. A host that has not installed the
+/// console store (an editor test without `console::init`) records nothing rather than
+/// crashing the send path.
+fn log_warned_outcome(
+    request: &ResolvedRequest,
+    response: &Response,
+    warnings: &[Warning],
+    cx: &mut App,
+) {
+    if warnings.is_empty() || cx.try_global::<ConsoleStore>().is_none() {
+        return;
+    }
+    let outcome = SendOutcome {
+        request: request.clone(),
+        response: response.clone(),
+        warnings: warnings.to_vec(),
+        auth: AppliedAuth::None,
+        secrets_used: SecretValues::new(),
+    };
+    record_outcome(&outcome, cx);
 }
 
 #[cfg(test)]

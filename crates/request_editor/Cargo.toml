@@ -16,6 +16,7 @@ path = "src/request_editor.rs"
 
 [dependencies]
 api_model.workspace = true
+console.workspace = true
 gpui.workspace = true
 http_engine.workspace = true
 pustman_actions.workspace = true

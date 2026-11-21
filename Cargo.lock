@@ -5408,6 +5408,7 @@ name = "request_editor"
 version = "0.1.0"
 dependencies = [
  "api_model",
+ "console",
  "gpui",
  "http_engine",
  "pustman_actions",

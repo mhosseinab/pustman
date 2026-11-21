@@ -21,6 +21,7 @@ mod params;
 mod response_split;
 pub mod send;
 mod settings_tab;
+mod unresolved_warning;
 pub mod url_bar;
 
 use api_model::{HttpRequest, RequestSettings};
@@ -38,6 +39,7 @@ use headers::{Headers, HeadersEvent};
 use params::{Params, ParamsEvent};
 use send::{InlineError, StatusLine};
 use settings_tab::{SettingChange, SettingsTab, SettingsTabEvent};
+use unresolved_warning::UnresolvedWarning;
 use url_bar::{UrlBar, UrlBarEvent};
 
 /// The key context the editor answers the keyboard in; `assets/keymaps/` binds
@@ -96,6 +98,9 @@ pub struct RequestEditor {
     /// display: `curl_paste`'s import error replaces `inline_error` outside a send and
     /// must never show it (`send`'s `render_inline_error`).
     tls_offer_error: Option<InlineError>,
+    /// The pre-send unresolved-variable warning bar's state (REQ-VAR-07): [`Some`] while
+    /// the bar lists names a send would use without a value (`unresolved_warning`).
+    unresolved_warning: Option<UnresolvedWarning>,
     /// What the status line shows for the last response.
     status_line: Option<StatusLine>,
     /// The response region below the request panes (S29e): the entity a send's result
@@ -181,6 +186,7 @@ impl RequestEditor {
             pending_send: None,
             inline_error: None,
             tls_offer_error: None,
+            unresolved_warning: None,
             status_line: None,
             response_view: cx.new(ResponseView::new),
             split_focus: cx.focus_handle().tab_stop(true),
@@ -262,6 +268,7 @@ impl RequestEditor {
             UrlBarEvent::MethodChanged(method) => self.draft.method = method.clone(),
         }
         self.refresh_auto_headers(cx);
+        self.recheck_unresolved(cx);
         cx.notify();
     }
 
@@ -309,6 +316,7 @@ impl RequestEditor {
             }
         }
         self.refresh_auto_headers(cx);
+        self.recheck_unresolved(cx);
         cx.notify();
     }
 
@@ -356,6 +364,7 @@ impl RequestEditor {
             }
         }
         self.refresh_auto_headers(cx);
+        self.recheck_unresolved(cx);
         cx.notify();
     }
 
@@ -402,6 +411,7 @@ impl RequestEditor {
             BodyTabEvent::BodyChanged => self.draft.body = self.body_tab.read(cx).body(cx),
         }
         self.refresh_auto_headers(cx);
+        self.recheck_unresolved(cx);
         cx.notify();
     }
 
@@ -419,6 +429,7 @@ impl RequestEditor {
             AuthTabEvent::AuthChanged => self.draft.auth = self.auth_tab.read(cx).auth(),
         }
         self.refresh_auto_headers(cx);
+        self.recheck_unresolved(cx);
         cx.notify();
     }
 }
@@ -445,6 +456,9 @@ impl Render for RequestEditor {
         let request_content = v_flex()
             .size_full()
             .min_w_0()
+            // The pre-send unresolved-variable warning bar, above the URL bar
+            // (REQ-VAR-07).
+            .children(self.render_unresolved_warning(cx))
             // The URL bar, wrapped: the cURL paste is captured on this wrapper, which
             // is on the dispatch path exactly while the URL bar has focus (`curl_paste`).
             .child(
