@@ -85,7 +85,8 @@ impl<T: Panel> PanelHandle for Entity<T> {
 impl Workspace {
     /// Register `panel` with its dock: a feature crate hands over its panel and the
     /// workspace routes it by [`Panel::position`], so a new panel never needs a
-    /// workspace edit (S22c).
+    /// workspace edit (S22c). Re-registering an id that another dock holds *moves* the
+    /// panel — the old dock drops its entry instead of keeping a stale one.
     ///
     /// Contract: registration never moves keyboard focus — the workspace keeps it
     /// until the user activates the panel's selector entry. `window` stays in the seam
@@ -97,10 +98,12 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let position = panel.read(cx).position(cx);
-        let dock = match position {
-            DockPosition::Left => &self.left_dock,
-            DockPosition::Bottom => &self.bottom_dock,
+        let panel_id = panel.read(cx).panel_id();
+        let (dock, other_dock) = match position {
+            DockPosition::Left => (&self.left_dock, &self.bottom_dock),
+            DockPosition::Bottom => (&self.bottom_dock, &self.left_dock),
         };
+        other_dock.update(cx, |dock, cx| dock.remove_panel(panel_id, cx));
         dock.update(cx, |dock, cx| dock.add_panel(Box::new(panel), cx));
     }
 }
@@ -108,3 +111,7 @@ impl Workspace {
 #[cfg(test)]
 #[path = "panel_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "panel_reregister_tests.rs"]
+mod reregister_tests;
