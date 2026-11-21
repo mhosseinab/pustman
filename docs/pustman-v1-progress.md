@@ -56,6 +56,7 @@ These run at the next human sign-off and are recorded in that sign-off's step re
 | E2E display scenario: S26 (send/cancel from the URL bar) | human | S38 | pending |
 | E2E display scenario: S28 (TLS badge, auth tabs) | human | S38 | pending |
 | E2E display scenario: S32 (console dock) | human | S38 | pending |
+| E2E display scenario: S33o (History live refresh; Timeline wheel + keyboard scroll; Ctrl/Cmd-Tab with Timeline focused) | human | S38 | pending |
 | Push `pustman-v1/main` and confirm CI green (S1 delta) | human | next promotion | done 2026-11-18 (CI run 44240566190 on `e5347fc`: verify (ubuntu-latest) success, verify (macos-latest) success) |
 | Manual smoke on Linux + macOS for each `release/pustman-v1-<n>` (n ≥ 2) | human | each promotion | pending |
 
@@ -113,7 +114,7 @@ Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending)
 | S36 | Manage Cookies dialog | passed | | #175, #176, #179, #180 | [S36a](progress/pustman-v1/steps/S36a.md), [S36b](progress/pustman-v1/steps/S36b.md) | S36a (`fd8a7de`), S36b (`05b1a4f`) |
 | S37 | Redaction NFR test (integration) | passed | 1 | | [S37](progress/pustman-v1/steps/S37.md) | S37 (`ce1b583`) passed |
 | S33n | Fix the M1 request-editor blockers and major layout bugs (driver-added, S38 prereq; #200 #201) | passed | 1 | 35e1813 | [S33n](progress/pustman-v1/steps/S33n.md) | LOW #264 |
-| S33o | Fix the M1 workspace, console, history and timeline major bugs (driver-added, S38 prereq; #199 #202) | in_progress | 1 | | | |
+| S33o | Fix the M1 workspace, console, history and timeline major bugs (driver-added, S38 prereq; #199 #202 #205) | passed | 3 | 6cca305 | [S33o](progress/pustman-v1/steps/S33o.md) | 2 review cycles, 3 fixes; LOW #270 |
 | S38 | M1 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off |
 | S39 | `collections_panel`: tree | pending | 0 | | |  |
 | S40 | Collection CRUD, save, ordering, dirty state | pending | 0 | | |  |
@@ -159,6 +160,8 @@ Each entry is a fact a later step must know, with its source record linked.
 
 - **Dispatch (OPERATOR decisions 2026-11-18, two of them).** Paths: worktrees at `.claude/worktrees/pustman-v1/S<N>`, briefs at `.claude/worktrees/pustman-v1/.briefs/S<N>-a<k>.md` (`-review<c>`, `-fix<c>`), build cache = the worktree own `target/` (no `CARGO_TARGET_DIR`), `CARGO_BUILD_JOBS=4` kept and also set by `.claude/worktrees/pustman-v1/.cargo/config.toml`. Briefs + dispatch: a brief file carries the real content and a `BRIEF-TOKEN`; the dispatch prompt is < ~400 chars and the worker must echo the `BRIEF-TOKEN` back (proof it read the brief). Isolation: one worker = one worktree = one branch; a worker never touches another worktree, the main checkout, or `pustman-v1/main`. Hotspot steps (`crates/pustman/src/main.rs`, `crates/pustman/Cargo.toml`) run alone. Merges one at a time. Reviewers stay in pairs and may run alongside workers. **Load guard before every dispatch:** `free -g` available >= 6 GB AND `df -h /home/geek/workspace/rea-agent/pustman` >= 40 GB free, else hold and log `LOAD HOLD`. Empty replies: check `git log pustman-v1/main..pustman-v1/S<N>` first; re-send once on its own while the others continue; 2 or more empty-with-no-commit in one batch -> drop to 2 for the next batch and log, return to the cap after one clean batch; log each empty with prompt length, brief path, elapsed time and the `free -g` reading. On merge: `git worktree remove .claude/worktrees/pustman-v1/S<N>` (deletes its `target/`), keep the branch. **CAP = 3** (OPERATOR confirmed 2026-11-18). Nothing goes out at width > 3. (2026-11-18)
 - **Worktree move invalidates `env!()`-baked paths.** A worktree moved from `/tmp` into `.claude/worktrees/pustman-v1/` keeps its `target/`, but `env!("CARGO_MANIFEST_DIR")` was expanded at COMPILE time against the old path, so cargo reuses a test binary whose baked path no longer exists and `read_dir` returns NotFound. **After any `git worktree move`, `rm -rf <worktree>/target` and rebuild.** (2026-11-18)
+
+- **Cloud disk (2026-11-21).** A cloud session has about 69 GB of writable disk. One step worktree (`target/` up to 36 GB with clippy, test and check builds) plus the main checkout's `target/` (19 GB) filled it, and the merge verify died ENOSPC. In the cloud: run `cargo clean` in the main checkout before a worktree verify, delete `target/debug/incremental` after building, and verify with `CARGO_INCREMENTAL=0`.
 
 ## Promotions
 
