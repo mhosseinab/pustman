@@ -271,21 +271,30 @@ impl TimelineTab {
     /// has focus, Up/Down move one line height, PageUp/PageDown one viewport height and
     /// Home/End go to the top and bottom — every move clamped to the content bounds, so
     /// no key press overshoots. Tab and Shift-Tab walk the tab stops and reveal the hop
-    /// row they land on (`Decision:`, module docs).
+    /// row they land on (`Decision:`, module docs). Modified keys are left alone (S33o
+    /// fix 3): GPUI dispatches key-down listeners before keybindings, so handling
+    /// ctrl-tab here would swallow the workspace's NextTab/PreviousTab binding.
     fn handle_key_down(
         &mut self,
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let modifiers = event.keystroke.modifiers;
         if event.keystroke.key == "tab" {
-            if event.keystroke.modifiers.shift {
+            if modifiers.control || modifiers.alt || modifiers.platform || modifiers.function {
+                return;
+            }
+            if modifiers.shift {
                 window.focus_prev(cx);
             } else {
                 window.focus_next(cx);
             }
             self.reveal_focused_hop(window, cx);
             cx.stop_propagation();
+            return;
+        }
+        if modifiers.modified() {
             return;
         }
         let offset = self.scroll.offset();

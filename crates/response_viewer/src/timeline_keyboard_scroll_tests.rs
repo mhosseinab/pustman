@@ -9,8 +9,9 @@ use std::time::Duration;
 
 use api_model::{Method, SecretValues};
 use gpui::{
-    Bounds, ElementId, Entity, Focusable, Modifiers, MouseButton, Pixels, Point, ScrollDelta,
-    ScrollEvent, ScrollSource, TestAppContext, TouchPhase, VisualTestContext, px, size,
+    Bounds, ElementId, Entity, Focusable, Keystroke, Modifiers, MouseButton, Pixels, Point,
+    ScrollDelta, ScrollEvent, ScrollSource, TestAppContext, TouchPhase, VisualTestContext, px,
+    size,
 };
 use http_engine::{
     Header, RedirectHop, RequestBody, ResolvedRequest, Response, ResponseBody, SendSettings,
@@ -187,6 +188,77 @@ fn test_tabbing_to_a_hop_scrolls_it_into_view(cx: &mut TestAppContext) {
         after.origin.y > before.origin.y,
         "the clipped row is scrolled fully into view on Tab (before {before:?}, after \
          {after:?})"
+    );
+}
+
+#[gpui::test]
+fn test_modified_tab_is_left_for_the_workspace_bindings(cx: &mut TestAppContext) {
+    // Modified Tab (ctrl-tab/ctrl-shift-tab on Linux and Windows, cmd-tab and friends on
+    // macOS) is the workspace's NextTab/PreviousTab binding. GPUI dispatches key-down
+    // listeners before keybindings, so a listener that swallows it makes the window's tab
+    // switcher unreachable from inside the tab (review 2 #2).
+    let (view, mut cx) = tall_timeline(cx);
+    let offset_before = scroll_offset(&view, &cx);
+    let os = cx.read(|cx| cx.platform_info().os);
+    let keystroke =
+        Keystroke::parse_with_os("ctrl-tab", os).expect("the test key ctrl-tab must parse");
+
+    // `Window::dispatch_keystroke` reports `true` when a key-down listener (or a
+    // binding) consumed the event — `false` means it propagated onward.
+    let handled = cx.update(|window, cx| window.dispatch_keystroke(keystroke, cx));
+    cx.run_until_parked();
+    draw_window(&mut cx);
+
+    assert!(
+        !handled,
+        "modified Tab is left unhandled by the timeline's key-down listener, so it \
+         propagates to the workspace bindings"
+    );
+    let (timeline_focused, focused_hop) = cx.update(|window, cx| {
+        let timeline = view.read(cx).timeline.read(cx);
+        (
+            timeline.focus_handle(cx).contains_focused(window, cx),
+            timeline
+                .hop_focus
+                .iter()
+                .position(|focus| focus.contains_focused(window, cx)),
+        )
+    });
+    assert!(
+        timeline_focused,
+        "ctrl-tab does not move focus off the timeline"
+    );
+    assert!(
+        focused_hop.is_none(),
+        "ctrl-tab does not move focus to a hop row"
+    );
+    assert_eq!(
+        scroll_offset(&view, &cx),
+        offset_before,
+        "ctrl-tab does not scroll the timeline"
+    );
+}
+
+#[gpui::test]
+fn test_ctrl_end_does_not_scroll_the_timeline(cx: &mut TestAppContext) {
+    let (view, mut cx) = tall_timeline(cx);
+    press_key(&mut cx, "down");
+    cx.run_until_parked();
+    draw_window(&mut cx);
+    let before = scroll_offset(&view, &cx);
+    assert!(
+        before.y < px(0.),
+        "one line down leaves the top of the timeline behind"
+    );
+
+    press_key(&mut cx, "ctrl-end");
+    cx.run_until_parked();
+    draw_window(&mut cx);
+
+    assert_eq!(
+        scroll_offset(&view, &cx),
+        before,
+        "modified End belongs to the window's bindings and never scrolls the timeline"
     );
 }
 
