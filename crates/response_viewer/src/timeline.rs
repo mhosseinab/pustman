@@ -19,13 +19,36 @@
 //! The rows are a snapshot taken when the response arrives ([`TimelineTab::set_response`],
 //! or a hop's toggle for the expanded headers); render only lays them out. Bar widths are
 //! derived in [`TimelineTab::set_response`], never in `render`.
+//!
+//! `Decision:` the tab scrolls from the keyboard as well as from the wheel (S33o fix 2,
+//! review 1 #4): the scroll root tracks its [`ScrollHandle`] and the tab's
+//! [`FocusHandle`], and Up/Down, PageUp/PageDown and Home/End move the scroll while the
+//! tab or anything in it has focus (S05; `references/interaction-focus-a11y.md`).
+//!
+//! `Decision:` a hop row Tab lands on is scrolled into view by the two scrollers that
+//! can clip it: the redirect list's own [`UniformListScrollHandle`] reveals the row in
+//! the list (non-strict minimal reveal — the `history_list`/picker pattern) and
+//! [`ScrollHandle::scroll_to_item`] reveals the redirect section in the document. GPUI
+//! has no minimal per-child reveal for an arbitrary descendant: [`ScrollHandle`]'s child
+//! APIs index only the root's direct children and `ScrollAnchor`, the one API that
+//! reaches below them, aligns the row's top with the viewport top — a jump, not a
+//! reveal. The reveal runs from the tab key in [`TimelineTab::handle_key_down`], which
+//! is also where focus actually moves between tab stops (`window.focus_next` /
+//! `focus_prev`, the `references/interaction-focus-a11y.md` Tab pattern): a focus
+//! subscription (`Context::on_focus_in`) needs a `Window` at registration and this view
+//! meets one only in `render`, which must stay pure. A hop the list has not laid out
+//! carries no tab stop, so Tab only reaches rows the reveal can show (S05;
+//! `references/interaction-focus-a11y.md`).
 
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
 use api_model::SecretValues;
-use gpui::{DefiniteLength, WeakEntity};
+use gpui::{
+    DefiniteLength, Focusable, KeyDownEvent, Role, ScrollHandle, ScrollStrategy,
+    UniformListScrollHandle, WeakEntity, point,
+};
 use http_engine::{
     Certificate, NetworkInfo, RedirectHop, ResolvedRequest, Response, ResponseVersion, Timings,
 };
@@ -145,11 +168,22 @@ pub struct TimelineTab {
     /// One focus handle per hop for its expand toggle — a handle made in render would be
     /// new every frame and drop the toggle's focus with it (`headers_view`).
     hop_focus: Arc<Vec<FocusHandle>>,
+    /// The redirect list's own scroll state, so [`Self::reveal_focused_hop`] can show a
+    /// row the list has clipped (`Decision:`, module docs).
+    redirect_scroll: UniformListScrollHandle,
+    /// The tab's own focus handle: the scroll root tracks it, so the timeline and its
+    /// children are keyboard-reachable and [`Self::handle_key_down`] scrolls while focus
+    /// is anywhere in the tab. A tab stop itself, so Tab can reach the scroll region
+    /// even when the response has no redirect chain.
+    focus_handle: FocusHandle,
+    /// The scroll root's state: what the wheel, the keyboard and the hop reveals all
+    /// move (`Decision:`, module docs).
+    scroll: ScrollHandle,
 }
 
 impl TimelineTab {
     /// An empty tab, waiting for a response.
-    pub fn new(_cx: &mut Context<Self>) -> Self {
+    pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             request_as_sent: None,
             phases: Arc::new(Vec::new()),
@@ -158,6 +192,9 @@ impl TimelineTab {
             rows: Arc::new(Vec::new()),
             expanded: HashSet::new(),
             hop_focus: Arc::new(Vec::new()),
+            redirect_scroll: UniformListScrollHandle::new(),
+            focus_handle: cx.focus_handle().tab_stop(true),
+            scroll: ScrollHandle::new(),
         }
     }
 
@@ -228,6 +265,87 @@ impl TimelineTab {
         }
         self.rows = Arc::new(redirect_rows(&self.hops, &self.expanded));
         cx.notify();
+    }
+
+    /// The keyboard's side of the scroll (S33o fix 2): while the tab or anything in it
+    /// has focus, Up/Down move one line height, PageUp/PageDown one viewport height and
+    /// Home/End go to the top and bottom — every move clamped to the content bounds, so
+    /// no key press overshoots. Tab and Shift-Tab walk the tab stops and reveal the hop
+    /// row they land on (`Decision:`, module docs). Modified keys are left alone (S33o
+    /// fix 3): GPUI dispatches key-down listeners before keybindings, so handling
+    /// ctrl-tab here would swallow the workspace's NextTab/PreviousTab binding.
+    fn handle_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let modifiers = event.keystroke.modifiers;
+        if event.keystroke.key == "tab" {
+            if modifiers.control || modifiers.alt || modifiers.platform || modifiers.function {
+                return;
+            }
+            if modifiers.shift {
+                window.focus_prev(cx);
+            } else {
+                window.focus_next(cx);
+            }
+            self.reveal_focused_hop(window, cx);
+            cx.stop_propagation();
+            return;
+        }
+        if modifiers.modified() {
+            return;
+        }
+        let offset = self.scroll.offset();
+        let target = match event.keystroke.key.as_str() {
+            "up" => offset.y + window.line_height(),
+            "down" => offset.y - window.line_height(),
+            "pageup" => offset.y + self.scroll.bounds().size.height,
+            "pagedown" => offset.y - self.scroll.bounds().size.height,
+            "home" => px(0.),
+            "end" => -self.scroll.max_offset().y,
+            _ => return,
+        };
+        let target = target.clamp(-self.scroll.max_offset().y, px(0.));
+        cx.stop_propagation();
+        if target != offset.y {
+            self.scroll.set_offset(point(offset.x, target));
+            cx.notify();
+        }
+    }
+
+    /// Scroll the hop row whose toggle holds focus into view after a Tab press: a
+    /// focused row the keyboard user cannot see is a keyboard trap (S05). Both scrollers
+    /// that can clip the row move — the redirect list reveals the row in its viewport,
+    /// the document reveals the redirect section in its own (`Decision:`, module docs).
+    /// Rows the list has not laid out have no tab stop, so there is nothing to reveal.
+    fn reveal_focused_hop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(hop) = self
+            .hop_focus
+            .iter()
+            .position(|focus| focus.contains_focused(window, cx))
+        else {
+            return;
+        };
+        if let Some(row) = self
+            .rows
+            .iter()
+            .position(|row| matches!(row, RedirectRow::Hop(row_hop) if *row_hop == hop))
+        {
+            self.redirect_scroll
+                .scroll_to_item(row, ScrollStrategy::Nearest);
+        }
+        self.scroll.scroll_to_item(self.redirects_section_index());
+        cx.notify();
+    }
+
+    /// Where the redirect section sits among the scroll root's children — what
+    /// [`ScrollHandle::scroll_to_item`] reveals it by. The root lays out its sections in
+    /// render order: "Request as sent" (when one was recorded), phases, network,
+    /// redirects.
+    fn redirects_section_index(&self) -> usize {
+        usize::from(self.request_as_sent.is_some()) + 2
     }
 
     /// The "Request as sent" section (REQ-NET-04): the final URL, the method, every
@@ -317,22 +435,25 @@ impl TimelineTab {
                     this.child(empty_state())
                 } else {
                     let key_rows = Arc::clone(&rows);
-                    this.child(VirtualList::new(
-                        child_id(base, "redirect-rows"),
-                        rows.len(),
-                        move |index| row_id_for(&key_rows, &key_base, index),
-                        move |index, _window, cx| {
-                            let list = RedirectList {
-                                rows: &rows,
-                                hops: &hops,
-                                hop_focus: &hop_focus,
-                                expanded: &expanded,
-                                base: &render_base,
-                                view: &view,
-                            };
-                            render_redirect_line(&list, index, cx)
-                        },
-                    ))
+                    this.child(
+                        VirtualList::new(
+                            child_id(base, "redirect-rows"),
+                            rows.len(),
+                            move |index| row_id_for(&key_rows, &key_base, index),
+                            move |index, _window, cx| {
+                                let list = RedirectList {
+                                    rows: &rows,
+                                    hops: &hops,
+                                    hop_focus: &hop_focus,
+                                    expanded: &expanded,
+                                    base: &render_base,
+                                    view: &view,
+                                };
+                                render_redirect_line(&list, index, cx)
+                            },
+                        )
+                        .track_scroll(self.redirect_scroll.clone()),
+                    )
                 }
             })
             .into_any_element()
@@ -347,8 +468,24 @@ impl Render for TimelineTab {
         let phases = self.phases_section(cx);
         let network = self.network_section(&base, cx);
         let redirects = self.redirects_section(&base, cx);
+        // The tab is one scrolling document inside its pane (`id` + `overflow_y_scroll`,
+        // with `min_h_0` up the flex chain): a timeline taller than the pane scrolls
+        // here and never overflows into — or scrolls — the window around it (S33o,
+        // #202). The scroll container needs the stable id for its scroll state.
         v_flex()
+            .id(base.clone())
+            // One keyboard-reachable scrolling document (S33o fix 2): the tab's focus
+            // handle and key context on the scroll root, a named scroll region for
+            // screen readers, and the scroll handle the keys and hop reveals move.
+            .track_focus(&self.focus_handle)
+            .key_context("TimelineTab")
+            .role(Role::ScrollView)
+            .aria_label(SharedString::new_static("Timeline"))
             .size_full()
+            .min_h_0()
+            .overflow_y_scroll()
+            .track_scroll(&self.scroll)
+            .on_key_down(cx.listener(Self::handle_key_down))
             .px(DynamicSpacing::Base04.rems(cx))
             .py(DynamicSpacing::Base03.rems(cx))
             .gap(DynamicSpacing::Base06.rems(cx))
@@ -837,6 +974,12 @@ fn empty_state() -> impl IntoElement {
         .child(Label::new("No redirects in this response").color(Color::Muted))
 }
 
+impl Focusable for TimelineTab {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
 /// A duration as the rows show it: milliseconds under a second, seconds above one,
 /// minutes and seconds for anything over a minute (the `status_line` shape; that helper
 /// is private to a file another step owns, so this is the same shape rather than a call).
@@ -861,3 +1004,11 @@ fn format_duration(duration: Option<Duration>) -> SharedString {
 #[cfg(test)]
 #[path = "timeline_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "timeline_m1_fixes_tests.rs"]
+mod timeline_m1_fixes_tests;
+
+#[cfg(test)]
+#[path = "timeline_keyboard_scroll_tests.rs"]
+mod timeline_keyboard_scroll_tests;

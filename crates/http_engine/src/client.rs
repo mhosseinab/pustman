@@ -303,18 +303,30 @@ impl HttpClient {
         self.cancel_pending(cx);
     }
 
-    /// Drop the in-flight task and tell subscribers it is gone.
+    /// Drop the in-flight task and tell subscribers it is gone. With a history row to
+    /// write, [`SendEvent::Cancelled`] is emitted only after that row is stored: the
+    /// Console entry it becomes and the History panel's re-read of the database run on
+    /// this event (S33o), and neither may land before the row exists.
     fn cancel_pending(&mut self, cx: &mut Context<HttpClient>) {
         let was_sending = self.is_sending();
         self.pending_send = None;
         let draft = self.pending_history.take();
         // The dropped task can no longer record its own row, so the cancelled row is
-        // written on a detached task of its own (REQ-HIST-01 records every send).
+        // written on a background task of its own (REQ-HIST-01 records every send) and
+        // the event follows it — never blocking the foreground on SQLite.
         if was_sending && let Some(draft) = draft {
-            cx.background_spawn(async move { draft.record_cancelled() })
-                .detach();
-        }
-        if was_sending {
+            cx.spawn(async move |this, cx| {
+                cx.background_spawn(async move { draft.record_cancelled() })
+                    .await;
+                let emitted = this.update(cx, |_, cx| cx.emit(SendEvent::Cancelled));
+                if emitted.is_err() {
+                    // Handled: the client entity was dropped while the row was being
+                    // written; there is nobody left to tell.
+                }
+            })
+            .detach();
+        } else if was_sending {
+            // Nothing is written, so there is nothing to order the event after.
             cx.emit(SendEvent::Cancelled);
         }
     }
@@ -323,3 +335,7 @@ impl HttpClient {
 #[cfg(test)]
 #[path = "client_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cancel_order_tests.rs"]
+mod cancel_order_tests;
