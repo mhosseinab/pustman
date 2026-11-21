@@ -72,9 +72,9 @@ deltas ≥ 3 OR unpromoted steps ≥ 16 — or stop after 150 turns.
 ```
 
 M3–M5 were expanded early (2026-11-21) into S49–S71. They start after S48 GO and
-`release/pustman-v1-4`. After Phase 6 (S49–S51e), the M3, M4 and M5 lanes are independent. Segments 5–7 may
-run at once: the orchestrator dispatches any eligible step, and each segment's `/goal` is judged
-on its own rows. Tags are cut in sign-off order, so the first milestone signed off takes `-5`.
+`release/pustman-v1-4`. After Phase 6 (S49–S51e) the lanes interleave: M4 needs S52b (M3's network model); M5 needs S52b and S59b (M3's GraphQL errors panel, reused by S69a). Segments 5–7
+may run at once: the orchestrator dispatches any eligible step from the graph, and each segment's
+`/goal` is judged on its own rows. Each sign-off promotes to the next free release tag.
 
 **Segment 5: S49–S59w (Phase 6 + M3), then the S60 M3 sign-off.**
 ```
@@ -87,7 +87,7 @@ OR a fix-vs-move-on decision is waiting for me — OR unapplied deploy deltas �
 steps ≥ 16 — or stop after 250 turns.
 ```
 
-**Segment 6: S61–S66 (M4), then the S67 M4 sign-off.** Needs S50a, S51a and S52b.
+**Segment 6: S61–S66 (M4), then the S67 M4 sign-off.** Outside Phase 6 it needs S52b.
 ```
 /goal Every row S61–S66 in docs/pustman-v1-progress.md is `passed` with a linked step record whose
 Evidence lines are pasted in this transcript, `scripts/pustman-v1-test.sh integration_tests
@@ -98,7 +98,7 @@ decision is waiting for me — OR unapplied deploy deltas ≥ 3 OR unpromoted st
 after 200 turns.
 ```
 
-**Segment 7: S68–S70 (M5), then the S71 M5 sign-off.** Needs S50a, S51a and S52b.
+**Segment 7: S68–S70 (M5), then the S71 M5 sign-off.** Outside Phase 6 it needs S52b and S59b.
 ```
 /goal Every row S68–S70 in docs/pustman-v1-progress.md is `passed` with a linked step record whose
 Evidence lines are pasted in this transcript, `scripts/pustman-v1-test.sh integration_tests

@@ -2488,10 +2488,11 @@ this text was written, and the code wins over this file. A worker that finds thi
 `Decision:` line, and the driver corrects the step before dispatching the next one that depends on it.
 
 The foundation steps depend on S48, and no M3, M4 or M5 step starts before they pass. After the
-foundation, the three milestones are independent (PRD §11: "M4–M6 are independent once M1 and M2
-land"). Each has its own sign-off, and tags are cut in sign-off order: the first of M3, M4 and M5 to
-sign off is promoted to `release/pustman-v1-5`, the next one to `-6`, and the last one to `-7`. A
-foundation step belongs to the first tag that ships it (D11).
+foundation, the three milestones interleave rather than run independently: M4 needs S52b (M3's
+network model), and M5 needs S52b and S59b (M3's GraphQL errors panel, reused by S69a). Each has its
+own sign-off, which promotes to the next free release tag. The cap on unpromoted steps can force an
+earlier promotion, so the tag numbers are not fixed. A foundation step belongs to the first tag that
+ships it (D11).
 
 Decisions made in this expansion (they apply to every step below):
 
@@ -3064,7 +3065,7 @@ challenge_answered_once_then_401_returned, digest_header_never_logged.
 `X-Amz-Date`, optional session token, and an unsigned-payload option.
 **Depends on:** S52a. **Deploy delta:** none. **High-stakes (auth).**
 **Edits:** `crates/http_engine/src/sigv4.rs`, `crates/http_engine/src/sigv4_tests.rs`,
-`crates/http_engine/src/http_engine.rs` (append `mod` only).
+`crates/http_engine/tests/fixtures/sigv4/*` (new), `crates/http_engine/src/http_engine.rs` (append `mod` only).
 
 ```
 Read the aws-sigv4 crate docs via Context7 (declared in S49), docs/PRD.md REQ-HTTP-06,
@@ -3073,7 +3074,7 @@ crates/http_engine/src/request_auth.rs.
 src/sigv4.rs: `sign(&AwsSigV4Auth, &mut ResolvedRequest, now)` through aws-sigv4. Do not
 re-implement canonicalisation. The clock is injected so tests are deterministic.
 
-Tests (sigv4_tests.rs), using the AWS SigV4 test-suite cases checked in under tests/fixtures/ with
+Tests (sigv4_tests.rs), using the AWS SigV4 test-suite cases checked in under crates/http_engine/tests/fixtures/sigv4/ with
 their provenance noted: get_vanilla_matches_aws_suite, post_with_body_matches_aws_suite,
 session_token_adds_security_token_header.
 ```

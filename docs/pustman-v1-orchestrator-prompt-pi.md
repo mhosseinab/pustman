@@ -108,11 +108,11 @@ Each segment ends at a human gate. After you clear the gate, start the next segm
 | 3 — after S25 GO + `release/pustman-v1-2` | 26–37 | Every row S26–S37 passed, `scripts/pustman-v1-test.sh integration_tests redaction` printed `PASS 2`, `VERIFY OK`, stopped at S38 (M1 sign-off). |
 | 4 — after S38 GO + `release/pustman-v1-3` | 39–47 | Every row S39–S47 passed, `scripts/pustman-v1-test.sh integration_tests sharing_ac_two_clones` printed `PASS 1`, `VERIFY OK`, stopped at S48 (M2 sign-off). |
 | 5 — after S48 GO + `release/pustman-v1-4` | 49–59 | Every row S49–S59 passed, `scripts/pustman-v1-test.sh integration_tests oauth_pkce_against_local_idp` and `scripts/pustman-v1-test.sh pustman wire_graphql` each printed `PASS 1`, `VERIFY OK`, stopped at S60 (M3 sign-off). |
-| 6 — M4, needs S50a, S51a, S52b | 61–66 | Every row S61–S66 passed, `integration_tests websocket_echo_ac`, `socketio_ac` and `hundred_thousand_event_log_ac` each printed `PASS 1`, `VERIFY OK`, stopped at S67 (M4 sign-off). |
-| 7 — M5, needs S50a, S51a, S52b | 68–70 | Every row S68–S70 passed, `integration_tests grpc_reflection_ac`, `grpc_proto_import_ac` and `grpc_all_four_kinds_ac` each printed `PASS 1`, `VERIFY OK`, stopped at S71 (M5 sign-off). |
+| 6 — M4; outside Phase 6 needs S52b | 61–66 | Every row S61–S66 passed, `integration_tests websocket_echo_ac`, `socketio_ac` and `hundred_thousand_event_log_ac` each printed `PASS 1`, `VERIFY OK`, stopped at S67 (M4 sign-off). |
+| 7 — M5; outside Phase 6 needs S52b, S59b | 68–70 | Every row S68–S70 passed, `integration_tests grpc_reflection_ac`, `grpc_proto_import_ac` and `grpc_all_four_kinds_ac` each printed `PASS 1`, `VERIFY OK`, stopped at S71 (M5 sign-off). |
 
-M3–M5 were expanded early (2026-11-21) into S49–S71. After Phase 6 the M3, M4 and M5 lanes are
-independent, so segments 5–7 may run at once; tags are cut in sign-off order (`-5`, `-6`, `-7`).
+M3–M5 were expanded early (2026-11-21) into S49–S71. After Phase 6 the lanes interleave: M4 needs S52b (M3's network model); M5 needs S52b and S59b (M3's GraphQL errors panel, reused by S69a).
+Segments 5–7 may run at once; each sign-off promotes to the next free release tag.
 After the M3–M5 sign-offs, the next step is a human-approved planning session that expands STUB-M6.
 The orchestrator never does this itself.
 

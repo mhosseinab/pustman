@@ -6,7 +6,7 @@ Zed is our reference implementation for "how a large Rust desktop app should be 
 to structure something, find the equivalent in Zed and follow its shape — but write our own code
 (see [Licensing](#licensing)).
 
-> Status: v1 (M0–M2) is under construction — driver and steps in `docs/pustman-v1-plan.md`. The
+> Status: v1 (M0–M5; M3–M5 expanded early as S49–S71) is under construction — driver and steps in `docs/pustman-v1-plan.md`. The
 > crate layout below is the PRD §9 target; **crates appear as the steps land**. The harness
 > (bootstrap/test/verify/tripwire scripts, protection hooks, subagents, promotion tooling) exists
 > from S0. Update this file when reality diverges from it.

@@ -140,8 +140,9 @@ pub enum TransportError { InvalidUrl, Dns, Connect, Tls, Timeout, TooManyRedirec
 | P10+ | STUB-M6, STUB-M7 | M6–M7 | expanded at a human gate |
 
 M0's sign-off comes after P2 in the graph only because P2 is independent of the shell. S25 does not
-depend on P2. After P6, M3, M4 and M5 run in parallel; tags are cut in sign-off order (`-5`, `-6`,
-`-7`). STUB-M6 can be expanded once S51d and S50e pass (PRD §11).
+depend on P2. After P6, the M3, M4 and M5 lanes interleave rather than run independently: M4 needs S52b (M3's network model); M5 needs S52b and S59b (M3's GraphQL errors panel, reused by S69a).
+Each sign-off promotes to the next free release tag. STUB-M6 can be expanded once S51d and S50e pass
+(PRD §11).
 
 ## 7. Decommission
 
