@@ -19,6 +19,7 @@ use ui::prelude::*;
 use variables::ScopeStack;
 
 use crate::method;
+use crate::variable_autocomplete::VariableAutocomplete;
 use crate::variable_highlight;
 
 /// The height of one method control (a [`ButtonSize::Medium`]) in pixels at the default
@@ -64,6 +65,9 @@ pub struct UrlBar {
     /// The scopes the URL highlights its `{{variables}}` against (REQ-VAR-03) — the
     /// editor's stack, shared (an `Arc`) so edits can re-highlight from here.
     scopes: Arc<ScopeStack>,
+    /// The `{{variable}}` autocomplete behind the URL field (REQ-VAR-04): the popover
+    /// under the input, driven from the input's edits (`variable_autocomplete`).
+    autocomplete: Entity<VariableAutocomplete>,
     _url_subscription: Subscription,
 }
 
@@ -79,6 +83,8 @@ impl UrlBar {
         // in the tab order right after the method control.
         url_input.read(cx).focus_handle(cx).tab_stop(true);
         let url_subscription = cx.subscribe_in(&url_input, window, Self::on_url_event);
+        // The `{{variable}}` popover completes this field (REQ-VAR-04).
+        let autocomplete = cx.new(|cx| VariableAutocomplete::new(url_input.clone(), window, cx));
         let bar = Self {
             method,
             url_input,
@@ -89,6 +95,7 @@ impl UrlBar {
             custom_input_subscription: None,
             custom_error: None,
             scopes: Arc::new(ScopeStack::new()),
+            autocomplete,
             _url_subscription: url_subscription,
         };
         bar.refresh_highlights(cx);
@@ -100,10 +107,20 @@ impl UrlBar {
         &self.url_input
     }
 
-    /// Store the scopes the URL highlights against and re-highlight it (REQ-VAR-03).
+    /// Store the scopes the URL highlights against and re-highlight it (REQ-VAR-03);
+    /// the autocomplete offers their names (REQ-VAR-04).
     pub fn set_scopes(&mut self, scopes: Arc<ScopeStack>, cx: &mut Context<Self>) {
+        self.autocomplete.update(cx, |autocomplete, cx| {
+            autocomplete.set_scopes(scopes.clone(), cx);
+        });
         self.scopes = scopes;
         self.refresh_highlights(cx);
+    }
+
+    /// The `{{variable}}` autocomplete behind the URL field (REQ-VAR-04) — what tests
+    /// and later fields reach into.
+    pub fn autocomplete(&self) -> &Entity<VariableAutocomplete> {
+        &self.autocomplete
     }
 
     /// Re-highlight the URL against the current scopes.
@@ -376,7 +393,7 @@ impl Render for UrlBar {
                             .border_color(cx.theme().colors().border)
                             .rounded_sm()
                             .px(DynamicSpacing::Base04.rems(cx))
-                            .child(self.url_input.clone()),
+                            .child(self.autocomplete.clone()),
                     ), // S26b's Send button lands at the end of this row.
             )
             .children(

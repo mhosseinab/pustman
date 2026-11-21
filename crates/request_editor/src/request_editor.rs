@@ -23,6 +23,7 @@ pub mod send;
 mod settings_tab;
 mod unresolved_warning;
 pub mod url_bar;
+pub mod variable_autocomplete;
 mod variable_highlight;
 
 use api_model::{HttpRequest, RequestSettings};

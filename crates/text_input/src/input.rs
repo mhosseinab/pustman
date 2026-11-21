@@ -1090,6 +1090,25 @@ impl TextInput {
         cx.notify();
     }
 
+    /// The completion trigger at the caret ([`crate::completion`]) — what a field's
+    /// autocomplete popover shows. The one read-only door onto that hook: the field
+    /// side never sees the editing state itself.
+    pub fn completion(&self) -> Option<crate::completion::Completion> {
+        crate::completion::completion_at(&self.state)
+    }
+
+    /// Replace a completion's range with the chosen `name`, through the one edit path
+    /// ([`crate::completion`]): one [`TextInputEvent::Changed`], undo-able like any edit.
+    pub fn insert_completion(
+        &mut self,
+        completion: &crate::completion::Completion,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        crate::completion::insert(&mut self.state, completion, name, window, cx);
+    }
+
     /// The caret offset under a mouse position, through the shaped line from the last
     /// paint. Before the first paint there is no geometry to hit, so the caret goes to
     /// the text start.

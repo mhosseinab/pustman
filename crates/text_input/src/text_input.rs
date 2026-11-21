@@ -19,6 +19,7 @@
 //! spans both widgets paint and move through every edit.
 
 pub mod buffer;
+pub mod completion;
 pub mod editing;
 pub mod highlights;
 pub mod input;
