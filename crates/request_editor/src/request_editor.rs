@@ -526,3 +526,7 @@ mod auto_header_tests;
 #[cfg(test)]
 #[path = "request_editor_curl_reseed_tests.rs"]
 mod curl_reseed_tests;
+
+#[cfg(test)]
+#[path = "m1_layout_fixes_tests.rs"]
+mod m1_layout_fixes_tests;

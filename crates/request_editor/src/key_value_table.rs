@@ -21,6 +21,11 @@ use ui::prelude::*;
 /// column never squeezes the text columns next to it.
 const NARROW_COLUMN_WIDTH_PX: f32 = 48.;
 
+/// The enabled checkbox's label — its accessible name. It paints no text: the column
+/// header ("Enabled") is the row's visible meaning, and the label would run over the
+/// Key cell beside it (S33n).
+pub const ENABLED_CHECKBOX_LABEL: &str = "Include this row in the request";
+
 /// Which cell of a row is being edited.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RowField {
@@ -346,9 +351,10 @@ impl KeyValueTable {
         let weak = cx.weak_entity();
         Toggle::new(
             ElementId::NamedInteger(SharedString::new_static("enabled"), id),
-            SharedString::new_static("Include this row in the request"),
+            SharedString::new_static(ENABLED_CHECKBOX_LABEL),
             ToggleState::from(row.row.enabled),
         )
+        .label_hidden()
         .on_change(move |state, _window, cx| {
             if weak
                 .update(cx, |table, cx| {

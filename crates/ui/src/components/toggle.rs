@@ -32,6 +32,13 @@ const CONTROL_PX: f32 = 16.;
 const SWITCH_WIDTH_PX: f32 = 32.;
 const SWITCH_HEIGHT_PX: f32 = 18.;
 
+/// The debug key a toggle's painted label renders under — the test hook that lets
+/// `VisualTestContext::debug_bounds` prove a label is (not) painted (the
+/// `response_viewer::error_panel`'s selector pattern, S33n).
+pub fn toggle_label_selector(label: &str) -> String {
+    format!("toggle-label-{label}")
+}
+
 /// What a toggle shows: on, off, or a mixed state for "some rows are ticked".
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ToggleState {
@@ -90,7 +97,8 @@ pub enum ToggleKind {
 type ChangeHandler = Rc<dyn Fn(ToggleState, &mut Window, &mut App)>;
 
 /// A checkbox or switch. The label is what the control means — it is drawn next to the
-/// control and doubles as the accessible name.
+/// control and doubles as the accessible name, or is the accessible name alone when
+/// [`Toggle::label_hidden`] says so.
 #[derive(Clone, IntoElement)]
 pub struct Toggle {
     id: ElementId,
@@ -99,6 +107,7 @@ pub struct Toggle {
     kind: ToggleKind,
     disabled: bool,
     color: Color,
+    label_hidden: bool,
     focus_handle: Option<FocusHandle>,
     on_change: Option<ChangeHandler>,
 }
@@ -129,9 +138,19 @@ impl Toggle {
             kind: ToggleKind::Checkbox,
             disabled: false,
             color: Color::Default,
+            label_hidden: false,
             focus_handle: None,
             on_change: None,
         }
+    }
+
+    /// Keep `label` as the control's accessible name only — no label text is drawn
+    /// beside the control. For a checkbox whose visible meaning lives elsewhere (a
+    /// table's "Enabled" column header), where painted label text would run over the
+    /// cells beside it (S33n).
+    pub fn label_hidden(mut self) -> Self {
+        self.label_hidden = true;
+        self
     }
 
     /// Draw it as a switch instead of a checkbox.
@@ -275,7 +294,12 @@ impl RenderOnce for Toggle {
             })
             .focus_visible(|style| style.border_color(cx.theme().colors().border_focused))
             .child(control)
-            .child(Label::new(label).size(LabelSize::Small).color(self.color))
+            .children((!self.label_hidden).then(|| {
+                let painted_label = label.clone();
+                div()
+                    .debug_selector(move || toggle_label_selector(&painted_label))
+                    .child(Label::new(label).size(LabelSize::Small).color(self.color))
+            }))
             .map(|this| {
                 if self.disabled {
                     this.cursor_not_allowed().opacity(0.6)
@@ -304,3 +328,7 @@ impl Disableable for Toggle {
         self
     }
 }
+
+#[cfg(test)]
+#[path = "toggle_label_tests.rs"]
+mod label_tests;

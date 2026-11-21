@@ -45,6 +45,7 @@ use http_engine::{
     resolve_request,
 };
 use pustman_actions::request;
+use response_viewer::ResponseView;
 use ui::prelude::*;
 use variables::{DynamicValues, ScopeStack};
 
@@ -235,6 +236,9 @@ impl RequestEditor {
             return;
         }
         self.unresolved_warning = None;
+        // The response region starts over with the send: its old facts and panes must
+        // never show beside what this send produces (S33n).
+        self.clear_previous_response(cx);
         let input = SendInput {
             request: sent.clone(),
             // The Auth tab's parent chain, nearest first — `prepare`'s own contract —
@@ -267,9 +271,12 @@ impl RequestEditor {
 
     /// Cancel the send in flight: dropping `pending_send` discards its result and
     /// [`HttpClient::cancel`] drops the task that holds the connection (REQ-HTTP-12).
-    /// A user cancel is not a failure — no error is shown.
+    /// A user cancel is not a failure — no error is shown — but it does show its own
+    /// state where responses live (S33n): the previous response must not survive
+    /// beside it.
     pub fn cancel_send(&mut self, cx: &mut Context<Self>) {
         self.pending_send = None;
+        self.show_cancelled_state(cx);
         if let Some(client) = cx
             .try_global::<RequestClient>()
             .map(|client| client.0.clone())
@@ -277,6 +284,27 @@ impl RequestEditor {
             client.update(cx, |client, cx| client.cancel(cx));
         }
         cx.notify();
+    }
+
+    /// The cancelled state in the response region (the response states' "Client
+    /// canceled"): the pane says the client stopped waiting — info level, not a
+    /// failure (`response_viewer`'s error panel maps [`TransportError::Cancelled`] to
+    /// severity info) — with the previous response gone (S33n).
+    fn show_cancelled_state(&mut self, cx: &mut Context<Self>) {
+        self.clear_previous_response(cx);
+        self.response_view
+            .update(cx, |view, cx| view.set_error(TransportError::Cancelled, cx));
+    }
+
+    /// Start the response region over: the previous response's facts
+    /// (`RequestEditor::status_line`) and the panes below it must never survive into
+    /// what the next outcome shows — a failed or cancelled send may not sit beside the
+    /// old 200 (S33n). A fresh [`ResponseView`] is the clear: its two setters show a
+    /// response or an error, and the error state replaces the strip only when the view
+    /// holds no response of its own.
+    fn clear_previous_response(&mut self, cx: &mut Context<Self>) {
+        self.status_line = None;
+        self.response_view = cx.new(ResponseView::new);
     }
 
     /// A send that failed before or at the transport: one Console Error entry
@@ -290,6 +318,7 @@ impl RequestEditor {
     /// test without `console::init`) records nothing rather than crashing the send path.
     fn fail_send(&mut self, sent: &HttpRequest, error: &PipelineError, cx: &mut Context<Self>) {
         self.pending_send = None;
+        self.clear_previous_response(cx);
         if cx.try_global::<ConsoleStore>().is_some() {
             record_error(Some(sent), error, cx);
         }
@@ -351,7 +380,11 @@ impl RequestEditor {
             }
             // A cancelled or replaced send is not a failure to report (REQ-HTTP-12) and
             // records nothing here: `console::watch` in the binary already records it.
-            Err(PipelineError::Transport(TransportError::Cancelled)) => {}
+            // It still shows its own state, so the previous response never sits beside
+            // it (S33n).
+            Err(PipelineError::Transport(TransportError::Cancelled)) => {
+                self.show_cancelled_state(cx)
+            }
             Err(error) => self.fail_send(&sent, &error, cx),
         }
         cx.notify();

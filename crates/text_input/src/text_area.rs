@@ -82,6 +82,12 @@ impl TextArea {
         self.state.text()
     }
 
+    /// The bounds the element painted at last frame — what a layout test measures the
+    /// widget's painted size through (`text_area_layout_tests`, S33n).
+    pub fn painted_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.last_bounds.get()
+    }
+
     /// Replace the text area's text, put the cursor at the end and report the change.
     /// Line breaks are kept (CRLF folds to LF, see [`EditState::set_text`]).
     pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
@@ -881,6 +887,11 @@ impl Render for TextArea {
             .text_ui_size(TextSize::Default, cx)
             .text_color(Color::Default.color(cx))
             .px(DynamicSpacing::Base04.px(cx))
+            // The widget fills the box its owner gives it (`TextAreaElement` sizes
+            // itself `relative(1.)` of this root), so the root takes the box's size:
+            // 100 % of an unsized root is 0 px, and a 0 px editor cannot be typed into
+            // or seen (S33n).
+            .size_full()
             .min_w_0()
             .overflow_hidden()
             .relative()
@@ -900,3 +911,7 @@ mod tests;
 #[cfg(test)]
 #[path = "text_area_font_size_tests.rs"]
 mod font_size_tests;
+
+#[cfg(test)]
+#[path = "text_area_layout_tests.rs"]
+mod layout_tests;

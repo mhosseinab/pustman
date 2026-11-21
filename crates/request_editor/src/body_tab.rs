@@ -60,7 +60,8 @@ const CONTROL_HEIGHT_PX: f32 = 28.;
 
 /// The height the raw editor gets at minimum, in pixels at the default scale: a body
 /// editor needs room for more than one line before it starts taking the pane's slack.
-const RAW_EDITOR_MIN_HEIGHT_PX: f32 = 120.;
+/// `pub(crate)` so the layout fix's test measures against the same minimum (S33n).
+pub(crate) const RAW_EDITOR_MIN_HEIGHT_PX: f32 = 120.;
 
 /// The width of the enabled, kind and remove columns in pixels at the default scale: a
 /// fixed column never squeezes the text columns next to it.
@@ -961,7 +962,9 @@ impl BodyTab {
             .cell(self.render_form_remove(row, cx))
     }
 
-    /// The enabled checkbox of one form-data row.
+    /// The enabled checkbox of one form-data row. Its label is the accessible name
+    /// only: the "Enabled" column header is the row's visible meaning, and painted
+    /// label text would run over the Key cell beside it (S33n).
     fn render_form_enabled(&self, row: &FormRow, cx: &mut Context<Self>) -> AnyElement {
         let id = row.id;
         let weak = cx.weak_entity();
@@ -970,6 +973,7 @@ impl BodyTab {
             SharedString::new_static("Include this field in the request"),
             ToggleState::from(row.field.enabled),
         )
+        .label_hidden()
         .on_change(move |state, _window, cx| {
             if weak
                 .update(cx, |tab, cx| {

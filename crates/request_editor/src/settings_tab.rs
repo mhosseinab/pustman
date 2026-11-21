@@ -43,6 +43,11 @@ use ui::prelude::*;
 /// scale: the version picker menu is anchored just under it (`auth_tab`).
 const CONTROL_HEIGHT_PX: f32 = 28.;
 
+/// The width of the numeric fields in pixels at the default scale: room for about six
+/// digits and the unit beside them. An unfixed field in a flex row renders at its caret
+/// width — a few pixels (S33n).
+const NUMBER_INPUT_WIDTH_PX: f32 = 96.;
+
 /// Test hook: the verify-TLS switch of the Settings tab.
 pub const VERIFY_TLS_SWITCH_SELECTOR: &str = "settings-verify-tls-switch";
 
@@ -529,6 +534,7 @@ impl SettingsTab {
                         div()
                             .id(ElementId::Name(SharedString::from(format!("{key}-input"))))
                             .debug_selector(|| format!("{key}-input"))
+                            .w(px_to_rems(NUMBER_INPUT_WIDTH_PX))
                             .child(self.numeric_input(field).clone()),
                     )
                     .child(
