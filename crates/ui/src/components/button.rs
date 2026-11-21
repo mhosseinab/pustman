@@ -411,7 +411,9 @@ impl RenderOnce for Button {
                 style_refinement.border_color(cx.theme().colors().border_focused)
             })
             .when_some(self.tab_index, |this, index| this.tab_index(index))
-            .tooltip(tooltip.builder())
+            // A hidden tooltip — the control's own popover is open (#265) — attaches no
+            // hover balloon at all, which is also what clears one already on screen.
+            .when(!tooltip.is_hidden(), |this| this.tooltip(tooltip.builder()))
             .child(content)
             .map(|this| {
                 if disabled {
@@ -644,7 +646,9 @@ impl RenderOnce for IconButton {
                 style_refinement.border_color(cx.theme().colors().border_focused)
             })
             .when_some(self.tab_index, |this, index| this.tab_index(index))
-            .tooltip(tooltip.builder())
+            // No hover balloon while the tooltip says the control's own popover is
+            // open (#265).
+            .when(!tooltip.is_hidden(), |this| this.tooltip(tooltip.builder()))
             .map(|this| match &self.hover_group {
                 Some(group) => this.invisible().group_hover(group.clone(), |s| s.visible()),
                 None => this,
