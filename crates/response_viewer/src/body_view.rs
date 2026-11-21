@@ -156,7 +156,7 @@ impl BodyView {
         ResponseViewerSetting::register(cx);
         let mode_bar = cx.new(|cx| {
             TabBar::new(cx)
-                .section()
+                .segmented()
                 .with_tabs(mode_tabs(cx.entity_id()))
         });
         let _mode_bar_subscription = cx.subscribe(&mode_bar, Self::on_mode_bar_event);
@@ -639,6 +639,7 @@ impl BodyView {
             .items_center()
             .justify_between()
             .px(DynamicSpacing::Base04.rems(cx))
+            .py(DynamicSpacing::Base06.rems(cx))
             .child(self.mode_bar.clone())
             .child(self.render_formatter_control(cx))
     }
@@ -964,3 +965,7 @@ mod format_tests;
 #[cfg(test)]
 #[path = "json_syntax_view_tests.rs"]
 mod json_syntax_view_tests;
+
+#[cfg(test)]
+#[path = "body_mode_bar_tests.rs"]
+mod body_mode_bar_tests;

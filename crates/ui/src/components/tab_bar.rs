@@ -13,8 +13,9 @@ use theme::ActiveTheme;
 
 use crate::actions::{Activate, SelectNext, SelectPrevious};
 use crate::components::behavior::Toggleable;
-use crate::components::tab::Tab;
+use crate::components::tab::{Tab, TabStyle};
 use crate::h_flex;
+use crate::spacing::DynamicSpacing;
 use crate::typography::StyledTypography;
 use crate::units::px_to_rems;
 
@@ -23,6 +24,9 @@ pub(crate) const TAB_BAR_CONTEXT: &str = "TabBar";
 
 /// The height of the request tab row: the redesign pack's `layout.requestTabs`, 40 px.
 const TAB_BAR_HEIGHT_PX: f32 = 40.;
+
+/// Test hook for the rounded track a segmented bar draws its chips in.
+pub const SEGMENTED_TRACK_SELECTOR: &str = "tab-bar-segmented-track";
 
 /// What a [`TabBar`] tells its owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,7 +47,7 @@ pub struct TabBar {
     focus_handle: FocusHandle,
     tabs: Vec<Tab>,
     selected: usize,
-    section: bool,
+    style: TabStyle,
 }
 
 impl TabBar {
@@ -55,7 +59,7 @@ impl TabBar {
             focus_handle: cx.focus_handle().tab_stop(true),
             tabs: Vec::new(),
             selected: 0,
-            section: false,
+            style: TabStyle::Pane,
         }
     }
 
@@ -63,7 +67,15 @@ impl TabBar {
     /// no band behind them, room around each label, and an accent underline under the
     /// active one (pack `workbench_blueprint.svg`). Pane tabs keep the default look.
     pub fn section(mut self) -> Self {
-        self.section = true;
+        self.style = TabStyle::Section;
+        self
+    }
+
+    /// Draw the bar as a segmented switch: a second level of tabs under a section row
+    /// (Pretty/Raw/Hex/Preview) reads as one compact control, its chips in a rounded
+    /// track, rather than as another underlined row stacked under the first.
+    pub fn segmented(mut self) -> Self {
+        self.style = TabStyle::Segmented;
         self
     }
 
@@ -172,25 +184,38 @@ impl Render for TabBar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let selected = self.selected;
         let focus_handle = self.focus_handle.clone();
-        let section = self.section;
+        let style = self.style;
+        let colors = cx.theme().colors();
         h_flex()
             .id(ElementId::from(&focus_handle))
             .font_ui(cx)
             .key_context(TAB_BAR_CONTEXT)
             .role(gpui::Role::TabList)
-            .h(px_to_rems(TAB_BAR_HEIGHT_PX))
-            .when(!section, |this| {
-                this.bg(cx.theme().colors().tab_bar_background)
+            .map(|this| match style {
+                TabStyle::Pane => this
+                    .h(px_to_rems(TAB_BAR_HEIGHT_PX))
+                    .items_stretch()
+                    .bg(colors.tab_bar_background),
+                TabStyle::Section => this.h(px_to_rems(TAB_BAR_HEIGHT_PX)).items_stretch(),
+                TabStyle::Segmented => this
+                    .debug_selector(|| SEGMENTED_TRACK_SELECTOR.to_owned())
+                    .flex_none()
+                    .items_center()
+                    .gap(DynamicSpacing::Base02.rems(cx))
+                    .p(DynamicSpacing::Base02.rems(cx))
+                    .rounded_md()
+                    .border_1()
+                    .border_color(colors.border_variant)
+                    .bg(colors.element_background),
             })
-            .items_stretch()
             .track_focus(&focus_handle)
-            .focus_visible(|style| style.border_color(cx.theme().colors().border_focused))
+            .focus_visible(|focused| focused.border_color(colors.border_focused))
             .on_action(cx.listener(Self::select_next))
             .on_action(cx.listener(Self::select_previous))
             .on_action(cx.listener(Self::activate))
             .children(self.tabs.iter().enumerate().map(|(index, tab)| {
                 tab.clone()
-                    .section(section)
+                    .style(style)
                     .toggle_state(index == selected)
                     .on_activated(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
                         this.activate_tab(index, cx);
@@ -210,3 +235,7 @@ mod keyboard_tests;
 #[cfg(test)]
 #[path = "tab_bar_section_tests.rs"]
 mod section_tests;
+
+#[cfg(test)]
+#[path = "tab_bar_segmented_tests.rs"]
+mod segmented_tests;

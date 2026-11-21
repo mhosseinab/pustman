@@ -45,7 +45,7 @@ pub use components::label::{Headline, Label, LabelSize};
 pub use components::list::VirtualList;
 pub use components::modal::Modal;
 pub use components::tab::Tab;
-pub use components::tab_bar::{TabBar, TabBarEvent};
+pub use components::tab_bar::{SEGMENTED_TRACK_SELECTOR, TabBar, TabBarEvent};
 pub use components::table::{Table, TableColumn, TableRow};
 pub use components::toast::{Toast, ToastEvent, Toasts};
 pub use components::toggle::{Toggle, ToggleKind, ToggleState};

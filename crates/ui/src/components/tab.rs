@@ -28,6 +28,22 @@ const DIRTY_DOT_PX: f32 = 6.;
 /// The accent line under the active section tab.
 const UNDERLINE_PX: f32 = 2.;
 
+/// The height of one chip in a segmented bar: compact enough that the switch reads as a
+/// control inside the content, not as another row of tabs.
+const SEGMENT_HEIGHT_PX: f32 = 22.;
+
+/// How a [`crate::TabBar`] draws its tabs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum TabStyle {
+    /// Open requests across a pane: filled boxes on a band.
+    #[default]
+    Pane,
+    /// Sections of an editor: transparent, underlined when active.
+    Section,
+    /// A second-level switch: chips in one rounded track, the active chip raised.
+    Segmented,
+}
+
 /// One tab: a title, an optional icon, and the state a request tab can be in.
 #[derive(Clone, IntoElement)]
 pub struct Tab {
@@ -38,7 +54,7 @@ pub struct Tab {
     dirty: bool,
     pinned: bool,
     disabled: bool,
-    section: bool,
+    style: TabStyle,
     width: Option<gpui::Rems>,
     on_activated: Option<ClickHandler>,
     on_close: Option<ClickHandler>,
@@ -67,7 +83,7 @@ impl Tab {
             dirty: false,
             pinned: false,
             disabled: false,
-            section: false,
+            style: TabStyle::Pane,
             width: None,
             on_activated: None,
             on_close: None,
@@ -121,10 +137,9 @@ impl Tab {
         self
     }
 
-    /// Draw as a section tab ([`crate::TabBar::section`]): transparent, wider, and
-    /// underlined when active instead of filled.
-    pub(crate) fn section(mut self, section: bool) -> Self {
-        self.section = section;
+    /// Draw in the bar's style ([`crate::TabBar::section`], [`crate::TabBar::segmented`]).
+    pub(crate) fn style(mut self, style: TabStyle) -> Self {
+        self.style = style;
         self
     }
 
@@ -170,7 +185,7 @@ impl RenderOnce for Tab {
         let colors = cx.theme().colors();
         let active = self.active;
         let disabled = self.disabled;
-        let section = self.section;
+        let style = self.style;
         let on_activated = self.on_activated;
 
         // A disabled tab offers nothing to click: no close button (the `Disableable`
@@ -205,12 +220,14 @@ impl RenderOnce for Tab {
             .items_center()
             .flex_shrink_0()
             .gap(DynamicSpacing::Base02.rems(cx))
-            .map(|this| {
-                if section {
-                    this.relative().px(DynamicSpacing::Base12.rems(cx))
-                } else {
-                    this.px(DynamicSpacing::Base04.rems(cx))
-                }
+            .map(|this| match style {
+                TabStyle::Pane => this.px(DynamicSpacing::Base04.rems(cx)),
+                TabStyle::Section => this.relative().px(DynamicSpacing::Base12.rems(cx)),
+                TabStyle::Segmented => this
+                    .h(px_to_rems(SEGMENT_HEIGHT_PX))
+                    .px(DynamicSpacing::Base08.rems(cx))
+                    .rounded_sm()
+                    .border_1(),
             })
             .when_some(self.width, |this, width| this.w(width))
             // A tooltip only when it adds what the tab does not show: the dirty state, or
@@ -218,20 +235,22 @@ impl RenderOnce for Tab {
             .when(self.dirty || self.width.is_some(), |this| {
                 this.tooltip(Tooltip::text(tooltip_text.clone()).builder())
             })
-            .map(|this| {
-                if section {
-                    this.text_color(if active {
-                        colors.text
-                    } else {
-                        colors.text_muted
-                    })
-                } else if active {
-                    this.bg(colors.tab_active_background)
-                        .text_color(colors.text_accent)
-                } else {
-                    this.bg(colors.tab_inactive_background)
-                        .text_color(colors.text_muted)
-                }
+            .map(|this| match (style, active) {
+                (TabStyle::Section, true) => this.text_color(colors.text),
+                (TabStyle::Section, false) => this.text_color(colors.text_muted),
+                (TabStyle::Segmented, true) => this
+                    .bg(colors.elevated_surface_background)
+                    .border_color(colors.border)
+                    .text_color(colors.text),
+                (TabStyle::Segmented, false) => this
+                    .border_color(colors.border_transparent)
+                    .text_color(colors.text_muted),
+                (TabStyle::Pane, true) => this
+                    .bg(colors.tab_active_background)
+                    .text_color(colors.text_accent),
+                (TabStyle::Pane, false) => this
+                    .bg(colors.tab_inactive_background)
+                    .text_color(colors.text_muted),
             })
             .when(disabled, |this| this.opacity(0.5))
             .hover(|style| {
@@ -272,7 +291,7 @@ impl RenderOnce for Tab {
                     .then(|| Icon::new(IconName::Pin).size(IconSize::XSmall)),
             )
             .children(close_button)
-            .when(section && active, |this| {
+            .when(style == TabStyle::Section && active, |this| {
                 this.child(
                     div()
                         .debug_selector(move || underline_selector)
