@@ -20,6 +20,7 @@
 //! Both draw from the same cached bytes the text modes draw from.
 
 use std::borrow::Cow;
+use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -35,6 +36,7 @@ use ui::prelude::*;
 use crate::child_id;
 use crate::find::{FindBar, FindEvent, FindMatch};
 use crate::hex_view::{HexRows, HexView};
+use crate::json_syntax::{JsonToken, LineSpans, json_line_spans, layer_highlights};
 use crate::large_body::{self, LargeBodyBanner, LargeBodyNotice, ResponseViewerSetting};
 use crate::pretty::{FormatError, Formatter};
 use crate::preview::{PreviewContent, PreviewPane};
@@ -87,6 +89,9 @@ pub struct BodyView {
     /// Pretty mode's lines, once the formatter landed off the foreground. Empty until
     /// then and after a format error — the pane falls back to the Raw lines either way.
     pretty_lines: Arc<Vec<SharedString>>,
+    /// The JSON syntax spans of [`Self::pretty_lines`], one list per line, computed with
+    /// them. Empty when Pretty did not format the body as JSON.
+    syntax_spans: Arc<Vec<LineSpans>>,
     /// The decoded body text, cached so a mode or override change reformats without
     /// re-reading the body.
     text: Arc<str>,
@@ -158,6 +163,7 @@ impl BodyView {
         Self {
             lines: Arc::new(Vec::new()),
             pretty_lines: Arc::new(Vec::new()),
+            syntax_spans: Arc::new(Vec::new()),
             text: Arc::from(""),
             bytes: Arc::new(Vec::new()),
             content_type: None,
@@ -199,6 +205,7 @@ impl BodyView {
         self.bytes = Arc::new(Vec::new());
         self.lines = Arc::new(Vec::new());
         self.pretty_lines = Arc::new(Vec::new());
+        self.syntax_spans = Arc::new(Vec::new());
         self.preview = None;
         self.format_error = None;
         let content_type = content_type(&response.headers);
@@ -455,6 +462,12 @@ impl BodyView {
         }
     }
 
+    /// Pretty mode's syntax spans, one list per formatted line.
+    #[cfg(test)]
+    pub(crate) fn syntax_spans(&self) -> &[LineSpans] {
+        &self.syntax_spans
+    }
+
     /// The formatter in effect: the hand-picked override, or what `Content-Type` says.
     fn effective_formatter(&self) -> Formatter {
         self.formatter_override.unwrap_or(self.detected)
@@ -466,6 +479,7 @@ impl BodyView {
     fn refresh_format(&mut self, cx: &mut Context<Self>) {
         self.format_task = None;
         self.pretty_lines = Arc::new(Vec::new());
+        self.syntax_spans = Arc::new(Vec::new());
         self.format_error = None;
         if self.mode != BodyMode::Pretty || self.text.is_empty() {
             return;
@@ -473,16 +487,26 @@ impl BodyView {
         let text = Arc::clone(&self.text);
         let formatter = self.effective_formatter();
         self.format_task = Some(cx.spawn(async move |this, cx| {
-            let formatted = cx
-                .background_spawn(async move { formatter.format(text.as_bytes()) })
+            let outcome = cx
+                .background_spawn(async move {
+                    let formatted = formatter
+                        .format(text.as_bytes())
+                        .map_err(|error| format_error_note(formatter, error))?;
+                    let lines = split_lines(&formatted);
+                    let spans = if formatter == Formatter::Json {
+                        lines.iter().map(|line| json_line_spans(line)).collect()
+                    } else {
+                        Vec::new()
+                    };
+                    Ok((lines, spans))
+                })
                 .await;
-            let outcome = match formatted {
-                Ok(formatted) => Ok(split_lines(&formatted)),
-                Err(error) => Err(format_error_note(formatter, error)),
-            };
             if let Err(_released) = this.update(cx, |view, cx| {
                 match outcome {
-                    Ok(lines) => view.pretty_lines = Arc::new(lines),
+                    Ok((lines, spans)) => {
+                        view.pretty_lines = Arc::new(lines);
+                        view.syntax_spans = Arc::new(spans);
+                    }
                     Err(message) => view.format_error = Some(message),
                 }
                 view.refresh_find(cx);
@@ -665,6 +689,11 @@ impl BodyView {
             return div().into_any_element();
         }
         let row_lines = Arc::clone(&lines);
+        let row_spans = if Arc::ptr_eq(&lines, &self.pretty_lines) {
+            Arc::clone(&self.syntax_spans)
+        } else {
+            Arc::new(Vec::new())
+        };
         let row_matches = self.find_matches(cx);
         let row_base = base.clone();
         let list_base = base.clone();
@@ -674,7 +703,8 @@ impl BodyView {
             lines.len(),
             move |index| child_id(&row_base, format!("line-{index}")),
             move |index, _window, cx| {
-                render_line_with_matches(&row_lines, index, &render_base, &row_matches, cx)
+                let spans = row_spans.get(index).map(Vec::as_slice).unwrap_or_default();
+                render_line_with_matches(&row_lines, index, &render_base, spans, &row_matches, cx)
             },
         )
         .track_scroll(self.list_scroll_handle.clone())
@@ -767,16 +797,18 @@ pub(crate) fn render_line(
     base: &ElementId,
     cx: &mut App,
 ) -> AnyElement {
-    render_line_with_matches(lines, index, base, &[], cx)
+    render_line_with_matches(lines, index, base, &[], &[], cx)
 }
 
-/// One body line with the find matches on it painted as [`HighlightStyle`] backgrounds
-/// (REQ-RESP-03). Only visible rows get here ([`VirtualList`] asks per row), and the
-/// row's matches come out of the ordered list by one binary search.
+/// One body line, coloured by its syntax spans, with the find matches on it painted as
+/// [`HighlightStyle`] backgrounds over them (REQ-RESP-03). Only visible rows get here
+/// ([`VirtualList`] asks per row), and the row's matches come out of the ordered list by
+/// one binary search.
 fn render_line_with_matches(
     lines: &[SharedString],
     index: usize,
     base: &ElementId,
+    spans: &[(Range<usize>, JsonToken)],
     matches: &[FindMatch],
     cx: &App,
 ) -> AnyElement {
@@ -788,11 +820,31 @@ fn render_line_with_matches(
         ..HighlightStyle::default()
     };
     let first = matches.partition_point(|found| found.line < index);
-    let highlights = matches[first..]
+    let found = matches[first..]
         .iter()
         .take_while(|found| found.line == index)
         .map(|found| (found.range.clone(), highlight))
         .collect::<Vec<_>>();
+    let colours = cx.theme().colors();
+    let syntax = spans
+        .iter()
+        .map(|(range, token)| {
+            let color = match token {
+                JsonToken::Key => colours.syntax_key,
+                JsonToken::String => colours.syntax_string,
+                JsonToken::Number => colours.syntax_number,
+                JsonToken::Boolean => colours.syntax_boolean,
+                JsonToken::Null => colours.syntax_null,
+                JsonToken::Punctuation => colours.syntax_punctuation,
+            };
+            let style = HighlightStyle {
+                color: Some(color),
+                ..HighlightStyle::default()
+            };
+            (range.clone(), style)
+        })
+        .collect::<Vec<_>>();
+    let highlights = layer_highlights(&syntax, &found);
     let line_id = child_id(base, format!("line-{index}"));
     div()
         .id(child_id(&line_id, "text"))
@@ -908,3 +960,7 @@ mod tests;
 #[cfg(test)]
 #[path = "find_format_tests.rs"]
 mod format_tests;
+
+#[cfg(test)]
+#[path = "json_syntax_view_tests.rs"]
+mod json_syntax_view_tests;

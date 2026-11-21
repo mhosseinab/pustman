@@ -64,9 +64,9 @@
 
     "syntax_key": "#8AB4FFff",
     "syntax_string": "#7BD6ADff",
-    "syntax_number": "#EDC66Aff",
-    "syntax_boolean": "#FF925Cff",
-    "syntax_null": "#A8B4C4ff",
+    "syntax_number": "#F0A85Aff",
+    "syntax_boolean": "#F28AD8ff",
+    "syntax_null": "#B9A6FFff",
     "syntax_punctuation": "#A8B4C4ff",
 
     "variable_resolved": "#7BD6ADff",

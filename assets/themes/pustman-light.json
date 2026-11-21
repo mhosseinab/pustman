@@ -62,12 +62,12 @@
     "accent_background": "#A73707ff",
     "accent_foreground": "#FFFFFFff",
 
-    "syntax_key": "#245EA8ff",
-    "syntax_string": "#176442ff",
-    "syntax_number": "#77520Aff",
-    "syntax_boolean": "#A73707ff",
-    "syntax_null": "#4E6070ff",
-    "syntax_punctuation": "#4E6070ff",
+    "syntax_key": "#0A4FC2ff",
+    "syntax_string": "#0B7A3Bff",
+    "syntax_number": "#9C4A00ff",
+    "syntax_boolean": "#B0158Aff",
+    "syntax_null": "#6B4FBFff",
+    "syntax_punctuation": "#5E6B78ff",
 
     "variable_resolved": "#176442ff",
     "variable_unresolved": "#AB253Dff"
