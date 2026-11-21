@@ -593,7 +593,9 @@ impl AuthTab {
                 )
                 .size(ButtonSize::Medium)
                 .end_icon(Icon::new(IconName::ChevronDown).size(IconSize::Small))
-                .tooltip(Tooltip::text("Choose the auth type"))
+                // The tooltip hides while its own dropdown is open (#267): with the
+                // pointer still on the anchor, the balloon would paint over the menu rows.
+                .tooltip(Tooltip::text("Choose the auth type").hidden(self.type_menu.is_some()))
                 .focus_handle(self.type_focus_handle.clone())
                 .on_click(cx.listener(|this, _event, window, cx| this.open_type_menu(window, cx))),
             )
@@ -614,7 +616,10 @@ impl AuthTab {
                 )
                 .size(ButtonSize::Medium)
                 .end_icon(Icon::new(IconName::ChevronDown).size(IconSize::Small))
-                .tooltip(Tooltip::text("Where the API key is sent"))
+                // Likewise for the location dropdown (#267).
+                .tooltip(
+                    Tooltip::text("Where the API key is sent").hidden(self.location_menu.is_some()),
+                )
                 .focus_handle(self.location_focus_handle.clone())
                 .on_click(
                     cx.listener(|this, _event, window, cx| this.open_location_menu(window, cx)),
@@ -925,3 +930,7 @@ mod tests;
 #[cfg(test)]
 #[path = "auth_tab_layout_tests.rs"]
 mod layout_tests;
+
+#[cfg(test)]
+#[path = "auth_tab_menu_tooltip_tests.rs"]
+mod menu_tooltip_tests;
