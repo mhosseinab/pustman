@@ -1,13 +1,17 @@
 //! M1 fixes (S33o): the Timeline tab must scroll inside its own pane, never push or
-//! scroll the window around it (plan issue #202). Selecting the tab with a long timeline
-//! used to shift the whole window content up and clip the tab strip above it; the tab
-//! strip's painted origin is the observable that proves the chrome never moves.
+//! scroll the window around it (plan issue #202). With a long timeline, selecting the
+//! tab used to overflow the pane and shift the whole window content up (clipping the tab
+//! strip); the tab strip's painted origin is the observable that proves the window chrome
+//! never moves, and the scroll check proves the content moved *inside* the pane instead.
 
 use std::ops::Deref;
 use std::time::Duration;
 
 use api_model::{Method, SecretValues};
-use gpui::{AnyWindowHandle, Bounds, ElementId, Modifiers, Pixels, TestAppContext, VisualTestContext};
+use gpui::{
+    Bounds, ElementId, Modifiers, MouseButton, Pixels, Point, ScrollDelta, ScrollEvent, ScrollSource,
+    TestAppContext, TouchPhase, VisualTestContext, px, size,
+};
 use http_engine::{
     Header, RedirectHop, RequestBody, ResolvedRequest, Response, ResponseBody, SendSettings, Timings,
 };
@@ -21,10 +25,7 @@ async fn test_timeline_tab_does_not_move_the_window_chrome(cx: &mut TestAppConte
     cx.update(init_test);
     // A window small enough that a long timeline is taller than the response region
     // below the tab strip — the pane size the S38 hand check ran into.
-    let window = cx.open_window(
-        gpui::size(gpui::px(800.), gpui::px(300.)),
-        |_, cx| ResponseView::new(cx),
-    );
+    let window = cx.open_window(size(px(800.), px(400.)), |_, cx| ResponseView::new(cx));
     let view = window
         .entity(cx)
         .expect("the window holds the response view");
@@ -41,21 +42,49 @@ async fn test_timeline_tab_does_not_move_the_window_chrome(cx: &mut TestAppConte
     });
     draw_window(&mut cx);
 
-    let before = tab_bounds(0, &mut cx).expect("the tab strip is painted before the switch");
-    eprintln!("PROBE tab strip before = {before:?}");
+    let strip_before = tab_bounds(0, &mut cx).expect("the tab strip is painted before the switch");
 
     let timeline_tab = tab_bounds(3, &mut cx).expect("the Timeline tab is on the strip");
     cx.simulate_click(timeline_tab.center(), Modifiers::none());
     cx.run_until_parked();
     draw_window(&mut cx);
 
-    let after = tab_bounds(0, &mut cx).expect("the tab strip is painted after the switch");
-    eprintln!("PROBE tab strip after = {after:?}");
-    eprintln!("PROBE note = {:?}", cx.debug_bounds("timeline-unmeasured-note"));
-
+    let strip_after = tab_bounds(0, &mut cx).expect("the tab strip is painted after the switch");
     assert_eq!(
-        before.origin, after.origin,
+        strip_before.origin, strip_after.origin,
         "selecting the Timeline tab does not move the tab strip (the window chrome)"
+    );
+
+    // The long timeline must scroll *inside* its pane: one scroll notch over the note
+    // moves the timeline content up, while the chrome stays where it was.
+    let note_before = cx
+        .debug_bounds("timeline-unmeasured-note")
+        .expect("the phases note is painted");
+    // The mouse must be over the pane for the scroll to hit it (hit-testing).
+    cx.simulate_mouse_move(note_before.center(), None::<MouseButton>, Modifiers::none());
+    cx.run_until_parked();
+    cx.simulate_event(ScrollEvent {
+        position: note_before.center(),
+        delta: ScrollDelta::Lines(Point::new(0., -3.)),
+        modifiers: Modifiers::none(),
+        touch_phase: TouchPhase::Moved,
+        source: ScrollSource::Pointer,
+    });
+    cx.run_until_parked();
+    draw_window(&mut cx);
+
+    let note_after = cx
+        .debug_bounds("timeline-unmeasured-note")
+        .expect("the phases note is painted after the scroll");
+    assert!(
+        note_after.origin.y < note_before.origin.y,
+        "the timeline scrolls inside its pane (the note moved up: {note_before:?} -> \
+         {note_after:?})"
+    );
+    let strip_after_scroll = tab_bounds(0, &mut cx).expect("the tab strip is painted");
+    assert_eq!(
+        strip_before.origin, strip_after_scroll.origin,
+        "scrolling the timeline never moves the window chrome"
     );
 }
 

@@ -2790,6 +2790,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "api_model",
+ "console",
  "gpui",
  "pustman_actions",
  "request_editor",

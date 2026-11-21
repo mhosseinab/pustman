@@ -4,13 +4,17 @@
 //! [`crate::open_entry`] (REQ-HIST-02).
 //!
 //! `storage` is synchronous (ADR-0002), so every read runs on `cx.background_executor`
-//! and the foreground never touches SQLite. The read is kicked off by the constructor
-//! and re-run on every search edit; the [`Task`] is stored, so a new query cancels the
-//! read it supersedes and only the newest result can land. Rows carry method, target,
+//! and the foreground never touches SQLite. The read is kicked off by the constructor,
+//! re-run on every search edit, and re-run when a send is recorded — the Console feed
+//! (`console::ConsoleStore`, which the send's owner pushes one entry per send into) is
+//! the app's existing per-send notification, so the list refreshes live without a
+//! polling timer (S33o). The [`Task`] is stored, so a new query cancels the read it
+//! supersedes and only the newest result can land. Rows carry method, target,
 //! status and time (REQ-HIST-01) — never request or response content (REQ-HIST-03).
 
 use std::sync::{Arc, Mutex};
 
+use console::ConsoleStore;
 use gpui::{
     AnyElement, App, Context, ElementId, Entity, FocusHandle, Focusable, Global,
     InteractiveElement, IntoElement, ParentElement, Render, Role, ScrollStrategy, SharedString,
@@ -95,9 +99,9 @@ pub struct HistoryList {
     selected_entry_id: Option<i64>,
     /// The list's scroll state, so moving the selection scrolls its row into view.
     scroll_handle: UniformListScrollHandle,
-    // Kept so the search box's edits keep reaching us; dropping it would silently stop
-    // filtering.
-    _search_subscription: Subscription,
+    // Kept so the search box's edits and the per-send Console feed keep reaching us;
+    // dropping them would silently stop filtering and live refresh.
+    _subscriptions: Vec<Subscription>,
 }
 
 impl HistoryList {
@@ -126,6 +130,12 @@ impl HistoryList {
             TextInput::new(window, cx).with_placeholder(SharedString::new_static("Search history"))
         });
         let _search_subscription = cx.subscribe_in(&search, window, Self::on_search_event);
+        // Live refresh (S33o): every recorded send lands one Console entry after its
+        // history row is written (`request_editor::send` records the outcome only once
+        // the client's background work has stored it), so the feed's notification is
+        // the moment the DB holds the row — re-read then, never on a timer.
+        let _recorded_observer =
+            cx.observe_global::<ConsoleStore>(|this: &mut Self, cx| this.reload(cx));
         let mut this = Self {
             store,
             workspace_id: workspace_id.into(),
@@ -136,7 +146,7 @@ impl HistoryList {
             pending_load: None,
             selected_entry_id: None,
             scroll_handle: UniformListScrollHandle::new(),
-            _search_subscription,
+            _subscriptions: vec![_search_subscription, _recorded_observer],
         };
         this.reload(cx);
         this

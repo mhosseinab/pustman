@@ -347,8 +347,15 @@ impl Render for TimelineTab {
         let phases = self.phases_section(cx);
         let network = self.network_section(&base, cx);
         let redirects = self.redirects_section(&base, cx);
+        // The tab is one scrolling document inside its pane (`id` + `overflow_y_scroll`,
+        // with `min_h_0` up the flex chain): a timeline taller than the pane scrolls
+        // here and never overflows into — or scrolls — the window around it (S33o,
+        // #202). The scroll container needs the stable id for its scroll state.
         v_flex()
+            .id(base.clone())
             .size_full()
+            .min_h_0()
+            .overflow_y_scroll()
             .px(DynamicSpacing::Base04.rems(cx))
             .py(DynamicSpacing::Base03.rems(cx))
             .gap(DynamicSpacing::Base06.rems(cx))

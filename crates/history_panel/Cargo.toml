@@ -18,6 +18,7 @@ path = "src/history_panel.rs"
 [dependencies]
 anyhow.workspace = true
 api_model.workspace = true
+console.workspace = true
 gpui.workspace = true
 pustman_actions.workspace = true
 request_editor.workspace = true
