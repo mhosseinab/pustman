@@ -61,7 +61,7 @@ These run at the next human sign-off and are recorded in that sign-off's step re
 
 ## Window
 
-Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending) · unpromoted passed steps: 0 · unapplied deltas: 0 (cap 3 / 16). SEGMENT 3 (S26–S37) IN FLIGHT.
+Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending) · unpromoted passed steps: S26–S37 (12 plan steps, 42 sub-step commits) · unapplied deltas: 0 (cap 3 / 16). SEGMENT 3 (S26–S37) COMPLETE; next gate S38 M1 SIGN-OFF (HUMAN): E2E display checks S26/S28/S32, then the human "go" for tag `release/pustman-v1-3`.
 
 ## Status
 
