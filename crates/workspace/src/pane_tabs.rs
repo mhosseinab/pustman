@@ -132,7 +132,10 @@ impl Pane {
         cx.notify();
     }
 
-    /// Push `handle` as a new tab and activate it.
+    /// Push `handle` as a new tab and activate it. A handle that is already open keeps
+    /// its existing tab — one tab per item (REQ-UI-02): a second tab would share its
+    /// element id with the first one in the frame, and `close_tab` would close only one
+    /// of the pair.
     pub(crate) fn push_tab(
         &mut self,
         handle: Box<dyn ItemHandle>,
@@ -140,6 +143,12 @@ impl Pane {
         cx: &mut Context<Self>,
     ) {
         let entity_id = handle.entity_id();
+        if self.position_of(entity_id).is_some() {
+            // The open tab already carries its own observer; this one is dropped with
+            // the parameter.
+            self.activate_item(entity_id, cx);
+            return;
+        }
         self.tabs.push(PaneTab {
             handle,
             pinned: false,
@@ -260,3 +269,7 @@ impl Pane {
 #[cfg(test)]
 #[path = "pane_tabs_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "pane_tabs_unique_tests.rs"]
+mod unique_tests;
