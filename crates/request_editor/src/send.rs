@@ -510,7 +510,7 @@ impl RequestEditor {
             } else {
                 ButtonStyle::Filled
             })
-            .size(ButtonSize::Medium)
+            .size(ButtonSize::Large)
             .key_binding(if in_flight {
                 KeyBinding::for_action(&request::Cancel)
             } else {
@@ -573,3 +573,7 @@ mod tests;
 #[cfg(test)]
 #[path = "send_pipeline_tests.rs"]
 mod pipeline_tests;
+
+#[cfg(test)]
+#[path = "send_row_height_tests.rs"]
+mod row_height_tests;

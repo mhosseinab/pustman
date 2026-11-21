@@ -4,6 +4,7 @@
 //! Enter/Space to activate — a tab bar is one control with a row of labels, not a row of
 //! independent buttons (REQ-UI-02, REQ-UI-07).
 
+use gpui::prelude::FluentBuilder;
 use gpui::{
     App, ClickEvent, Context, ElementId, EventEmitter, FocusHandle, Focusable, InteractiveElement,
     IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled, Window,
@@ -42,6 +43,7 @@ pub struct TabBar {
     focus_handle: FocusHandle,
     tabs: Vec<Tab>,
     selected: usize,
+    section: bool,
 }
 
 impl TabBar {
@@ -53,7 +55,16 @@ impl TabBar {
             focus_handle: cx.focus_handle().tab_stop(true),
             tabs: Vec::new(),
             selected: 0,
+            section: false,
         }
+    }
+
+    /// Draw the bar as section tabs inside an editor (Params…Settings, Body/Headers…):
+    /// no band behind them, room around each label, and an accent underline under the
+    /// active one (pack `workbench_blueprint.svg`). Pane tabs keep the default look.
+    pub fn section(mut self) -> Self {
+        self.section = true;
+        self
     }
 
     /// The tabs this bar shows, before it is put on screen.
@@ -161,13 +172,16 @@ impl Render for TabBar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let selected = self.selected;
         let focus_handle = self.focus_handle.clone();
+        let section = self.section;
         h_flex()
             .id(ElementId::from(&focus_handle))
             .font_ui(cx)
             .key_context(TAB_BAR_CONTEXT)
             .role(gpui::Role::TabList)
             .h(px_to_rems(TAB_BAR_HEIGHT_PX))
-            .bg(cx.theme().colors().tab_bar_background)
+            .when(!section, |this| {
+                this.bg(cx.theme().colors().tab_bar_background)
+            })
             .items_stretch()
             .track_focus(&focus_handle)
             .focus_visible(|style| style.border_color(cx.theme().colors().border_focused))
@@ -176,6 +190,7 @@ impl Render for TabBar {
             .on_action(cx.listener(Self::activate))
             .children(self.tabs.iter().enumerate().map(|(index, tab)| {
                 tab.clone()
+                    .section(section)
                     .toggle_state(index == selected)
                     .on_activated(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
                         this.activate_tab(index, cx);
@@ -191,3 +206,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tab_bar_keyboard_tests.rs"]
 mod keyboard_tests;
+
+#[cfg(test)]
+#[path = "tab_bar_section_tests.rs"]
+mod section_tests;

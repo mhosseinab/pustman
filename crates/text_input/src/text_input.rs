@@ -29,7 +29,8 @@ pub use highlights::Highlight;
 pub use input::{EditState, TextInput, TextInputEvent};
 pub use text_area::TextArea;
 
-use gpui::{App, KeyBinding};
+use gpui::{App, Div, KeyBinding};
+use ui::prelude::*;
 
 use input::{
     Backspace, Copy, Cut, Delete, Down, End, Enter, Home, Left, Paste, Redo, Right, SelectAll,
@@ -37,6 +38,22 @@ use input::{
     TEXT_INPUT_CONTEXT, Undo, Up, WordLeft, WordRight,
 };
 use text_area::TEXT_AREA_CONTEXT;
+
+/// Test hook: `VisualTestContext::debug_bounds` finds a focused field's ring under this key.
+pub const FOCUS_RING_SELECTOR: &str = "text-field-focus-ring";
+
+/// The ring a focused field draws over itself. It is an overlay, so gaining focus never
+/// moves the text, and it shows however focus arrived: a click focuses a field as much
+/// as Tab does, and either way the user needs to see where typing goes (#212).
+fn focus_ring(cx: &App) -> Div {
+    div()
+        .absolute()
+        .inset_0()
+        .rounded_sm()
+        .border_1()
+        .border_color(cx.theme().colors().border_focused)
+        .debug_selector(|| FOCUS_RING_SELECTOR.to_string())
+}
 
 /// Set the widgets up: bind the editing keys every [`TextInput`] and [`TextArea`]
 /// answers to.
@@ -123,3 +140,7 @@ pub fn init(cx: &mut App) {
     }
     cx.bind_keys(bindings);
 }
+
+#[cfg(test)]
+#[path = "focus_ring_tests.rs"]
+mod focus_ring_tests;

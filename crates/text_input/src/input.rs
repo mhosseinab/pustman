@@ -33,6 +33,9 @@ pub const TEXT_INPUT_CONTEXT: &str = "TextInput";
 /// The debug selector the placeholder carries, so a test can see it come and go.
 pub const PLACEHOLDER_SELECTOR: &str = "text-input-placeholder";
 
+/// Test hook: the single-line field's own box, under `VisualTestContext::debug_bounds`.
+pub const TEXT_INPUT_SELECTOR: &str = "text-input";
+
 actions!(
     text_input,
     [
@@ -1569,9 +1572,11 @@ impl Element for TextElement {
 }
 
 impl Render for TextInput {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let focused = self.state.focus_handle().is_focused(window);
         div()
             .key_context(TEXT_INPUT_CONTEXT)
+            .debug_selector(|| TEXT_INPUT_SELECTOR.to_string())
             .track_focus(self.state.focus_handle())
             .cursor(CursorStyle::IBeam)
             .on_action(cx.listener(Self::backspace))
@@ -1600,7 +1605,7 @@ impl Render for TextInput {
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .font_ui(cx)
-            .text_ui_size(TextSize::Ui, cx)
+            .text_ui_size(TextSize::Default, cx)
             .text_color(Color::Default.color(cx))
             .px(DynamicSpacing::Base04.px(cx))
             .min_w_0()
@@ -1621,6 +1626,7 @@ impl Render for TextInput {
                     .child(self.placeholder.clone())
             }))
             .child(TextElement { input: cx.entity() })
+            .when(focused, |this| this.child(crate::focus_ring(cx)))
     }
 }
 
@@ -1631,3 +1637,7 @@ mod tests;
 #[cfg(test)]
 #[path = "input_placeholder_tests.rs"]
 mod placeholder_tests;
+
+#[cfg(test)]
+#[path = "input_font_size_tests.rs"]
+mod font_size_tests;

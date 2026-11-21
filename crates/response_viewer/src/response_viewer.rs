@@ -98,7 +98,7 @@ pub struct ResponseView {
 impl ResponseView {
     /// An empty viewer: the "no response yet" empty state until [`Self::set_response`].
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let tab_bar = cx.new(|cx| TabBar::new(cx).with_tabs(tabs()));
+        let tab_bar = cx.new(|cx| TabBar::new(cx).section().with_tabs(tabs()));
         let _tab_bar_subscription = cx.subscribe(&tab_bar, Self::on_tab_bar_event);
         Self {
             focus_handle: cx.focus_handle(),

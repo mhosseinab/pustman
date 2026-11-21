@@ -6,8 +6,8 @@
 //! matches the keymap. Every icon-only control carries one (REQ-UI-07).
 
 use gpui::{
-    Action, AnyView, App, AppContext, Context, IntoElement, ParentElement, Render, RenderOnce,
-    SharedString, Styled, Window,
+    Action, AnyView, App, AppContext, Context, InteractiveElement, IntoElement, ParentElement,
+    Render, RenderOnce, SharedString, Styled, Window, div,
 };
 
 use crate::color::Color;
@@ -22,6 +22,14 @@ use crate::v_flex;
 /// The widest a tooltip grows before its text wraps: long values belong in the control
 /// they describe, not in a balloon.
 const MAX_WIDTH_PX: f32 = 320.;
+
+/// Transparent space above a hover tooltip. GPUI anchors the tooltip one pixel from the
+/// pointer, so without it the balloon is drawn over the control being hovered (#231);
+/// this clears the pointer's arrow and the lower half of a 40 px row.
+const POINTER_CLEARANCE_PX: f32 = 24.;
+
+/// Test hook: `VisualTestContext::debug_bounds` finds a shown tooltip under this key.
+pub const TOOLTIP_SELECTOR: &str = "tooltip";
 
 /// The factory a component stores to build its hover tooltip.
 pub type TooltipBuilder = Box<dyn Fn(&mut Window, &mut App) -> AnyView>;
@@ -99,13 +107,16 @@ struct TooltipView(Tooltip);
 
 impl Render for TooltipView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.0.clone().render(window, cx)
+        div()
+            .pt(px_to_rems(POINTER_CLEARANCE_PX))
+            .child(self.0.clone().render(window, cx))
     }
 }
 
 impl RenderOnce for Tooltip {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let mut tooltip = v_flex()
+            .debug_selector(|| TOOLTIP_SELECTOR.into())
             .elevation_2(cx)
             .font_ui(cx)
             .max_w(px_to_rems(MAX_WIDTH_PX))

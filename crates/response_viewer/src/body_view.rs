@@ -149,7 +149,11 @@ impl BodyView {
         // The pane reads `request.response_pretty_limit_mb` (REQ-RESP-06); registering
         // here makes the read safe however the host orders its settings init.
         ResponseViewerSetting::register(cx);
-        let mode_bar = cx.new(|cx| TabBar::new(cx).with_tabs(mode_tabs(cx.entity_id())));
+        let mode_bar = cx.new(|cx| {
+            TabBar::new(cx)
+                .section()
+                .with_tabs(mode_tabs(cx.entity_id()))
+        });
         let _mode_bar_subscription = cx.subscribe(&mode_bar, Self::on_mode_bar_event);
         Self {
             lines: Arc::new(Vec::new()),

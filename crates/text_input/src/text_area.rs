@@ -844,7 +844,8 @@ impl Element for TextAreaElement {
 }
 
 impl Render for TextArea {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let focused = self.state.focus_handle().is_focused(window);
         div()
             .key_context(TEXT_AREA_CONTEXT)
             .track_focus(self.state.focus_handle())
@@ -877,7 +878,7 @@ impl Render for TextArea {
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .font_ui(cx)
-            .text_ui_size(TextSize::Ui, cx)
+            .text_ui_size(TextSize::Default, cx)
             .text_color(Color::Default.color(cx))
             .px(DynamicSpacing::Base04.px(cx))
             .min_w_0()
@@ -888,9 +889,14 @@ impl Render for TextArea {
                 last_layout: self.last_layout.clone(),
                 last_bounds: self.last_bounds.clone(),
             })
+            .when(focused, |this| this.child(crate::focus_ring(cx)))
     }
 }
 
 #[cfg(test)]
 #[path = "text_area_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "text_area_font_size_tests.rs"]
+mod font_size_tests;

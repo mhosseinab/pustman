@@ -25,6 +25,9 @@ use crate::units::px_to_rems;
 /// The dot that says "this tab has unsaved changes".
 const DIRTY_DOT_PX: f32 = 6.;
 
+/// The accent line under the active section tab.
+const UNDERLINE_PX: f32 = 2.;
+
 /// One tab: a title, an optional icon, and the state a request tab can be in.
 #[derive(Clone, IntoElement)]
 pub struct Tab {
@@ -35,6 +38,7 @@ pub struct Tab {
     dirty: bool,
     pinned: bool,
     disabled: bool,
+    section: bool,
     width: Option<gpui::Rems>,
     on_activated: Option<ClickHandler>,
     on_close: Option<ClickHandler>,
@@ -63,6 +67,7 @@ impl Tab {
             dirty: false,
             pinned: false,
             disabled: false,
+            section: false,
             width: None,
             on_activated: None,
             on_close: None,
@@ -116,6 +121,13 @@ impl Tab {
         self
     }
 
+    /// Draw as a section tab ([`crate::TabBar::section`]): transparent, wider, and
+    /// underlined when active instead of filled.
+    pub(crate) fn section(mut self, section: bool) -> Self {
+        self.section = section;
+        self
+    }
+
     /// Whether this tab is disabled: it then offers nothing to click — no activation and
     /// no close button (see [`Disableable`]).
     pub(crate) fn is_disabled(&self) -> bool {
@@ -149,6 +161,7 @@ impl RenderOnce for Tab {
         // button under these keys.
         let selector = self.id.to_string();
         let close_selector = format!("{selector}-close");
+        let underline_selector = format!("{selector}-underline");
         let tooltip_text = if self.dirty {
             SharedString::from(format!("{label} — unsaved changes"))
         } else {
@@ -157,6 +170,7 @@ impl RenderOnce for Tab {
         let colors = cx.theme().colors();
         let active = self.active;
         let disabled = self.disabled;
+        let section = self.section;
         let on_activated = self.on_activated;
 
         // A disabled tab offers nothing to click: no close button (the `Disableable`
@@ -191,11 +205,27 @@ impl RenderOnce for Tab {
             .items_center()
             .flex_shrink_0()
             .gap(DynamicSpacing::Base02.rems(cx))
-            .px(DynamicSpacing::Base04.rems(cx))
-            .when_some(self.width, |this, width| this.w(width))
-            .tooltip(Tooltip::text(tooltip_text.clone()).builder())
             .map(|this| {
-                if active {
+                if section {
+                    this.relative().px(DynamicSpacing::Base12.rems(cx))
+                } else {
+                    this.px(DynamicSpacing::Base04.rems(cx))
+                }
+            })
+            .when_some(self.width, |this, width| this.w(width))
+            // A tooltip only when it adds what the tab does not show: the dirty state, or
+            // a label a fixed width may truncate. Repeating a visible label covers the bar.
+            .when(self.dirty || self.width.is_some(), |this| {
+                this.tooltip(Tooltip::text(tooltip_text.clone()).builder())
+            })
+            .map(|this| {
+                if section {
+                    this.text_color(if active {
+                        colors.text
+                    } else {
+                        colors.text_muted
+                    })
+                } else if active {
                     this.bg(colors.tab_active_background)
                         .text_color(colors.text_accent)
                 } else {
@@ -242,5 +272,21 @@ impl RenderOnce for Tab {
                     .then(|| Icon::new(IconName::Pin).size(IconSize::XSmall)),
             )
             .children(close_button)
+            .when(section && active, |this| {
+                this.child(
+                    div()
+                        .debug_selector(move || underline_selector)
+                        .absolute()
+                        .bottom_0()
+                        .left_0()
+                        .right_0()
+                        .h(px_to_rems(UNDERLINE_PX))
+                        .bg(colors.border_selected),
+                )
+            })
     }
 }
+
+#[cfg(test)]
+#[path = "tab_tooltip_tests.rs"]
+mod tooltip_tests;

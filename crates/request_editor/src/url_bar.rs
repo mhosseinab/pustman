@@ -23,9 +23,10 @@ use crate::variable_autocomplete::VariableAutocomplete;
 use crate::variable_highlight;
 use crate::variable_hover::VariableHover;
 
-/// The height of one method control (a [`ButtonSize::Medium`]) in pixels at the default
-/// scale: the dropdown is anchored just under it.
-const METHOD_CONTROL_HEIGHT_PX: f32 = 28.;
+/// The height of the URL row in pixels at the default scale — a [`ButtonSize::Large`],
+/// the pack's `density.compact-row`. The method, the URL field and Send all stand on it
+/// (#218), and the method dropdown is anchored just under it.
+const URL_ROW_HEIGHT_PX: f32 = 32.;
 
 /// The width of the custom method field in pixels at the default scale — room for the
 /// longest plausible token (`PROPFIND`) without taking space from the URL.
@@ -33,6 +34,12 @@ const CUSTOM_FIELD_WIDTH_PX: f32 = 120.;
 
 /// Test hook: the inline error that says why a custom method was rejected.
 pub const CUSTOM_ERROR_SELECTOR: &str = "custom-method-error";
+
+/// Test hook: the method control at the start of the URL row.
+pub const METHOD_CONTROL_SELECTOR: &str = "method-control";
+
+/// Test hook: the bordered URL field.
+pub const URL_FIELD_SELECTOR: &str = "url-field";
 
 /// What a [`UrlBar`] tells its owner.
 #[derive(Clone, Debug, PartialEq)]
@@ -340,7 +347,11 @@ impl UrlBar {
     fn render_method_control(&self, cx: &mut Context<Self>) -> AnyElement {
         let control = match self.custom_input.clone() {
             Some(input) => div()
+                .flex()
+                .flex_col()
+                .justify_center()
                 .w(px_to_rems(CUSTOM_FIELD_WIDTH_PX))
+                .h(px_to_rems(URL_ROW_HEIGHT_PX))
                 .border_1()
                 .border_color(cx.theme().colors().border)
                 .rounded_sm()
@@ -351,7 +362,7 @@ impl UrlBar {
                 ElementId::from(&self.method_focus_handle),
                 SharedString::from(self.method.as_str()),
             )
-            .size(ButtonSize::Medium)
+            .size(ButtonSize::Large)
             .end_icon(Icon::new(IconName::ChevronDown).size(IconSize::Small))
             .tooltip(Tooltip::text("Choose the HTTP method"))
             .focus_handle(self.method_focus_handle.clone())
@@ -359,12 +370,13 @@ impl UrlBar {
             .into_any_element(),
         };
         div()
+            .debug_selector(|| METHOD_CONTROL_SELECTOR.to_string())
             .relative()
             .child(control)
             .children(self.method_menu.clone().map(|menu| {
                 div()
                     .absolute()
-                    .top(px_to_rems(METHOD_CONTROL_HEIGHT_PX))
+                    .top(px_to_rems(URL_ROW_HEIGHT_PX))
                     .left_0()
                     .child(
                         deferred(
@@ -407,8 +419,13 @@ impl Render for UrlBar {
                     .child(self.render_method_control(cx))
                     .child(
                         div()
+                            .debug_selector(|| URL_FIELD_SELECTOR.to_string())
+                            .flex()
+                            .flex_col()
+                            .justify_center()
                             .flex_1()
                             .min_w_0()
+                            .h(px_to_rems(URL_ROW_HEIGHT_PX))
                             .border_1()
                             .border_color(cx.theme().colors().border)
                             .rounded_sm()
@@ -423,3 +440,7 @@ impl Render for UrlBar {
             )
     }
 }
+
+#[cfg(test)]
+#[path = "url_bar_field_width_tests.rs"]
+mod field_width_tests;

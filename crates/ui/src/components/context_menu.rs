@@ -341,6 +341,9 @@ impl Render for ContextMenu {
             .track_focus(&focus_handle)
             .focus_visible(|style| style.border_color(cx.theme().colors().border_focused))
             .elevation_2(cx)
+            // The menu owns the pointer while open: without it, hover and tooltips of the
+            // controls drawn underneath still fire through the menu (#205).
+            .occlude()
             .min_w(px_to_rems(MIN_WIDTH_PX))
             .py(DynamicSpacing::Base02.rems(cx))
             .rounded_sm()
@@ -363,3 +366,7 @@ impl Render for ContextMenu {
 #[cfg(test)]
 #[path = "context_menu_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "context_menu_occlusion_tests.rs"]
+mod occlusion_tests;

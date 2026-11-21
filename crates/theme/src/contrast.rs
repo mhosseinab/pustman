@@ -36,3 +36,7 @@ fn channel(value: f32) -> f64 {
 #[cfg(test)]
 #[path = "contrast_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "contrast_non_text_tests.rs"]
+mod non_text_tests;

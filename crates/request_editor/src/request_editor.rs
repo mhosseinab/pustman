@@ -153,7 +153,7 @@ impl RequestEditor {
         let settings_tab = cx.new(|cx| SettingsTab::new(&request, window, cx));
         let settings_tab_subscription =
             cx.subscribe_in(&settings_tab, window, Self::on_settings_tab_event);
-        let tab_bar = cx.new(TabBar::new);
+        let tab_bar = cx.new(|cx| TabBar::new(cx).section());
         tab_bar.update(cx, |bar, cx| {
             bar.set_tabs(
                 vec![

@@ -14,6 +14,9 @@ use crate::RequestEditor;
 /// Test hook: the drag handle between the request and response panes.
 pub(crate) const SPLIT_HANDLE_SELECTOR: &str = "response-split-handle";
 
+/// Test hook: the 1 px line drawn inside the handle.
+pub(crate) const SPLIT_LINE_SELECTOR: &str = "response-split-line";
+
 /// The share of the split the request pane opens at.
 pub(crate) const DEFAULT_SPLIT_FRACTION: f32 = 0.5;
 
@@ -75,13 +78,26 @@ impl RequestEditor {
             )))
             .debug_selector(|| SPLIT_HANDLE_SELECTOR.to_owned())
             .track_focus(&self.split_focus)
-            .h(DynamicSpacing::Base04.rems(cx))
+            .group(SPLIT_HANDLE_SELECTOR)
+            // A transparent strip to grab, a 1 px line to see (#224): the pane edges
+            // stay calm while the hit area stays wide enough for a mouse.
+            .h(DynamicSpacing::Base08.rems(cx))
             .w_full()
             .flex_shrink_0()
+            .flex()
+            .items_center()
             .cursor(CursorStyle::ResizeUpDown)
-            .bg(colors.border_variant)
-            .hover(|style| style.bg(colors.border))
             .focus_visible(|style| style.bg(colors.border_focused))
+            .child(
+                div()
+                    .debug_selector(|| SPLIT_LINE_SELECTOR.to_owned())
+                    .h(px_to_rems(1.))
+                    .w_full()
+                    .bg(colors.border)
+                    .group_hover(SPLIT_HANDLE_SELECTOR, |style| {
+                        style.bg(colors.border_focused)
+                    }),
+            )
             .role(Role::Splitter)
             .aria_label(SharedString::new_static(
                 "Resize the request and response panes",
@@ -156,3 +172,7 @@ impl RequestEditor {
 #[cfg(test)]
 #[path = "response_split_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "response_split_divider_tests.rs"]
+mod divider_tests;
