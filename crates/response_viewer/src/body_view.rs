@@ -25,8 +25,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use gpui::{
-    Anchor, AnyElement, Entity, FocusHandle, Focusable, HighlightStyle, ScrollStrategy, StyledText,
-    Subscription, Task, UniformListScrollHandle, Window, anchored, deferred,
+    Anchor, AnyElement, Entity, FocusHandle, Focusable, HighlightStyle, InteractiveText,
+    ScrollStrategy, StyledText, Subscription, Task, UniformListScrollHandle, Window, anchored,
+    deferred,
 };
 use http_engine::{Header, Response, ResponseBody};
 use settings::Setting;
@@ -789,9 +790,9 @@ impl Focusable for BodyView {
     }
 }
 
-/// One body line: the content font, truncated with the full line behind a tooltip.
-/// Shared with the Preview text lines ([`crate::preview`]): a body pane's lines all draw
-/// the same way.
+/// One body line: the content font, truncated with its full text in a hover tooltip
+/// when — and only when — the line is actually truncated (#268). Shared with the Preview
+/// text lines ([`crate::preview`]): a body pane's lines all draw the same way.
 pub(crate) fn render_line(
     lines: &[SharedString],
     index: usize,
@@ -847,6 +848,11 @@ fn render_line_with_matches(
         .collect::<Vec<_>>();
     let highlights = layer_highlights(&syntax, &found);
     let line_id = child_id(base, format!("line-{index}"));
+    let text = StyledText::new(line.clone()).with_highlights(highlights);
+    // The layout the text fills once the list lays it out — read at hover time to see
+    // what was actually drawn.
+    let laid_out = text.layout().clone();
+    let full_line = line;
     div()
         .id(child_id(&line_id, "text"))
         .w_full()
@@ -856,14 +862,21 @@ fn render_line_with_matches(
         .font_buffer(cx)
         .text_buffer(cx)
         .text_color(cx.theme().colors().text)
-        .tooltip(Tooltip::text(line.clone()).builder())
-        .child(
-            div()
-                .w_full()
-                .min_w_0()
-                .truncate()
-                .child(StyledText::new(line).with_highlights(highlights)),
-        )
+        .child(div().w_full().min_w_0().truncate().child(
+            InteractiveText::new(child_id(&line_id, "hover"), text).tooltip(
+                move |_index, _window, cx| {
+                    // A truncation tooltip only (#268): when the drawn text is the
+                    // line we hold, the hover has nothing to add — a balloon of the
+                    // same plain text would only cover the token-coloured line it
+                    // repeats (`seg2.png`).
+                    if laid_out.text() == full_line {
+                        None
+                    } else {
+                        Some(Tooltip::text(full_line.clone()).into_any_view(cx))
+                    }
+                },
+            ),
+        ))
         .into_any_element()
 }
 
@@ -957,6 +970,10 @@ fn body_bytes(response: &Response) -> std::io::Result<Vec<u8>> {
 #[cfg(test)]
 #[path = "body_view_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "body_tooltip_tests.rs"]
+mod tooltip_tests;
 
 #[cfg(test)]
 #[path = "find_format_tests.rs"]
