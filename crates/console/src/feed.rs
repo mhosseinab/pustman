@@ -126,8 +126,10 @@ pub fn watch(client: &Entity<HttpClient>, cx: &mut App) -> Subscription {
         // The entry names its own send from the event's identity (S33o: a replaced
         // send's cancellation is emitted after its history row is written, so the entry
         // can land after the new send's). The URL is redacted exactly as [`record_error`]
-        // redacts one: the empty secret set masks userinfo and credential shapes, and a
-        // send that resolves variables carries its pre-resolution URL.
+        // redacts one — the empty secret set masks userinfo and credential shapes — over
+        // the URL as the send captured it: pre-resolution text where the send resolves
+        // `{{variables}}` itself, and the scheme alone where the URL is resolved text
+        // (`http_engine`'s capture rule: the resolved URL carries secret values).
         let secrets = SecretValues::new();
         let (method, url) = match &event.send {
             Some(send) => (Some(send.method.clone()), redact_url(&send.url, &secrets)),

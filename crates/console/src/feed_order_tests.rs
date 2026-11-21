@@ -121,7 +121,9 @@ fn test_a_cancelled_send_names_the_request_it_dropped(cx: &mut TestAppContext) {
         let entry = entries.front().expect("the one entry just recorded");
         assert_eq!(entry.raw_response, "Cancelled");
         assert_eq!(entry.method, Some(Method::Get));
-        assert_eq!(entry.url, "https://a.test/never-sent");
+        // The request is resolved text, whose URL carries secret values (PRD §7), so the
+        // entry keeps only the printable URL form — never the URL text itself.
+        assert_eq!(entry.url, "https://<redacted>");
     });
 }
 

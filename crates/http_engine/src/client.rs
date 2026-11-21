@@ -1,5 +1,6 @@
 //! The GPUI entity that owns an in-flight send (PRD REQ-HTTP-12).
 
+use std::fmt;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ use crate::error::TransportError;
 use crate::history::{HistoryDraft, HistoryRecorder};
 use crate::pipeline::{PipelineError, Warning};
 use crate::prepare::{Prepared, prepare};
+use crate::redacted_url;
 use crate::request::ResolvedRequest;
 use crate::request_auth::AppliedAuth;
 use crate::response::Response;
@@ -70,16 +72,30 @@ pub struct SendOutcome {
 }
 
 /// Which send a [`SendEvent`] is about: the request's method and URL as the caller sent
-/// it — `{{variables}}` unresolved where the send resolves them — so the Console entry
-/// the event becomes names its own send, however entries land in order (S33o: a replaced
-/// send's cancellation is emitted after its history row, and can land after the new
-/// send's entry).
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// it, so the Console entry the event becomes names its own send, however entries land in
+/// order (S33o: a replaced send's cancellation is emitted after its history row, and can
+/// land after the new send's entry).
+#[derive(Clone, PartialEq, Eq)]
 pub struct SendIdentity {
     /// The request's method.
     pub method: Method,
-    /// The request's URL, as the caller sent it.
+    /// The request's URL as it may be named: the pre-resolution text where the send
+    /// resolves `{{variables}}` itself ([`HttpClient::send_request`] — exactly what
+    /// `record_error` records), and only the scheme where the URL is resolved text
+    /// ([`HttpClient::send`]) — the resolved URL carries secret values, a webhook token
+    /// lives in the path (PRD §7) — which is the `redacted_url` form [`fmt::Debug`]
+    /// follows too.
     pub url: String,
+}
+
+impl fmt::Debug for SendIdentity {
+    /// Print no URL: it may carry secret values (PRD §7) — the same reason
+    /// [`ResolvedRequest`]'s `Debug` prints no values.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SendIdentity")
+            .field("method", &self.method)
+            .finish_non_exhaustive()
+    }
 }
 
 /// What happened to a send [`HttpClient`] was driving, and which send it was.
@@ -187,9 +203,13 @@ impl HttpClient {
         request: ResolvedRequest,
         cx: &mut Context<HttpClient>,
     ) -> Task<Result<Response, TransportError>> {
+        // The request is resolved text by the time `send` sees it, and the resolved URL
+        // carries secret values (PRD §7: a webhook token lives in the path), so the
+        // identity keeps only the printable form: a cancelled send's Console entry names
+        // the method and the scheme, never URL text the caller resolved.
         let identity = SendIdentity {
             method: request.method.clone(),
-            url: request.url.as_str().to_owned(),
+            url: redacted_url(&request.url),
         };
         let transport = self.transport.clone();
         self.drive_send(
@@ -395,3 +415,7 @@ mod tests;
 #[cfg(test)]
 #[path = "cancel_order_tests.rs"]
 mod cancel_order_tests;
+
+#[cfg(test)]
+#[path = "send_identity_tests.rs"]
+mod send_identity_tests;
