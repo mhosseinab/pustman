@@ -364,7 +364,9 @@ impl UrlBar {
             )
             .size(ButtonSize::Large)
             .end_icon(Icon::new(IconName::ChevronDown).size(IconSize::Small))
-            .tooltip(Tooltip::text("Choose the HTTP method"))
+            // The tooltip hides while its own dropdown is open (#265): with the pointer
+            // still on the anchor, the balloon would paint over the menu rows.
+            .tooltip(Tooltip::text("Choose the HTTP method").hidden(self.method_menu.is_some()))
             .focus_handle(self.method_focus_handle.clone())
             .on_click(cx.listener(|this, _event, window, cx| this.open_method_menu(window, cx)))
             .into_any_element(),
@@ -444,3 +446,7 @@ impl Render for UrlBar {
 #[cfg(test)]
 #[path = "url_bar_field_width_tests.rs"]
 mod field_width_tests;
+
+#[cfg(test)]
+#[path = "url_bar_menu_tooltip_tests.rs"]
+mod menu_tooltip_tests;

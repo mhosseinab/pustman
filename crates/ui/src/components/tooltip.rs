@@ -41,6 +41,8 @@ pub struct Tooltip {
     title: SharedString,
     meta: Option<SharedString>,
     key_hint: Option<KeyBinding>,
+    /// Suppressed while the control's own popover is open ([`Self::hidden`]).
+    hidden: bool,
 }
 
 impl Tooltip {
@@ -50,6 +52,7 @@ impl Tooltip {
             title: title.into(),
             meta: None,
             key_hint: None,
+            hidden: false,
         }
     }
 
@@ -59,6 +62,7 @@ impl Tooltip {
             title: title.into(),
             meta: Some(meta.into()),
             key_hint: None,
+            hidden: false,
         }
     }
 
@@ -68,7 +72,23 @@ impl Tooltip {
             title: title.into(),
             meta: None,
             key_hint: Some(KeyBinding::for_action(action)),
+            hidden: false,
         }
+    }
+
+    /// Keep the hover balloon away while `hidden` — how a control hides its tooltip
+    /// while its own popover is open (#265): with the pointer resting on the anchor,
+    /// the balloon would paint over the menu the pointer is really for.
+    pub fn hidden(mut self, hidden: bool) -> Self {
+        self.hidden = hidden;
+        self
+    }
+
+    /// Whether the hover balloon should stay away. The button components honor this by
+    /// attaching no hover tooltip at all, which is also what clears one already on
+    /// screen (GPUI drops the active tooltip when its builder goes away).
+    pub(crate) fn is_hidden(&self) -> bool {
+        self.hidden
     }
 
     /// The title, which icon-only controls use as their accessible label.
