@@ -12,6 +12,7 @@ use environment_picker::{quick_look, selector};
 use gpui::{App, AppContext, Entity, EntityId, Global, Subscription, WeakEntity};
 use history_panel::HistoryList;
 use secrets::{KeyringStore, SecretStore};
+use settings::Setting;
 use storage::LocalStore;
 use ui::Severity;
 use workspace::Workspace;
@@ -124,6 +125,11 @@ pub fn init_with_store(cx: &mut App, store: StoreLocation) {
 /// `console` (S32w): `console::watch` records every cancellation this client reports
 /// (REQ-HTTP-12). Its [`Subscription`] lives in [`ConsoleWiring`] for the app's lifetime
 /// — dropping a subscription stops the recording.
+///
+/// `history` (S33w): every send this client makes is recorded into the local store
+/// (PRD §8.5, REQ-HIST-01). The store lands on a background task, so the recorder is
+/// installed by [`init_history_recording`] when [`AppStore`] lands — exactly once per
+/// client.
 fn init_http_client(cx: &mut App) {
     gpui_tokio::init(cx);
     let transport = http_engine::ReqwestTransport::new(gpui_tokio::Tokio::handle(cx));
@@ -133,6 +139,7 @@ fn init_http_client(cx: &mut App) {
         ._subscriptions
         .push(subscription);
     request_editor::send::set_http_client(client, cx);
+    init_history_recording(cx);
 }
 
 /// The `console` wire (S32w): the [`Subscription`]s that keep the app's Console feed
@@ -183,6 +190,77 @@ fn install_environment_picker_inputs(cx: &mut App, store: &Arc<Mutex<LocalStore>
             secret_store,
         },
     );
+}
+
+/// The app-wide history-recording wire (S33w): the [`http_engine::HistoryRecorder`] the
+/// app's one HTTP client records every send through (REQ-HIST-01), installed once per
+/// client once the local store it writes through exists. The observer lives here for the
+/// app's lifetime — dropping a subscription stops the watching.
+#[derive(Default)]
+struct HistoryRecordingWiring {
+    started: bool,
+    /// The clients that already got their recorder, so `set_history` runs exactly once
+    /// per client however often [`AppStore`] is set.
+    recorded: Vec<EntityId>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl Global for HistoryRecordingWiring {}
+
+/// `history` (S33w): the app's one HTTP client records every send into the local store
+/// (PRD §8.5, REQ-HIST-01). The store opens on a background task, so
+/// [`install_history_recording`] runs when [`AppStore`] lands — and once here too, for
+/// the store that landed before this wire registered: watched from both sides, neither
+/// order loses a recording (the [`HistoryPanelWiring`] shape below).
+fn init_history_recording(cx: &mut App) {
+    if cx.default_global::<HistoryRecordingWiring>().started {
+        return;
+    }
+    cx.default_global::<HistoryRecordingWiring>().started = true;
+    // The retention window is the typed `history_retention_days` setting (REQ-HIST-04);
+    // the recorder takes its value once, when it is built below.
+    settings::Settings::register(cx);
+    let subscription = cx.observe_global::<AppStore>(install_history_recording);
+    cx.default_global::<HistoryRecordingWiring>()
+        ._subscriptions
+        .push(subscription);
+    install_history_recording(cx);
+}
+
+/// Give the installed HTTP client its [`http_engine::HistoryRecorder`], exactly once per
+/// client. A run with no store at all (`StoreStartup::Unavailable`) never gets here:
+/// nothing is recorded and no new error is shown — the store's toast has already told
+/// the user. The workspace id is the one the History panel reads.
+fn install_history_recording(cx: &mut App) {
+    let Some(store) = cx
+        .try_global::<AppStore>()
+        .map(|store| Arc::clone(&store.0))
+    else {
+        // No store yet to record into — the observer runs again when one lands.
+        return;
+    };
+    let Some(client) = cx
+        .try_global::<request_editor::send::RequestClient>()
+        .map(|client| client.0.clone())
+    else {
+        // `init_http_client` installs the client before this wire runs; without one
+        // there is nothing to record through.
+        return;
+    };
+    if cx
+        .default_global::<HistoryRecordingWiring>()
+        .recorded
+        .contains(&client.entity_id())
+    {
+        return;
+    }
+    let retention_days = settings::Settings::get_global(cx).history_retention_days;
+    let recorder =
+        http_engine::HistoryRecorder::new(store, WORKSPACE_ID).with_retention_days(retention_days);
+    client.update(cx, |client, _| client.set_history(recorder));
+    cx.default_global::<HistoryRecordingWiring>()
+        .recorded
+        .push(client.entity_id());
 }
 
 /// The app-wide history-panel wiring (S35w): the windows waiting for the local store the
