@@ -151,6 +151,27 @@ impl ResponseView {
         cx.notify();
     }
 
+    /// Start the region over for the next outcome (#264): what the previous response
+    /// showed — its status line, its panes, its held bytes — is gone and the "no
+    /// response yet" empty state is back, while the view itself stays alive with its
+    /// in-flight [`Self::save_body`] / [`Self::copy_body`] tasks untouched. Replacing
+    /// the entity with a fresh [`ResponseView`] would drop those tasks, and a dropped
+    /// [`gpui::Task`] is cancelled (AGENTS.md › Async).
+    ///
+    /// `Decision:` the four panes are rebuilt rather than asked to clear themselves:
+    /// they have no shared "nothing shown" state, and a rebuilt pane is exactly what a
+    /// fresh [`ResponseView`] gave the callers this replaces — minus the dropped tasks.
+    pub fn clear(&mut self, cx: &mut Context<Self>) {
+        self.status_line = None;
+        self.response = None;
+        self.error = None;
+        self.body = cx.new(BodyView::new);
+        self.headers = cx.new(HeadersView::new);
+        self.cookies = cx.new(CookiesTab::new);
+        self.timeline = cx.new(TimelineTab::new);
+        cx.notify();
+    }
+
     /// What the region under the tabs shows: the error panel after a failed send
     /// (REQ-RESP-08), otherwise the selected tab's pane.
     fn pane(&self) -> AnyElement {
@@ -267,3 +288,7 @@ fn empty_state(cx: &App) -> impl IntoElement {
                 .color(Color::Muted),
         )
 }
+
+#[cfg(test)]
+#[path = "clear_tests.rs"]
+mod clear_tests;

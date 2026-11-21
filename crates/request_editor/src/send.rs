@@ -45,7 +45,6 @@ use http_engine::{
     resolve_request,
 };
 use pustman_actions::request;
-use response_viewer::ResponseView;
 use ui::prelude::*;
 use variables::{DynamicValues, ScopeStack};
 
@@ -299,12 +298,13 @@ impl RequestEditor {
     /// Start the response region over: the previous response's facts
     /// (`RequestEditor::status_line`) and the panes below it must never survive into
     /// what the next outcome shows — a failed or cancelled send may not sit beside the
-    /// old 200 (S33n). A fresh [`ResponseView`] is the clear: its two setters show a
-    /// response or an error, and the error state replaces the strip only when the view
+    /// old 200 (S33n). [`response_viewer::ResponseView::clear`] is the clear: it resets
+    /// what the region shows while keeping the entity — and its in-flight save/copy
+    /// tasks — alive (#264), and the error state replaces the strip only when the view
     /// holds no response of its own.
     fn clear_previous_response(&mut self, cx: &mut Context<Self>) {
         self.status_line = None;
-        self.response_view = cx.new(ResponseView::new);
+        self.response_view.update(cx, |view, cx| view.clear(cx));
     }
 
     /// A send that failed before or at the transport: one Console Error entry
