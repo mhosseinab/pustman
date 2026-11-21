@@ -144,7 +144,24 @@ fn resolve_pairs(
 
 /// Append the resolved params to the URL query. A table that adds nothing must leave the
 /// query exactly as it resolved, so an untouched URL gains no bare `?`.
+///
+/// The editor mirrors every enabled query row into the URL text (`request_editor`'s
+/// Params tab), so a row the URL already carries is not appended again; each URL pair
+/// absorbs one matching row, which keeps repeated keys (`?tag=a&tag=b`) exact.
 fn append_params(url: &mut Url, params: Vec<(String, String)>) {
+    let mut carried: Vec<(String, String)> = url.query_pairs().into_owned().collect();
+    let params: Vec<(String, String)> = params
+        .into_iter()
+        .filter(
+            |param| match carried.iter().position(|pair| pair == param) {
+                Some(index) => {
+                    carried.swap_remove(index);
+                    false
+                }
+                None => true,
+            },
+        )
+        .collect();
     if params.is_empty() {
         return;
     }
@@ -249,3 +266,7 @@ fn send_settings(overrides: Option<&RequestSettings>) -> SendSettings {
 #[cfg(test)]
 #[path = "pipeline_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "pipeline_param_mirror_tests.rs"]
+mod param_mirror_tests;
