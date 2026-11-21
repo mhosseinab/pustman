@@ -318,7 +318,7 @@ impl HistoryList {
             .w_full()
             .h(px_to_rems(ROW_HEIGHT_PX))
             .items_center()
-            .px(DynamicSpacing::Base04.rems(cx))
+            .px(DynamicSpacing::Base08.rems(cx))
             .border_b_1()
             .border_color(cx.theme().colors().border_variant)
             .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
@@ -347,7 +347,7 @@ impl HistoryList {
             .h(px_to_rems(ROW_HEIGHT_PX))
             .min_w_0()
             .justify_center()
-            .px(DynamicSpacing::Base04.rems(cx))
+            .px(DynamicSpacing::Base08.rems(cx))
             .gap(DynamicSpacing::Base01.rems(cx))
             .rounded_sm()
             .cursor_pointer()
@@ -448,8 +448,8 @@ impl Render for HistoryList {
             .on_action(cx.listener(Self::activate))
             .size_full()
             .font_ui(cx)
-            .p(DynamicSpacing::Base04.rems(cx))
-            .gap(DynamicSpacing::Base04.rems(cx))
+            .p(DynamicSpacing::Base08.rems(cx))
+            .gap(DynamicSpacing::Base06.rems(cx))
             .child(
                 div()
                     .w_full()
@@ -457,7 +457,7 @@ impl Render for HistoryList {
                     .border_1()
                     .border_color(colors.border)
                     .rounded_sm()
-                    .px(DynamicSpacing::Base04.rems(cx))
+                    .px(DynamicSpacing::Base06.rems(cx))
                     .child(self.search.clone()),
             )
             .map(|panel| match &error {

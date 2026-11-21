@@ -225,7 +225,7 @@ impl ConsolePanel {
             .h(rems(ROW_HEIGHT_REMS))
             .min_w_0()
             .gap(DynamicSpacing::Base04.rems(cx))
-            .px(DynamicSpacing::Base04.rems(cx))
+            .px(DynamicSpacing::Base08.rems(cx))
             // The border is always drawn (transparent) so the focus ring shows without
             // moving the row's layout.
             .border_1()
@@ -296,7 +296,7 @@ impl ConsolePanel {
             .h(rems(DETAILS_HEIGHT_REMS))
             .overflow_y_scroll()
             .gap(DynamicSpacing::Base04.rems(cx))
-            .p(DynamicSpacing::Base04.rems(cx))
+            .p(DynamicSpacing::Base08.rems(cx))
             .border_t_1()
             .border_color(cx.theme().colors().border)
             .children(
@@ -316,8 +316,8 @@ impl ConsolePanel {
         h_flex()
             .w_full()
             .gap(DynamicSpacing::Base03.rems(cx))
-            .px(DynamicSpacing::Base04.rems(cx))
-            .py(DynamicSpacing::Base02.rems(cx))
+            .px(DynamicSpacing::Base08.rems(cx))
+            .py(DynamicSpacing::Base04.rems(cx))
             .border_b_1()
             .border_color(cx.theme().colors().border)
             .child(self.level_chip("All", None, cx))

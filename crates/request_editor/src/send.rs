@@ -390,29 +390,25 @@ impl RequestEditor {
         cx.notify();
     }
 
-    /// Everything under the URL bar: the inline failure first — where the send happened
-    /// — then the Send/Cancel button. The response's own status line is the embedded
-    /// [`response_viewer::ResponseView`]'s (S29e); only a "Sending…" note stays here,
-    /// beside the button.
-    pub(super) fn render_send_area(&self, cx: &mut Context<Self>) -> AnyElement {
-        v_flex()
-            .gap(DynamicSpacing::Base02.rems(cx))
-            .children(
-                self.inline_error
-                    .clone()
-                    .map(|error| self.render_inline_error(&error, cx)),
-            )
-            .child(
-                h_flex()
-                    .gap(DynamicSpacing::Base03.rems(cx))
-                    .justify_end()
-                    .min_w_0()
-                    .items_center()
-                    .children(self.render_sending(cx))
-                    .children(self.render_tls_badge(cx))
-                    .child(self.render_send_button(cx)),
-            )
+    /// The end of the URL row: a "Sending…" note, the TLS badge and the Send/Cancel
+    /// button. The response's own status line is the embedded
+    /// [`response_viewer::ResponseView`]'s (S29e).
+    pub(super) fn render_send_controls(&self, cx: &mut Context<Self>) -> AnyElement {
+        h_flex()
+            .flex_none()
+            .gap(DynamicSpacing::Base03.rems(cx))
+            .items_center()
+            .children(self.render_sending(cx))
+            .children(self.render_tls_badge(cx))
+            .child(self.render_send_button(cx))
             .into_any_element()
+    }
+
+    /// The inline failure under the URL row, where the send happened.
+    pub(super) fn render_send_error(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.inline_error
+            .clone()
+            .map(|error| self.render_inline_error(&error, cx))
     }
 
     /// "Sending…" beside the button while a request is in flight — the one piece of

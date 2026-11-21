@@ -48,6 +48,21 @@ const CONTROL_HEIGHT_PX: f32 = 28.;
 /// width — a few pixels (S33n).
 const NUMBER_INPUT_WIDTH_PX: f32 = 96.;
 
+/// The control column's width in pixels at the default scale: the widest control (the
+/// numeric field) fits, so every switch, field and picker starts on one vertical line.
+const CONTROL_COLUMN_WIDTH_PX: f32 = 128.;
+
+/// The "use global default" column's width in pixels at the default scale: room for
+/// "Use global default (30000 ms)" at the small label size.
+const DEFAULT_COLUMN_WIDTH_PX: f32 = 232.;
+
+/// The form's widest extent in rems: past it the name column only adds empty space
+/// between a setting's name and its control.
+const FORM_MAX_WIDTH_REMS: f32 = 52.;
+
+/// Test hook: the HTTP version picker.
+const HTTP_VERSION_CONTROL_SELECTOR: &str = "settings-http-version-control";
+
 /// Test hook: the verify-TLS switch of the Settings tab.
 pub const VERIFY_TLS_SWITCH_SELECTOR: &str = "settings-verify-tls-switch";
 
@@ -198,6 +213,7 @@ impl NumericField {
 /// hooks of its two controls.
 struct BoolRow {
     name: &'static str,
+    description: &'static str,
     change: fn(Option<bool>) -> SettingChange,
     value: Option<bool>,
     default: Option<bool>,
@@ -416,17 +432,19 @@ impl SettingsTab {
         cx.notify();
     }
 
-    /// One boolean override: its switch (the value the send uses) beside the "use
-    /// global default" checkbox (the state), the default's value named next to that
-    /// state. `default` is [`None`] where no code default exists (`remove_referer`).
+    /// One boolean override: its switch (the value the send uses) in the control column,
+    /// the "use global default" checkbox (the state) in the default column, the
+    /// default's value named next to that state. `default` is [`None`] where no code
+    /// default exists (`remove_referer`).
     fn render_bool_row(
         &self,
         row: BoolRow,
         weak: &WeakEntity<SettingsTab>,
         cx: &App,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
         let BoolRow {
             name,
+            description,
             change,
             value,
             default,
@@ -440,142 +458,129 @@ impl SettingsTab {
             default.map(|default| on_off(default).to_string()),
         );
         let pinned = value.or(default).unwrap_or(false);
-        h_flex()
+        let control = h_flex()
             .id(ElementId::Name(SharedString::from(format!(
-                "settings-row-{switch_selector}"
+                "{switch_selector}-wrap"
             ))))
-            .items_center()
-            .gap(DynamicSpacing::Base03.rems(cx))
-            .min_w_0()
+            .debug_selector(|| switch_selector.to_string())
             .child(
-                h_flex()
-                    .id(ElementId::Name(SharedString::from(format!(
-                        "{switch_selector}-wrap"
-                    ))))
-                    .debug_selector(|| switch_selector.to_string())
-                    .child(
-                        Toggle::new(
-                            ElementId::Name(SharedString::from(switch_selector)),
-                            SharedString::from(name),
-                            ToggleState::from(pinned),
-                        )
-                        .kind(ToggleKind::Switch)
-                        .on_change(move |state, _window, cx| {
-                            let change = change(Some(state.is_selected()));
-                            if switch_weak
-                                .update(cx, |tab, cx| tab.apply(change, cx))
-                                .is_err()
-                            {
-                                // Handled: the tab closed with its window; no setting
-                                // left to change.
-                            }
-                        }),
-                    ),
-            )
+                Toggle::new(
+                    ElementId::Name(SharedString::from(switch_selector)),
+                    SharedString::from(name),
+                    ToggleState::from(pinned),
+                )
+                .kind(ToggleKind::Switch)
+                // The row's name column names it on screen; the label stays its
+                // accessible name.
+                .label_hidden()
+                .on_change(move |state, _window, cx| {
+                    let change = change(Some(state.is_selected()));
+                    if switch_weak
+                        .update(cx, |tab, cx| tab.apply(change, cx))
+                        .is_err()
+                    {
+                        // Handled: the tab closed with its window; no setting left to
+                        // change.
+                    }
+                }),
+            );
+        let use_default = h_flex()
+            .id(ElementId::Name(SharedString::from(format!(
+                "{default_selector}-wrap"
+            ))))
+            .debug_selector(|| default_selector.to_string())
             .child(
-                h_flex()
-                    .id(ElementId::Name(SharedString::from(format!(
-                        "{default_selector}-wrap"
-                    ))))
-                    .debug_selector(|| default_selector.to_string())
-                    .child(
-                        Toggle::new(
-                            ElementId::Name(SharedString::from(default_selector)),
-                            SharedString::from(checkbox_label),
-                            ToggleState::from(value.is_none()),
-                        )
-                        .on_change(move |state, _window, cx| {
-                            let use_default = state.is_selected();
-                            let change =
-                                change((!use_default).then(|| value.or(default).unwrap_or(false)));
-                            if checkbox_weak
-                                .update(cx, |tab, cx| tab.apply(change, cx))
-                                .is_err()
-                            {
-                                // Handled: the tab closed with its window; no setting
-                                // left to change.
-                            }
-                        }),
-                    ),
-            )
+                Toggle::new(
+                    ElementId::Name(SharedString::from(default_selector)),
+                    SharedString::from(checkbox_label),
+                    ToggleState::from(value.is_none()),
+                )
+                .on_change(move |state, _window, cx| {
+                    let use_default = state.is_selected();
+                    let change = change((!use_default).then(|| value.or(default).unwrap_or(false)));
+                    if checkbox_weak
+                        .update(cx, |tab, cx| tab.apply(change, cx))
+                        .is_err()
+                    {
+                        // Handled: the tab closed with its window; no setting left to
+                        // change.
+                    }
+                }),
+            );
+        settings_row(
+            SharedString::from(format!("settings-row-{switch_selector}")),
+            name,
+            description,
+            control.into_any_element(),
+            use_default.into_any_element(),
+            None,
+            cx,
+        )
     }
 
-    /// One numeric override: its value field (the value the send uses) beside the
-    /// "use global default" checkbox, and the parse note under the row while the text
-    /// is not a number.
+    /// One numeric override: its value field (the value the send uses) in the control
+    /// column, the "use global default" checkbox in the default column, and the parse
+    /// note under the row while the text is not a number.
     fn render_numeric_row(
         &self,
         field: NumericField,
         name: &'static str,
+        description: &'static str,
         weak: &WeakEntity<SettingsTab>,
         cx: &App,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
         let key = field.key();
         let checkbox_key = format!("{key}-default");
         let checkbox_weak = weak.clone();
         let checkbox_label =
             use_default_label(field.is_inherit(self), Some(field.default_display()));
-        v_flex()
-            .gap(DynamicSpacing::Base01.rems(cx))
+        let control = div()
+            .id(ElementId::Name(SharedString::from(format!("{key}-input"))))
+            .debug_selector(|| format!("{key}-input"))
+            .w(px_to_rems(NUMBER_INPUT_WIDTH_PX))
+            .child(self.numeric_input(field).clone());
+        let use_default = h_flex()
+            .id(ElementId::Name(SharedString::from(checkbox_key.clone())))
+            .debug_selector(move || checkbox_key.clone())
             .child(
-                h_flex()
-                    .id(ElementId::Name(SharedString::from(format!(
-                        "settings-row-{key}"
-                    ))))
-                    .items_center()
-                    .gap(DynamicSpacing::Base03.rems(cx))
-                    .min_w_0()
-                    .child(
-                        Label::new(SharedString::from(name))
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
-                    )
-                    .child(
-                        div()
-                            .id(ElementId::Name(SharedString::from(format!("{key}-input"))))
-                            .debug_selector(|| format!("{key}-input"))
-                            .w(px_to_rems(NUMBER_INPUT_WIDTH_PX))
-                            .child(self.numeric_input(field).clone()),
-                    )
-                    .child(
-                        h_flex()
-                            .id(ElementId::Name(SharedString::from(checkbox_key.clone())))
-                            .debug_selector(move || checkbox_key.clone())
-                            .child(
-                                Toggle::new(
-                                    ElementId::Name(SharedString::from(format!(
-                                        "{key}-default-toggle"
-                                    ))),
-                                    SharedString::from(checkbox_label),
-                                    ToggleState::from(field.is_inherit(self)),
-                                )
-                                .on_change(
-                                    move |state, _window, cx| {
-                                        let change = field.use_default_change(state.is_selected());
-                                        if checkbox_weak
-                                            .update(cx, |tab, cx| {
-                                                tab.apply(change, cx);
-                                                tab.fill_inputs(cx);
-                                            })
-                                            .is_err()
-                                        {
-                                            // Handled: the tab closed with its window; no
-                                            // setting left to change.
-                                        }
-                                    },
-                                ),
-                            ),
-                    ),
-            )
-            .children(field.is_invalid(self).then(|| {
-                Label::new(SharedString::from(field.invalid_note()))
-                    .size(LabelSize::XSmall)
-                    .color(Color::Error)
-            }))
+                Toggle::new(
+                    ElementId::Name(SharedString::from(format!("{key}-default-toggle"))),
+                    SharedString::from(checkbox_label),
+                    ToggleState::from(field.is_inherit(self)),
+                )
+                .on_change(move |state, _window, cx| {
+                    let change = field.use_default_change(state.is_selected());
+                    if checkbox_weak
+                        .update(cx, |tab, cx| {
+                            tab.apply(change, cx);
+                            tab.fill_inputs(cx);
+                        })
+                        .is_err()
+                    {
+                        // Handled: the tab closed with its window; no setting left to
+                        // change.
+                    }
+                }),
+            );
+        let note = field.is_invalid(self).then(|| {
+            Label::new(SharedString::from(field.invalid_note()))
+                .size(LabelSize::XSmall)
+                .color(Color::Error)
+                .into_any_element()
+        });
+        settings_row(
+            SharedString::from(format!("settings-row-{key}")),
+            name,
+            description,
+            control.into_any_element(),
+            use_default.into_any_element(),
+            note,
+            cx,
+        )
     }
 
-    /// The HTTP version override: the picker (the value the send uses) beside the
-    /// "use global default" checkbox.
+    /// The HTTP version override: the picker (the value the send uses) in the control
+    /// column, the "use global default" checkbox in the default column.
     fn render_version_row(&self, cx: &mut Context<Self>) -> AnyElement {
         let weak = cx.weak_entity();
         let default = SendSettings::default().http_version;
@@ -584,45 +589,38 @@ impl SettingsTab {
             self.http_version.is_none(),
             Some(version_label(default).to_string()),
         );
-        h_flex()
-            .id(ElementId::Name(SharedString::new_static(
-                "settings-row-http-version",
+        let use_default = h_flex()
+            .id(ElementId::Name(SharedString::from(
+                checkbox_key.to_string(),
             )))
-            .items_center()
-            .gap(DynamicSpacing::Base03.rems(cx))
-            .min_w_0()
+            .debug_selector(|| checkbox_key.to_string())
             .child(
-                Label::new(SharedString::new_static("HTTP version"))
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
-            )
-            .child(self.render_version_control(cx))
-            .child(
-                h_flex()
-                    .id(ElementId::Name(SharedString::from(
-                        checkbox_key.to_string(),
-                    )))
-                    .debug_selector(|| checkbox_key.to_string())
-                    .child(
-                        Toggle::new(
-                            ElementId::Name(SharedString::new_static(
-                                "settings-http-version-default-toggle",
-                            )),
-                            SharedString::from(checkbox_label),
-                            ToggleState::from(self.http_version.is_none()),
-                        )
-                        .on_change(move |state, _window, cx| {
-                            let change = SettingChange::HttpVersion(
-                                (!state.is_selected()).then_some(default),
-                            );
-                            if weak.update(cx, |tab, cx| tab.apply(change, cx)).is_err() {
-                                // Handled: the tab closed with its window; no version
-                                // left to change.
-                            }
-                        }),
-                    ),
-            )
-            .into_any_element()
+                Toggle::new(
+                    ElementId::Name(SharedString::new_static(
+                        "settings-http-version-default-toggle",
+                    )),
+                    SharedString::from(checkbox_label),
+                    ToggleState::from(self.http_version.is_none()),
+                )
+                .on_change(move |state, _window, cx| {
+                    let change =
+                        SettingChange::HttpVersion((!state.is_selected()).then_some(default));
+                    if weak.update(cx, |tab, cx| tab.apply(change, cx)).is_err() {
+                        // Handled: the tab closed with its window; no version left to
+                        // change.
+                    }
+                }),
+            );
+        let control = self.render_version_control(cx);
+        settings_row(
+            SharedString::new_static("settings-row-http-version"),
+            "HTTP version",
+            "The protocol version this request is sent with.",
+            control,
+            use_default.into_any_element(),
+            None,
+            cx,
+        )
     }
 
     /// The version control: the dropdown trigger. The menu floats under it.
@@ -632,6 +630,7 @@ impl SettingsTab {
             .unwrap_or_else(|| SendSettings::default().http_version);
         h_flex()
             .relative()
+            .debug_selector(|| HTTP_VERSION_CONTROL_SELECTOR.to_owned())
             .child(
                 Button::new(
                     ElementId::from(&self.version_focus_handle),
@@ -656,42 +655,19 @@ impl Render for SettingsTab {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let weak = cx.weak_entity();
         let defaults = SendSettings::default();
-        v_flex()
-            .id(ElementId::Name(SharedString::new_static("settings-tab")))
-            .size_full()
-            .flex_1()
-            .min_h_0()
-            .min_w_0()
-            .gap(DynamicSpacing::Base04.rems(cx))
-            .child(self.render_numeric_row(NumericField::TimeoutMs, "Timeout (ms)", &weak, cx))
-            .child(self.render_bool_row(
-                BoolRow {
-                    name: "Follow redirects",
-                    change: SettingChange::FollowRedirects,
-                    value: self.follow_redirects,
-                    default: Some(defaults.follow_redirects),
-                    switch_selector: "settings-follow-redirects-switch",
-                    default_selector: "settings-follow-redirects-default",
-                },
+        let connection = [
+            self.render_numeric_row(
+                NumericField::TimeoutMs,
+                "Timeout (ms)",
+                "How long to wait for a response before giving up.",
                 &weak,
                 cx,
-            ))
-            .child(self.render_numeric_row(NumericField::MaxRedirects, "Max redirects", &weak, cx))
-            .child(self.render_bool_row(
-                BoolRow {
-                    name: "Follow original method on 301/302",
-                    change: SettingChange::FollowOriginalMethod,
-                    value: self.follow_original_method,
-                    default: Some(defaults.follow_original_method),
-                    switch_selector: "settings-follow-original-method-switch",
-                    default_selector: "settings-follow-original-method-default",
-                },
-                &weak,
-                cx,
-            ))
-            .child(self.render_bool_row(
+            ),
+            self.render_version_row(cx),
+            self.render_bool_row(
                 BoolRow {
                     name: "Verify TLS certificates",
+                    description: "Reject servers whose certificate is not trusted.",
                     change: SettingChange::VerifyTls,
                     value: self.verify_tls,
                     default: Some(defaults.verify_tls),
@@ -700,10 +676,48 @@ impl Render for SettingsTab {
                 },
                 &weak,
                 cx,
-            ))
-            .child(self.render_bool_row(
+            ),
+        ];
+        let redirects = [
+            self.render_bool_row(
+                BoolRow {
+                    name: "Follow redirects",
+                    description: "Follow 3xx responses to their Location.",
+                    change: SettingChange::FollowRedirects,
+                    value: self.follow_redirects,
+                    default: Some(defaults.follow_redirects),
+                    switch_selector: "settings-follow-redirects-switch",
+                    default_selector: "settings-follow-redirects-default",
+                },
+                &weak,
+                cx,
+            ),
+            self.render_numeric_row(
+                NumericField::MaxRedirects,
+                "Max redirects",
+                "Stop after this many redirects.",
+                &weak,
+                cx,
+            ),
+            self.render_bool_row(
+                BoolRow {
+                    name: "Follow original method",
+                    description: "Keep the method and body on 301/302 instead of switching to GET.",
+                    change: SettingChange::FollowOriginalMethod,
+                    value: self.follow_original_method,
+                    default: Some(defaults.follow_original_method),
+                    switch_selector: "settings-follow-original-method-switch",
+                    default_selector: "settings-follow-original-method-default",
+                },
+                &weak,
+                cx,
+            ),
+        ];
+        let url_and_headers = [
+            self.render_bool_row(
                 BoolRow {
                     name: "Encode URL automatically",
+                    description: "Percent-encode reserved characters in the URL path and query.",
                     change: SettingChange::EncodeUrl,
                     value: self.encode_url,
                     default: Some(defaults.encode_url),
@@ -712,10 +726,11 @@ impl Render for SettingsTab {
                 },
                 &weak,
                 cx,
-            ))
-            .child(self.render_bool_row(
+            ),
+            self.render_bool_row(
                 BoolRow {
                     name: "Remove Referer header",
+                    description: "Drop the Referer header when following a redirect.",
                     change: SettingChange::RemoveReferer,
                     value: self.remove_referer,
                     default: None,
@@ -724,9 +739,104 @@ impl Render for SettingsTab {
                 },
                 &weak,
                 cx,
-            ))
-            .child(self.render_version_row(cx))
+            ),
+        ];
+        v_flex()
+            .id(ElementId::Name(SharedString::new_static("settings-tab")))
+            .size_full()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .overflow_y_scroll()
+            .child(
+                v_flex()
+                    .w_full()
+                    .max_w(rems(FORM_MAX_WIDTH_REMS))
+                    .gap(DynamicSpacing::Base16.rems(cx))
+                    .py(DynamicSpacing::Base06.rems(cx))
+                    .child(settings_section("Connection", connection, cx))
+                    .child(settings_section("Redirects", redirects, cx))
+                    .child(settings_section("URL & headers", url_and_headers, cx)),
+            )
     }
+}
+
+/// One titled group of rows, separated by hairlines.
+fn settings_section(
+    title: &'static str,
+    rows: impl IntoIterator<Item = AnyElement>,
+    cx: &App,
+) -> impl IntoElement {
+    let border = cx.theme().colors().border_variant;
+    v_flex()
+        .min_w_0()
+        .child(
+            div().pb(DynamicSpacing::Base04.rems(cx)).child(
+                Label::new(SharedString::new_static(title))
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
+            ),
+        )
+        .child(
+            v_flex()
+                .min_w_0()
+                .border_t_1()
+                .border_color(border)
+                .children(
+                    rows.into_iter()
+                        .map(|row| div().border_b_1().border_color(border).child(row)),
+                ),
+        )
+}
+
+/// One setting: its name and what it does on the left, then the control and the
+/// "use global default" checkbox in fixed columns, so every row's controls line up.
+fn settings_row(
+    id: SharedString,
+    name: &'static str,
+    description: &'static str,
+    control: AnyElement,
+    use_default: AnyElement,
+    note: Option<AnyElement>,
+    cx: &App,
+) -> AnyElement {
+    h_flex()
+        .id(ElementId::Name(id))
+        .items_center()
+        .gap(DynamicSpacing::Base12.rems(cx))
+        .py(DynamicSpacing::Base06.rems(cx))
+        .min_w_0()
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap(DynamicSpacing::Base01.rems(cx))
+                .child(Label::new(SharedString::new_static(name)).truncate())
+                .child(
+                    Label::new(SharedString::new_static(description))
+                        .size(LabelSize::Small)
+                        .color(Color::Muted)
+                        .truncate(),
+                ),
+        )
+        .child(
+            v_flex()
+                .flex_none()
+                .w(px_to_rems(CONTROL_COLUMN_WIDTH_PX))
+                .items_start()
+                .gap(DynamicSpacing::Base01.rems(cx))
+                .child(control)
+                .children(note),
+        )
+        .child(
+            div()
+                .flex_none()
+                .w(px_to_rems(DEFAULT_COLUMN_WIDTH_PX))
+                .flex()
+                .items_center()
+                .child(use_default),
+        )
+        .into_any_element()
 }
 
 /// Store `value` in `slot` — whether it changed. Equal values are not edits.

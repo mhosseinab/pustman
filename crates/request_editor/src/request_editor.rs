@@ -50,6 +50,9 @@ use variable_hover::SecretSources;
 /// `request::Send`, `request::Cancel` and `request::FocusUrlBar` against it.
 pub const REQUEST_EDITOR_CONTEXT: &str = "RequestEditor";
 
+/// The test selector on the active tab's content, under the request tab strip.
+pub(crate) const REQUEST_TAB_CONTENT_SELECTOR: &str = "request-tab-content";
+
 /// The Params tab's index in the request tab strip.
 const PARAMS_TAB_INDEX: usize = 0;
 
@@ -471,32 +474,54 @@ impl Render for RequestEditor {
         let request_content = v_flex()
             .size_full()
             .min_w_0()
+            .px(DynamicSpacing::Base12.rems(cx))
+            .pt(DynamicSpacing::Base12.rems(cx))
+            .gap(DynamicSpacing::Base06.rems(cx))
             // The pre-send unresolved-variable warning bar, above the URL bar
             // (REQ-VAR-07).
             .children(self.render_unresolved_warning(cx))
             // The URL bar, wrapped: the cURL paste is captured on this wrapper, which
             // is on the dispatch path exactly while the URL bar has focus (`curl_paste`).
+            // Send ends the URL row; the URL bar's own errors stay under its field.
             .child(
-                div()
-                    .capture_action::<text_input::input::Paste>(
-                        cx.listener(Self::handle_paste_curl),
+                h_flex()
+                    .items_start()
+                    .gap(DynamicSpacing::Base04.rems(cx))
+                    .min_w_0()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(DynamicSpacing::Base02.rems(cx))
+                            .capture_action::<text_input::input::Paste>(
+                                cx.listener(Self::handle_paste_curl),
+                            )
+                            .child(self.url_bar.clone())
+                            // Under the field, so Tab reaches Undo before Send.
+                            .children(self.render_import_undo(cx)),
                     )
-                    .child(self.url_bar.clone()),
+                    .child(self.render_send_controls(cx)),
             )
-            .children(self.render_import_undo(cx))
-            // Under the URL bar, where the send happened: the inline failure and then
-            // the Send/Cancel button.
-            .child(self.render_send_area(cx))
+            // Under the URL row, where the send happened: the inline failure.
+            .children(self.render_send_error(cx))
             // The request tab strip over the tab content: the selection decides which
             // tab's content shows below.
             .child(self.tab_bar.clone())
-            .map(|this| match self.active_tab {
-                HEADERS_TAB_INDEX => this.child(self.headers.clone()),
-                BODY_TAB_INDEX => this.child(self.body_tab.clone()),
-                AUTH_TAB_INDEX => this.child(self.auth_tab.clone()),
-                SETTINGS_TAB_INDEX => this.child(self.settings_tab.clone()),
-                _ => this.child(self.params.clone()),
-            })
+            .child(
+                v_flex()
+                    .debug_selector(|| REQUEST_TAB_CONTENT_SELECTOR.to_owned())
+                    .pb(DynamicSpacing::Base08.rems(cx))
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .map(|this| match self.active_tab {
+                        HEADERS_TAB_INDEX => this.child(self.headers.clone()),
+                        BODY_TAB_INDEX => this.child(self.body_tab.clone()),
+                        AUTH_TAB_INDEX => this.child(self.auth_tab.clone()),
+                        SETTINGS_TAB_INDEX => this.child(self.settings_tab.clone()),
+                        _ => this.child(self.params.clone()),
+                    }),
+            )
             .into_any_element();
         v_flex()
             .id(ElementId::from(&self.focus_handle))
@@ -530,3 +555,7 @@ mod curl_reseed_tests;
 #[cfg(test)]
 #[path = "m1_layout_fixes_tests.rs"]
 mod m1_layout_fixes_tests;
+
+#[cfg(test)]
+#[path = "editor_layout_polish_tests.rs"]
+mod editor_layout_polish_tests;

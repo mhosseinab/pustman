@@ -85,10 +85,19 @@ impl Render for Pane {
             // The tab strip only exists while the pane holds tabs; the empty state is
             // the Welcome item this pane owns, not a tab.
             .children((!self.tabs.is_empty()).then(|| self.tab_bar.clone()))
-            .map(|this| match active_view {
-                Some(item) => this.child(item),
-                None => this.child(self.welcome.clone()),
-            })
+            // The item gets the height left under the tab strip and no more: without
+            // `min_h_0` a tall item (the Settings form) squeezes the strip and pushes
+            // its own top out of view instead of scrolling inside.
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .map(|this| match active_view {
+                        Some(item) => this.child(item),
+                        None => this.child(self.welcome.clone()),
+                    }),
+            )
             .into_any_element()
     }
 }
