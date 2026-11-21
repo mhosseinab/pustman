@@ -229,7 +229,10 @@ async fn a_hostname_mismatch_never_puts_the_requested_name_into_the_tls_reason()
     let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     // The certificate is trusted but names `localhost` and `127.0.0.1` only, so this
     // handshake fails on the NAME — with the secret-carrying requested name (PRD §7).
+    // `no_proxy`: the handshake must reach the loopback server directly; through an
+    // `HTTPS_PROXY` it fails as a connect error, not on the certificate's name (#269).
     let client = reqwest::Client::builder()
+        .no_proxy()
         .add_root_certificate(certificate)
         .resolve("token-REDACTED-example.example.test", address)
         .build()
