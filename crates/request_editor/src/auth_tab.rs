@@ -45,6 +45,7 @@
 //! `ui` and delete this copy.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use api_model::{ApiKeyLocation, Auth, AuthSource, HttpRequest, effective_auth};
 use gpui::{
@@ -56,6 +57,8 @@ use ui::components::context_menu::ContextMenuEvent;
 use ui::prelude::*;
 
 use variables::{ScopeStack, spans};
+
+use crate::variable_highlight;
 
 /// The height of one control (a [`ButtonSize::Medium`]) in pixels at the default
 /// scale: a picker menu is anchored just under it (`body_tab`).
@@ -172,6 +175,8 @@ pub struct AuthTab {
     type_focus_handle: FocusHandle,
     /// The location button's focus handle, likewise.
     location_focus_handle: FocusHandle,
+    /// The scopes the auth fields highlight their `{{variables}}` against (REQ-VAR-03).
+    scopes: Arc<ScopeStack>,
     _field_subscriptions: Vec<Subscription>,
 }
 
@@ -209,6 +214,7 @@ impl AuthTab {
             location_menu_subscription: None,
             type_focus_handle: cx.focus_handle().tab_stop(true),
             location_focus_handle: cx.focus_handle().tab_stop(true),
+            scopes: Arc::new(ScopeStack::new()),
             _field_subscriptions: Vec::new(),
         };
         // Seed before the fields are wired back to the tab, so the fills are not
@@ -228,7 +234,28 @@ impl AuthTab {
             })
         })
         .collect();
+        tab.refresh_highlights(cx);
         tab
+    }
+
+    /// Store the scopes the auth fields highlight against and re-highlight them
+    /// (REQ-VAR-03).
+    pub fn set_scopes(&mut self, scopes: Arc<ScopeStack>, cx: &mut Context<Self>) {
+        self.scopes = scopes;
+        self.refresh_highlights(cx);
+    }
+
+    /// Re-highlight every auth field against the current scopes.
+    fn refresh_highlights(&self, cx: &mut Context<Self>) {
+        for input in [
+            &self.basic_username_input,
+            &self.basic_password_input,
+            &self.bearer_token_input,
+            &self.api_key_name_input,
+            &self.api_key_value_input,
+        ] {
+            variable_highlight::apply_to_input(input, &self.scopes, cx);
+        }
     }
 
     /// The parent chain that resolves `Inherit` (REQ-MODEL-01), nearest first — what
@@ -393,6 +420,7 @@ impl AuthTab {
         if *event != TextInputEvent::Changed {
             return;
         }
+        self.refresh_highlights(cx);
         let text = self.field_input(field).read(cx).text();
         let updated = (!text.is_empty()).then_some(text);
         if self.field_value(field) == updated.as_deref() {

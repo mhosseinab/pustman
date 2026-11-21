@@ -108,6 +108,22 @@ impl KeyValueTable {
         self.rows.iter().map(|row| row.row.clone()).collect()
     }
 
+    /// Every row's cells with the row field each edits, in row order — the read-only
+    /// reach the variable highlighter needs into this table's inputs
+    /// (`crate::variable_highlight`, REQ-VAR-03).
+    pub fn cell_inputs(&self) -> Vec<(RowField, Entity<TextInput>)> {
+        self.rows
+            .iter()
+            .flat_map(|row| {
+                [
+                    (RowField::Key, row.key_input.clone()),
+                    (RowField::Value, row.value_input.clone()),
+                    (RowField::Description, row.description_input.clone()),
+                ]
+            })
+            .collect()
+    }
+
     /// The stable ids of the rows, in order — what a caller compares to prove that a
     /// round trip through the URL did not rebuild the table under the caret.
     pub fn row_ids(&self) -> Vec<u64> {

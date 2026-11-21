@@ -38,6 +38,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use api_model::{Body, FormField, HttpRequest, RawLanguage};
 use gpui::{
@@ -48,8 +49,10 @@ use gpui::{
 use text_input::{TextArea, TextInput, TextInputEvent};
 use ui::components::context_menu::ContextMenuEvent;
 use ui::prelude::*;
+use variables::ScopeStack;
 
 use crate::key_value_table::{KeyValueTable, KeyValueTableEvent, KeyValueTableShape};
+use crate::variable_highlight;
 
 /// The height of one body control (a [`ButtonSize::Medium`]) in pixels at the default
 /// scale: a picker menu is anchored just under it.
@@ -194,6 +197,8 @@ pub struct BodyTab {
     /// The file-dialog task: replacing it cancels the dialog's answer before it,
     /// because dropping a `Task` cancels it (AGENTS.md › Async).
     pick_task: Option<Task<()>>,
+    /// The scopes the body fields highlight their `{{variables}}` against (REQ-VAR-03).
+    scopes: Arc<ScopeStack>,
     _urlencoded_subscription: Subscription,
     _raw_subscription: Subscription,
 }
@@ -229,10 +234,12 @@ impl BodyTab {
             mode_focus_handle: cx.focus_handle().tab_stop(true),
             language_focus_handle: cx.focus_handle().tab_stop(true),
             pick_task: None,
+            scopes: Arc::new(ScopeStack::new()),
             _urlencoded_subscription,
             _raw_subscription,
         };
         tab.seed(&request.body, window, cx);
+        tab.refresh_highlights(cx);
         tab
     }
 
@@ -292,6 +299,26 @@ impl BodyTab {
     /// The urlencoded table.
     pub fn urlencoded_table(&self) -> &Entity<KeyValueTable> {
         &self.urlencoded_table
+    }
+
+    /// Store the scopes this tab's fields highlight against and re-highlight them
+    /// (REQ-VAR-03).
+    pub fn set_scopes(&mut self, scopes: Arc<ScopeStack>, cx: &mut Context<Self>) {
+        self.scopes = scopes;
+        self.refresh_highlights(cx);
+    }
+
+    /// Re-highlight everything this tab edits against the current scopes. The
+    /// description cells stay plain — the same "never sent" rule
+    /// [`variable_highlight::apply_to_table`] applies to key/value rows.
+    fn refresh_highlights(&self, cx: &mut Context<Self>) {
+        variable_highlight::apply_to_area(&self.raw_text, &self.scopes, cx);
+        for row in &self.form_rows {
+            variable_highlight::apply_to_input(&row.key_input, &self.scopes, cx);
+            variable_highlight::apply_to_input(&row.value_input, &self.scopes, cx);
+            variable_highlight::apply_to_input(&row.content_type_input, &self.scopes, cx);
+        }
+        variable_highlight::apply_to_table(&self.urlencoded_table, &self.scopes, cx);
     }
 
     /// The raw body's language (REQ-HTTP-04) — part of the body, so the draft follows.
@@ -530,6 +557,7 @@ impl BodyTab {
         if *event != TextInputEvent::Changed {
             return;
         }
+        self.refresh_highlights(cx);
         let Some(row) = self.form_rows.iter_mut().find(|row| row.id == id) else {
             return;
         };
@@ -559,6 +587,7 @@ impl BodyTab {
         if *event != KeyValueTableEvent::RowsChanged {
             return;
         }
+        self.refresh_highlights(cx);
         cx.emit(BodyTabEvent::BodyChanged);
         cx.notify();
     }
@@ -574,6 +603,7 @@ impl BodyTab {
         if *event != TextInputEvent::Changed {
             return;
         }
+        self.refresh_highlights(cx);
         cx.emit(BodyTabEvent::BodyChanged);
         cx.notify();
     }

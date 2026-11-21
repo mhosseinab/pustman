@@ -31,6 +31,8 @@
 //! and the draft cannot drift: a draft replaced wholesale never keeps the switches of
 //! the request it replaced.
 
+use std::sync::Arc;
+
 use api_model::{HttpRequest, KeyValue, RequestSettings};
 use gpui::{
     App, Context, ElementId, Entity, EventEmitter, FocusHandle, IntoElement, KeyDownEvent,
@@ -42,6 +44,7 @@ use ui::prelude::*;
 use variables::{DynamicValues, ScopeKind, ScopeStack};
 
 use crate::key_value_table::{KeyValueTable, KeyValueTableEvent, KeyValueTableShape, RowField};
+use crate::variable_highlight;
 
 /// Header names the key cells suggest, most common first (REQ-HTTP-03). A `const`
 /// slice: the list is static, so its order never jitters and no map is rendered.
@@ -159,6 +162,8 @@ pub struct Headers {
     /// The read-only auto-header block: one focusable region over the rows' text — the
     /// switches are tab stops of their own (see [`ui::Toggle`]).
     auto_focus: FocusHandle,
+    /// The scopes the rows highlight their `{{variables}}` against (REQ-VAR-03).
+    scopes: Arc<ScopeStack>,
     _table_subscription: Subscription,
 }
 
@@ -181,11 +186,24 @@ impl Headers {
             known_rows: Vec::new(),
             draft_settings: settings_for(request),
             auto_focus: cx.focus_handle().tab_stop(true),
+            scopes: Arc::new(ScopeStack::new()),
             _table_subscription: subscription,
         };
         headers.sync_row_snapshot(cx);
         headers.auto_rows = auto_headers_for(request);
+        headers.refresh_highlights(cx);
         headers
+    }
+
+    /// Store the scopes the rows highlight against and re-highlight them (REQ-VAR-03).
+    pub fn set_scopes(&mut self, scopes: Arc<ScopeStack>, cx: &mut Context<Self>) {
+        self.scopes = scopes;
+        self.refresh_highlights(cx);
+    }
+
+    /// Re-highlight the user rows' key and value cells against the current scopes.
+    fn refresh_highlights(&self, cx: &mut Context<Self>) {
+        variable_highlight::apply_to_table(&self.table, &self.scopes, cx);
     }
 
     /// The user rows as the request model stores them.
@@ -255,6 +273,7 @@ impl Headers {
         if *event != KeyValueTableEvent::RowsChanged {
             return;
         }
+        self.refresh_highlights(cx);
         self.refresh_suggestions(cx);
         cx.emit(HeadersEvent::RowsChanged);
     }
@@ -386,6 +405,9 @@ impl Headers {
         }
         self.table
             .update(cx, |table, cx| table.set_rows(rows, window, cx));
+        // The rewrite built fresh cells carrying text, and a programmatic table write
+        // emits nothing, so they are highlighted here.
+        self.refresh_highlights(cx);
         self.dismiss_suggestions(cx);
         self.sync_row_snapshot(cx);
         let focus_id = self.table.read(cx).row_ids().get(index).copied();

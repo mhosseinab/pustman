@@ -16,8 +16,10 @@ use gpui::{
 use text_input::{TextInput, TextInputEvent};
 use ui::components::context_menu::ContextMenuEvent;
 use ui::prelude::*;
+use variables::ScopeStack;
 
 use crate::method;
+use crate::variable_highlight;
 
 /// The height of one method control (a [`ButtonSize::Medium`]) in pixels at the default
 /// scale: the dropdown is anchored just under it.
@@ -59,6 +61,9 @@ pub struct UrlBar {
     custom_input_subscription: Option<Subscription>,
     /// Why the last typed custom method was not applied, shown under the field.
     custom_error: Option<SharedString>,
+    /// The scopes the URL highlights its `{{variables}}` against (REQ-VAR-03) — the
+    /// editor's stack, shared (an `Arc`) so edits can re-highlight from here.
+    scopes: Arc<ScopeStack>,
     _url_subscription: Subscription,
 }
 
@@ -74,7 +79,7 @@ impl UrlBar {
         // in the tab order right after the method control.
         url_input.read(cx).focus_handle(cx).tab_stop(true);
         let url_subscription = cx.subscribe_in(&url_input, window, Self::on_url_event);
-        Self {
+        let bar = Self {
             method,
             url_input,
             method_focus_handle: cx.focus_handle().tab_stop(true),
@@ -83,8 +88,27 @@ impl UrlBar {
             custom_input: None,
             custom_input_subscription: None,
             custom_error: None,
+            scopes: Arc::new(ScopeStack::new()),
             _url_subscription: url_subscription,
-        }
+        };
+        bar.refresh_highlights(cx);
+        bar
+    }
+
+    /// The URL field — what the variable highlighter and later steps reach into.
+    pub fn url_input(&self) -> &Entity<TextInput> {
+        &self.url_input
+    }
+
+    /// Store the scopes the URL highlights against and re-highlight it (REQ-VAR-03).
+    pub fn set_scopes(&mut self, scopes: Arc<ScopeStack>, cx: &mut Context<Self>) {
+        self.scopes = scopes;
+        self.refresh_highlights(cx);
+    }
+
+    /// Re-highlight the URL against the current scopes.
+    fn refresh_highlights(&self, cx: &mut Context<Self>) {
+        variable_highlight::apply_to_input(&self.url_input, &self.scopes, cx);
     }
 
     /// The URL text.
@@ -228,6 +252,7 @@ impl UrlBar {
         cx: &mut Context<Self>,
     ) {
         if *event == TextInputEvent::Changed {
+            self.refresh_highlights(cx);
             cx.emit(UrlBarEvent::UrlChanged);
         }
     }

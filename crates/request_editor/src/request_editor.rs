@@ -23,6 +23,7 @@ pub mod send;
 mod settings_tab;
 mod unresolved_warning;
 pub mod url_bar;
+mod variable_highlight;
 
 use api_model::{HttpRequest, RequestSettings};
 use gpui::{
@@ -113,6 +114,10 @@ pub struct RequestEditor {
     /// (`response_split`). `Decision:` not persisted — a per-tab layout preference of
     /// this session, so no workspace-format change comes with it.
     split_fraction: f32,
+    /// The scopes every field highlights its `{{variables}}` against (REQ-VAR-03);
+    /// `variable_highlight` owns the API around it (`set_scopes`), shared with the
+    /// field modules as an `Arc` because `ScopeStack` is not `Clone`.
+    scopes: std::sync::Arc<variables::ScopeStack>,
     _url_bar_subscription: Subscription,
     _params_subscription: Subscription,
     _headers_subscription: Subscription,
@@ -191,6 +196,7 @@ impl RequestEditor {
             response_view: cx.new(ResponseView::new),
             split_focus: cx.focus_handle().tab_stop(true),
             split_fraction: response_split::DEFAULT_SPLIT_FRACTION,
+            scopes: std::sync::Arc::new(variables::ScopeStack::new()),
             _url_bar_subscription: url_bar_subscription,
             _params_subscription: params_subscription,
             _headers_subscription: headers_subscription,

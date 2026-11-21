@@ -7,15 +7,19 @@
 //! `{{var}}` must round-trip). The `#fragment` tail sits after the query and is carried
 //! through untouched. Disabled rows are omitted from the URL but kept in the table.
 
+use std::sync::Arc;
+
 use api_model::{HttpRequest, KeyValue};
 use gpui::{
     App, Context, ElementId, Entity, EventEmitter, IntoElement, ParentElement, Render,
     SharedString, Subscription, Window,
 };
 use ui::prelude::*;
+use variables::ScopeStack;
 
 use crate::key_value_table::{KeyValueTable, KeyValueTableEvent, KeyValueTableShape};
 use crate::url_bar::UrlBar;
+use crate::variable_highlight;
 
 /// What a [`Params`] tells its owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,6 +37,8 @@ pub struct Params {
     url_bar: Entity<UrlBar>,
     query_table: Entity<KeyValueTable>,
     path_table: Entity<KeyValueTable>,
+    /// The scopes both tables highlight their `{{variables}}` against (REQ-VAR-03).
+    scopes: Arc<ScopeStack>,
     _query_subscription: Subscription,
     _path_subscription: Subscription,
 }
@@ -64,13 +70,29 @@ impl Params {
         path_table.update(cx, |table, cx| table.set_rows(path_rows, window, cx));
         let _query_subscription = cx.subscribe_in(&query_table, window, Self::on_query_table_event);
         let _path_subscription = cx.subscribe_in(&path_table, window, Self::on_path_table_event);
-        Self {
+        let params = Self {
             url_bar,
             query_table,
             path_table,
+            scopes: Arc::new(ScopeStack::new()),
             _query_subscription,
             _path_subscription,
-        }
+        };
+        params.refresh_highlights(cx);
+        params
+    }
+
+    /// Store the scopes both tables highlight against and re-highlight them
+    /// (REQ-VAR-03).
+    pub fn set_scopes(&mut self, scopes: Arc<ScopeStack>, cx: &mut Context<Self>) {
+        self.scopes = scopes;
+        self.refresh_highlights(cx);
+    }
+
+    /// Re-highlight both tables against the current scopes.
+    fn refresh_highlights(&self, cx: &mut App) {
+        variable_highlight::apply_to_table(&self.query_table, &self.scopes, cx);
+        variable_highlight::apply_to_table(&self.path_table, &self.scopes, cx);
     }
 
     /// The query rows as the request model stores them.
@@ -118,6 +140,9 @@ impl Params {
         if rows_changed {
             cx.emit(ParamsEvent::RowsChanged);
         }
+        // Rows rewritten above are fresh inputs carrying text, and a programmatic
+        // table write emits nothing, so they are highlighted here.
+        self.refresh_highlights(cx);
     }
 
     /// The query rows changed: rebuild the URL from them and push it into the URL bar
@@ -132,6 +157,7 @@ impl Params {
         if *event != KeyValueTableEvent::RowsChanged {
             return;
         }
+        self.refresh_highlights(cx);
         let current = self.url_bar.read(cx).url(cx);
         let (base, _, fragment) = split_url(&current);
         let rebuilt = build_url(base, &self.query_rows(cx), fragment);
@@ -153,6 +179,7 @@ impl Params {
         if *event != KeyValueTableEvent::RowsChanged {
             return;
         }
+        self.refresh_highlights(cx);
         cx.emit(ParamsEvent::RowsChanged);
     }
 }
