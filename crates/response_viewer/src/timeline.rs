@@ -861,3 +861,7 @@ fn format_duration(duration: Option<Duration>) -> SharedString {
 #[cfg(test)]
 #[path = "timeline_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "timeline_m1_fixes_tests.rs"]
+mod m1_fixes_tests;
