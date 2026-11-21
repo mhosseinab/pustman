@@ -112,7 +112,7 @@ Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending)
 | S35 | `history_panel` | passed | | | [S35a](progress/pustman-v1/steps/S35a.md), [S35b](progress/pustman-v1/steps/S35b.md), [S35c](progress/pustman-v1/steps/S35c.md), [S35d](progress/pustman-v1/steps/S35d.md), [S35w](progress/pustman-v1/steps/S35w.md) | S35a (`cb0be4c`), S35b (`d0fdcf2`), S35c (`d32857d`), S35d (`2f1ca4d`, driver-added; closes #141) passed; S35w (`d738c28`) passed — all sub-steps merged |
 | S36 | Manage Cookies dialog | passed | | #175, #176, #179, #180 | [S36a](progress/pustman-v1/steps/S36a.md), [S36b](progress/pustman-v1/steps/S36b.md) | S36a (`fd8a7de`), S36b (`05b1a4f`) |
 | S37 | Redaction NFR test (integration) | passed | 1 | | [S37](progress/pustman-v1/steps/S37.md) | S37 (`ce1b583`) passed |
-| S33n | Fix the M1 request-editor blockers and major layout bugs (driver-added, S38 prereq; #200 #201) | in_progress | 1 | | | |
+| S33n | Fix the M1 request-editor blockers and major layout bugs (driver-added, S38 prereq; #200 #201) | passed | 1 | 35e1813 | [S33n](progress/pustman-v1/steps/S33n.md) | LOW #264 |
 | S33o | Fix the M1 workspace, console, history and timeline major bugs (driver-added, S38 prereq; #199 #202) | in_progress | 1 | | | |
 | S38 | M1 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off |
 | S39 | `collections_panel`: tree | pending | 0 | | |  |
