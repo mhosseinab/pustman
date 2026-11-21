@@ -1,7 +1,7 @@
-# Repo rule: cargo uses at most 4 cores — 4 compile jobs and 4 test threads per invocation.
+# Repo rule: cargo uses at most 3 cores — 3 compile jobs and 3 test threads per invocation.
 # Cargo reads this from every checkout and worktree under the repo root.
 [build]
-jobs = 4
+jobs = 3
 
 [env]
-RUST_TEST_THREADS = "4"
+RUST_TEST_THREADS = "3"

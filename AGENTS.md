@@ -98,8 +98,8 @@ cargo fmt --all -- --check
 cargo run -p pustman
 ```
 
-Cargo uses at most 4 cores: the checked-in `.cargo/config.toml` sets `[build] jobs = 4` and
-`RUST_TEST_THREADS=4` for every checkout and worktree. Don't raise it with `-j`, `--jobs` or `--test-threads`.
+Cargo uses at most 3 cores: the checked-in `.cargo/config.toml` sets `[build] jobs = 3` and
+`RUST_TEST_THREADS=3` for every checkout and worktree. Don't raise it with `-j`, `--jobs` or `--test-threads`.
 
 Run the narrowest command that proves your change (`cargo test -p request_editor some_test`) before the
 workspace-wide ones.
