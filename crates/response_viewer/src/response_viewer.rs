@@ -275,6 +275,14 @@ pub(crate) fn child_id(base: &ElementId, name: impl Into<SharedString>) -> Eleme
     ElementId::from((base.clone(), name))
 }
 
+/// The empty-state heading's colour (#266): the theme's body text — `text/primary` in
+/// the redesign pack's theme roles (`01_specs/design_system.md`). A [`Headline`] with no
+/// colour of its own inherits its container's text colour, and this pane's container
+/// sets none, so the heading fell back to GPUI's default — near-black on the dark
+/// theme's background. `empty_state_tests` holds the token to the pack's 4.5:1 text
+/// contrast in both bundled themes.
+const EMPTY_STATE_HEADING_COLOR: Color = Color::Default;
+
 /// The state before the first response: what this region will show, and how to get one.
 fn empty_state(cx: &App) -> impl IntoElement {
     v_flex()
@@ -282,7 +290,11 @@ fn empty_state(cx: &App) -> impl IntoElement {
         .justify_center()
         .items_center()
         .gap(DynamicSpacing::Base04.rems(cx))
-        .child(Headline::new("No response yet").size(HeadlineSize::Small))
+        .child(
+            Headline::new("No response yet")
+                .size(HeadlineSize::Small)
+                .color(EMPTY_STATE_HEADING_COLOR),
+        )
         .child(
             Label::new("Send a request to see its status, headers and body here.")
                 .color(Color::Muted),
@@ -292,3 +304,7 @@ fn empty_state(cx: &App) -> impl IntoElement {
 #[cfg(test)]
 #[path = "clear_tests.rs"]
 mod clear_tests;
+
+#[cfg(test)]
+#[path = "empty_state_tests.rs"]
+mod empty_state_tests;
