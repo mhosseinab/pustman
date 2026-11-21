@@ -9,11 +9,12 @@ use std::time::Duration;
 
 use api_model::{Method, SecretValues};
 use gpui::{
-    Bounds, ElementId, Modifiers, MouseButton, Pixels, Point, ScrollDelta, ScrollEvent, ScrollSource,
-    TestAppContext, TouchPhase, VisualTestContext, px, size,
+    Bounds, ElementId, Modifiers, MouseButton, Pixels, Point, ScrollDelta, ScrollEvent,
+    ScrollSource, TestAppContext, TouchPhase, VisualTestContext, px, size,
 };
 use http_engine::{
-    Header, RedirectHop, RequestBody, ResolvedRequest, Response, ResponseBody, SendSettings, Timings,
+    Header, RedirectHop, RequestBody, ResolvedRequest, Response, ResponseBody, SendSettings,
+    Timings,
 };
 use ui::test_support::{draw_window, init_test};
 use url::Url;
@@ -112,7 +113,6 @@ fn long_response() -> Response {
         first_byte: Some(Duration::from_millis(120)),
         download: Some(Duration::from_millis(80)),
         total: Some(Duration::from_millis(292)),
-        ..Timings::default()
     };
     response.redirects = (0..30)
         .map(|hop_index| RedirectHop {

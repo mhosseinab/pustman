@@ -106,9 +106,7 @@ mod m1_fixes_tests {
 }
 
 /// The app's one window on the full init order (the `wire_request_editor.rs` shape).
-fn open_workspace<'a>(
-    cx: &'a mut TestAppContext,
-) -> (Entity<Workspace>, &'a mut gpui::VisualTestContext) {
+fn open_workspace(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut gpui::VisualTestContext) {
     cx.update(|cx| pustman::init_with_store(cx, StoreLocation::InMemory));
     let (workspace, cx) = cx.add_window_view(Workspace::new);
     cx.update(|_window, cx| StartupProblems::attach_workspace(&workspace, cx));
