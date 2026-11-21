@@ -1,7 +1,8 @@
-# Pustman v1 (M0–M2) — Step-by-Step Implementation
+# Pustman v1 (M0–M5) — Step-by-Step Implementation
 
 **Status: READY TO EXECUTE (2026-11-17). Revised 2026-11-19 into smaller steps** (see
-[Smaller steps](#smaller-steps-2026-11-19-revision)). Companion to [`pustman-v1-plan.md`](pustman-v1-plan.md)
+[Smaller steps](#smaller-steps-2026-11-19-revision)). **Expanded 2026-11-21 with M3–M5** (S49–S71, from
+[Phase 6](#phase-6--protocol-foundation-shared-by-m3-m4-and-m5); STUB-M6/M7 remain). Companion to [`pustman-v1-plan.md`](pustman-v1-plan.md)
 (the *why*). This is the *how*: ordered, **standalone, independently verifiable** steps, each with a
 prompt you can paste as-is and an explicit Verify block. **Read-only for workers**: a worker never
 edits a Goal, a Verify block, an existing test, or this file.
@@ -24,7 +25,8 @@ Because of that contract, prompts below describe only the change itself and the 
   - **S25**, the M0 sign-off
   - **S38**, the M1 sign-off
   - **S48**, the M2 sign-off
-  - **STUB-M3..M7**, the expansion gates
+  - **S60**, **S67** and **S71**, the M3, M4 and M5 sign-offs
+  - **STUB-M6** and **STUB-M7**, the expansion gates
 - **`[GPUI]`** marks a step whose crate depends on `gpui`. Its Verify cannot run until G-DEPS clears
   (see plan §2).
 
@@ -156,14 +158,18 @@ Five conventions make the sub-steps independent:
    - verifies with `scripts/pustman-v1-test.sh pustman wire_<feature>` → `PASS 1` and
      `cargo build -p pustman` → exit 0, plus the step's E2E scenario when it has one.
 
-   Feature sub-steps never touch `crates/pustman/**`.
+   Feature sub-steps never touch `crates/pustman/**`. The M3–M5 wire steps (S59w, S65w, S69w) leave
+   `pustman.rs` alone, because their feature crates are already registered: they append dev-deps to
+   `crates/pustman/Cargo.toml` and add the `wire_<feature>.rs` test.
 5. **Serial files stay serial.** A crate's main view file (`request_editor.rs`, `response_viewer.rs`,
    `tree.rs`, `workspace.rs`, `reqwest_transport.rs`) is edited by one chain of sub-steps at a time;
    the graph below orders every pair that shares one. Parallelism comes from new modules and from
    different crates.
 
 **High-stakes sub-steps** (consensus review, as before): S13c and S16a (secrets), S28c (TLS),
-S43a/S43b/S43c (secrets), S45a/S45b (import), plus the unsplit S12, S37 and S47.
+S43a/S43b/S43c (secrets), S45a/S45b (import), plus the unsplit S12, S37 and S47. M3 adds S50c and
+S52a (import/auth model), S55a–S55d and S56a–S56d (auth and OAuth secrets), S57a–S57c (proxy,
+certificates, TLS) and S58b (OAuth form).
 
 **In-flight mapping** (2026-11-19): S12 is unchanged. The S19 worktree already holds most of the
 component files; its work continues as **S19a**, and S19b/S19c start after S19a merges.
@@ -172,14 +178,18 @@ component files; its work continues as **S19a**, and S19b/S19c start after S19a 
 
 Measured by a validator script over this file and the 2026-11-17 version. Stubs and G-DEPS are not counted.
 
-| Measure | 2026-11-17 | This revision |
-| --- | --- | --- |
-| Steps (human sign-offs included) | 49 | 109 |
-| Steps touching a hotspot | 9 (18%) | 9 (8%) — only the wire steps |
-| Longest dependency chain, in steps | 23 | 31 |
-| Widest graph level (steps with no edge between them) | 5 | 10 |
-| Unordered step pairs sharing a non-append, non-hotspot file | — | 0 |
-| Original test names missing from this file | — | 0 |
+| Measure | 2026-11-17 | 2026-11-19 | 2026-11-21 (M3–M5 expanded) |
+| --- | --- | --- | --- |
+| Steps (human sign-offs included) | 49 | 109 | 167 |
+| Steps touching a hotspot | 9 (18%) | 9 (8%) — only the wire steps | 12 (7%) — only the wire steps |
+| Longest dependency chain, in steps | 23 | 31 | 45 |
+| Widest graph level (steps with no edge between them) | 5 | 10 | 10 |
+| Unordered step pairs sharing a non-append, non-hotspot file | — | 0 | 0 |
+| Original test names missing from this file | — | 0 | 0 |
+
+For the 2026-11-21 column, every new step's `PASS n` was also checked against the test names its prompt
+lists. The longest chain now runs on past S48 through
+S49→S51a→S51b→S51c→S51d→S54c→S59b→S69a→S69b→S69c→S69d→S69w→S70→S71.
 
 The chain is longer in steps but shorter in work, because each step on it is smaller. The longest chain runs
 S0→S1→S17→S18→S19a→S22a→S22b→S23a→S23b→S25→S26a→…→S28c→S29e→S33a→S33b→S33c→S38→S39a→S39b→S40a→S40b→S42a→S45a→S45b→S48.
@@ -197,11 +207,13 @@ hotspots:
   - crates/pustman/Cargo.toml       # same steps as pustman.rs
 ```
 
-Only the wire steps touch these files: S22e, S24w, S26w, S29w, S32w, S34w, S35w, S39w and S44w. The
+Only the wire steps touch these files: S22e, S24w, S26w, S29w, S32w, S34w, S35w, S39w and S44w, and
+for M3–M5 S59w, S65w and S69w (`crates/pustman/Cargo.toml` dev-deps only). The
 validation numbers are in [Step counts](#step-counts-2026-11-19-revision). Two earlier design
 choices still keep other files off this list:
 
-- The root `Cargo.toml` uses `members = ["crates/*"]` and declares every dependency in S1.
+- The root `Cargo.toml` uses `members = ["crates/*"]` and declares every dependency in S1 (M0–M2)
+  and S49 (M3–M5).
 - Keymaps are written once in S21.
 
 ## Dependency graph (quick view)
@@ -246,7 +258,21 @@ Phase 5 workspaces     S38→S39a→S39b→{S39w, S40a} ; S40a→S40b ; S38→S4
                        S9,S42a,S40a→S45a→S45b ; S40b→S45c
                        S41a,S24a→S46 ; S37,S43b,S44a→S47
                        Phase 5 leaves→S48 (M2 SIGN-OFF, human) ── promote -4
-Phase 6+ (stubs)       S48→STUB-M3 ; S48→STUB-M4 ; S48→STUB-M5 ; S48→STUB-M6 ; STUB-M3..M6→STUB-M7
+Phase 6 foundation    S48→S49 ; S49→S50a→{S50b, S50c} ; S49→S50d ; S50a,S50b→S50e
+                       S49→S51a→S51b→S51c→S51d ; S51a→S51e
+Phase 7 M3             S50c→S52a ; S49→S52b ; S50a→S53 ; S51a→S54a ; S54a,S53→S54b ; S54b,S51d→S54c
+                       auth     S52a,S54b→S55a ; S52a→S55b ; S52a→S55c ; S55a,S55b,S55c→S55d
+                       oauth    S55d→S56a→S56b→S56c→S56d
+                       network  S52b,S54b→S57a→S57b ; S57b,S50d→S57c
+                       ui       S52a,S57c→S58a ; S58a,S56c→S58b ; S53,S50d,S50e,S58b→S59a ; S54c→S59b
+                       S59a,S59b,S56d→S59w (wire) ; S54c,S57c,S58b,S59w→S60 (M3 SIGN-OFF, human) ── promote next tag
+Phase 8 M4             S50a,S51a,S52b→S61a→{S61b, S61c} ; S61a→S62a→S62b
+                       S61b,S61c,S51d,S50d,S50e→S63a→S63b ; S62b,S63a→S64
+                       S51e,S63a,S63b,S64→S65 ; S65,S63b→S65w (wire) ; S65w→S66→S67 (M4 SIGN-OFF, human) ── promote next tag
+Phase 9 M5             S50a→S68a→{S68b, S68c} ; S68b,S68c,S52b→S68d ; S68d,S51a→S68e
+                       S59b,S68d→S69a ; S68d,S69a,S50d,S50e→S69b ; S69b,S68e,S51d→S69c ; S69b,S69c→S69d
+                       S69c,S69d→S69w (wire) ; S69w→S70→S71 (M5 SIGN-OFF, human) ── promote next tag
+Phase 10+ (stubs)      S51d,S50e→STUB-M6 ; S60,S67,S71,STUB-M6→STUB-M7
 ```
 
 These chains are serial on purpose, because each shares a file:
@@ -256,6 +282,11 @@ These chains are serial on purpose, because each shares a file:
 - `response_viewer.rs`: S29a→S29c→S30d→S30e→S31a; `body_view.rs`: S29b→S30a→S30b→S30c.
 - `tree.rs`: S39a→S39b→S40a→S40b→S42b.
 - `workspace.rs`: S22a→S22d. S22b and S22c each add their own module.
+- M3–M5: `postman.rs`: S50c→S52a. `client.rs`: S53→S54b→S55a→S56c. `reqwest_transport.rs`:
+  S54b→S57a→S57b. `auth_tab.rs`: S58a→S58b. `response_viewer.rs`: S54c→S59b→S69a. `session_log.rs`:
+  S51c→S51d. `websocket_editor.rs`: S63a→S63b→S65. `socketio_editor.rs`: S64→S65. `grpc_editor.rs`:
+  S69b→S69c→S69d. `pustman_actions.rs`: S50d→S57c. `crates/pustman/Cargo.toml` (hotspot): S59w, S65w,
+  S69w, serialized by the driver. `api_model/src/request.rs` is edited only by S50a.
 
 ---
 
@@ -2441,30 +2472,1544 @@ Human validation on Linux + macOS with two clones of one GitHub repo: A adds a r
 api_key, commits, pushes; B (Pustman open) pulls → request appears within 1 s, api_key unset,
 send prompts to set it; `git show` has no secret. Also: import a real Postman v2.1 export; export
 it back and re-import in Postman; branch switch with a conflict file shows the badge; status bar
-branch/dirty. Record M2 GO/NO-GO; then /promote → release/pustman-v1-4. Then decide which of
-STUB-M3..M6 to expand first.
+branch/dirty. Record M2 GO/NO-GO; then /promote → release/pustman-v1-4. M3–M5 are already
+expanded (S49+); decide whether to expand STUB-M6 now.
 ```
 
 **Verify:** the log records `M2 GO`. CI is green at the merge SHA.
 
 ---
 
-# Phase 6+ — Later milestones (STUBS: not dispatchable)
+# Phase 6 — Protocol foundation (shared by M3, M4 and M5)
 
-Each stub is expanded into full `S<N>` steps by a human-approved planning session after the
-previous milestone's sign-off. The expansion follows the same shape and appends steps after S48. A
-driver must **never** dispatch a STUB row; reaching one is a stop condition.
+Expanded on 2026-11-21, before M2 was built (progress stood at S38), on the user's "go". Every prompt below
+that names an M2-era file says "grep the current code first": M2 may have changed a signature since
+this text was written, and the code wins over this file. A worker that finds this file wrong reports a
+`Decision:` line, and the driver corrects the step before dispatching the next one that depends on it.
+
+The foundation steps depend on S48, and no M3, M4 or M5 step starts before they pass. After the
+foundation, the three milestones are independent (PRD §11: "M4–M6 are independent once M1 and M2
+land"). Each has its own sign-off, and tags are cut in sign-off order: the first of M3, M4 and M5 to
+sign off is promoted to `release/pustman-v1-5`, the next one to `-6`, and the last one to `-7`. A
+foundation step belongs to the first tag that ships it (D11).
+
+Decisions made in this expansion (they apply to every step below):
+
+- **Dependencies are declared once, in S49.** No later step edits the root `Cargo.toml`, the same
+  rule S1 set for M0–M2. A later step that needs another crate stops and reports, and the driver
+  adds a dependency step.
+- **No code generation.** gRPC messages are dynamic (`prost-reflect` over descriptors compiled in
+  process by `protox`), and no `build.rs` or `protoc` is used anywhere. Test servers use the same
+  dynamic codec, so no generated stubs exist in the repository.
+- **OAuth 2.0 runs on our own HTTP engine.** Token, refresh and code-exchange requests are form POSTs sent
+  through `http_engine` so they honour the proxy, certificates, Console and redaction. A
+  third-party OAuth client would bypass all four. PKCE uses `sha2`, `base64` and `rand`, all declared.
+- **Protocol clients are domain crates.** `websocket_client` (WebSocket and Socket.IO) and `grpc_client`
+  have no GPUI views, and their editors live in `request_editor`. Socket.IO is a module of
+  `websocket_client`, not a crate of its own: the PRD §9 crate list names only `websocket_client`, and
+  Socket.IO runs over it.
+- **File suffixes:** `.graphql.json`, `.websocket.json` (PRD §6.1), `.socketio.json` and `.grpc.json`
+  (PRD §6.1).
+- **Deferred to STUB-M7:**
+  - the P1/P2 items in these sections: REQ-GQL-02/03/04, REQ-SSE-02/03, REQ-WS-06, REQ-GRPC-07 and
+    Socket.IO v2/v3;
+  - draft autosave and restore-after-restart for non-HTTP tabs. Protocol requests reopen from the
+    tree.
+
+### S49 — Declare the M3–M5 dependencies
+**Goal:** every third-party crate M3, M4 and M5 need is declared once, in the root `Cargo.toml`. They
+resolve on our toolchain, their licences allow us to ship them, and they share one rustls crypto provider.
+**Depends on:** S48. **Deploy delta:** none.
+**Edits:**
+- `Cargo.toml` (root: `[workspace.dependencies]` only);
+- `crates/websocket_client/Cargo.toml`, `crates/websocket_client/src/websocket_client.rs`,
+  `crates/websocket_client/src/tls_provider.rs`, `crates/websocket_client/src/tls_provider_tests.rs`;
+- `crates/grpc_client/Cargo.toml`, `crates/grpc_client/src/grpc_client.rs`,
+  `crates/grpc_client/src/tls_provider.rs`, `crates/grpc_client/src/tls_provider_tests.rs`;
+- `crates/http_engine/Cargo.toml` (append deps);
+- `docs/ARCHITECTURE.md` (append rows).
+
+```
+Read AGENTS.md (Licensing, Toolchain, "Never re-implement what already exists"), docs/PRD.md §9
+(candidate libraries), the root Cargo.toml. Resolve EVERY crate below with Context7 (resolve-library-id,
+then query-docs) before writing its version: no version from memory. Pick the newest release that
+builds on our pinned toolchain and uses the same reqwest/rustls/tokio majors we already declare.
+
+Declare in [workspace.dependencies], grouped under a "# M3–M5 protocols" comment:
+- auth: a Digest-auth crate if Context7 shows a maintained one, else md-5 (sha2 covers SHA-256);
+  sha2; hmac; aws-sigv4 (+ aws-credential-types if its signing API needs it); jsonwebtoken;
+  p12-keystore (PFX → PEM, because reqwest's rustls backend takes PEM identities);
+- proxy: the reqwest `socks` feature, added to our existing reqwest line;
+- WebSocket: tokio-tungstenite with a rustls feature that matches reqwest's;
+- Socket.IO: rust_socketio (async feature), and socketioxide as a test-only server. Record in a
+  Decision line which Engine.IO/Socket.IO versions rust_socketio speaks (PRD REQ-SIO-01);
+- gRPC: tonic (tls + transport features), prost, prost-types, prost-reflect (serde feature, for proto3
+  JSON), protox, tonic-reflection, tonic-types (google.rpc.Status details);
+- path entries: websocket_client, grpc_client.
+No build.rs and no protoc anywhere.
+
+Create crates/websocket_client and crates/grpc_client: domain crates, no gpui, `[lints] workspace =
+true`, lib roots src/websocket_client.rs and src/grpc_client.rs. Each depends on every crate declared
+above for its protocol. Append to crates/http_engine/Cargo.toml every auth/proxy crate above that
+http_engine will use.
+Each crate gets src/tls_provider.rs: `pub fn ensure_crypto_provider()`. It installs the same rustls
+CryptoProvider reqwest uses, once (a second call is a no-op). Tests:
+- websocket_client: tls_provider_tests.rs, websocket_and_reqwest_share_one_crypto_provider. It
+  builds a reqwest Client and a tokio-tungstenite rustls connector in one process, and each
+  completes a TLS handshake to an in-process rcgen server.
+- grpc_client: tls_provider_tests.rs, tonic_channel_and_reqwest_share_one_crypto_provider. Same
+  shape, for a tonic Endpoint with TLS.
+
+Append ARCHITECTURE.md rows for the two crates. Licences: every new package must be MIT, Apache-2.0,
+BSD, ISC, Zlib, Unicode or MPL-2.0. Paste the licence-check output. Do not touch crates/pustman or
+any existing test.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh websocket_client tls_provider::` → `PASS 1`.
+- `scripts/pustman-v1-test.sh grpc_client tls_provider::` → `PASS 1`.
+- `cargo build -p http_engine` → exit 0.
+- `cargo metadata --format-version 1 | jq -r '.packages[] | select(.source != null) | .license // "NONE"' | grep -ciE 'GPL|NONE'`
+  → `0`. Our own crates have `source == null`, so they are not counted.
+- `cargo tree -p grpc_client -p websocket_client -e normal | grep -c gpui` → `0`.
+- `git ls-files '*build.rs' | wc -l` → the same count as on `pustman-v1/main` before the step.
+
+### S50a — Request kinds for GraphQL, WebSocket, Socket.IO and gRPC
+**Goal:** `Request` has `GraphQl`, `WebSocket`, `SocketIo` and `Grpc` variants that round-trip through
+JSON, and every match site handles them.
+**Depends on:** S49. **Deploy delta:** none.
+**Edits:**
+- `crates/api_model/src/protocol_request.rs`, `crates/api_model/src/protocol_request_tests.rs`;
+- `crates/api_model/src/request.rs`;
+- `crates/api_model/src/api_model.rs` (append `mod`/`pub use` lines only);
+- every file a grep for `Request::Unsupported`/`Request::Http` match arms finds outside `api_model`.
+
+```
+Read crates/api_model/src/request.rs (the Request enum and its tagged serde), docs/PRD.md §5.2,
+§5.4, §5.5, §5.6, §6.1.
+
+src/protocol_request.rs defines:
+- GraphQlRequest{id, name, url, headers, auth, query, variables: String (raw JSON text, so invalid
+  JSON survives a save), operation_name: Option<String>, settings};
+- WebSocketRequest{id, name, url, headers, params, subprotocols, auth, settings, saved_messages:
+  Vec<SavedMessage{name, kind: Text|Json|Binary, payload}>};
+- SocketIoRequest{id, name, url, path (default "/socket.io"), namespace (default "/"), headers,
+  auth_payload: String, handshake_timeout_ms, listen: Vec<String>, all_events: bool (default true),
+  saved_emits};
+- GrpcRequest{id, name, target, service, method, message: String, metadata, auth, deadline_ms, tls:
+  bool, descriptor_source: Reflection|ProtoFiles{files, import_paths}|DescriptorSet{path}}.
+Reuse the existing header/param, Auth and RequestSettings types. Do not copy them.
+
+request.rs: add the variants with serde tags "graphql", "websocket", "socketio" and "grpc".
+Unsupported keeps every other kind (MQTT, …). Then run
+`grep -rn "Request::Unsupported\|Request::Http" crates/ --include=*.rs` and handle the new variants
+at every match site found. A site that cannot do anything for a kind yet treats it exactly as it
+treats Unsupported today, and says so in a one-line comment. List every site you edited in a
+Decision line.
+
+Tests (protocol_request_tests.rs): graphql_request_round_trips_json,
+websocket_request_round_trips_with_saved_messages, socketio_request_defaults_path_and_namespace,
+grpc_request_round_trips_each_descriptor_source, mqtt_kind_still_preserved_as_unsupported.
+Do not edit existing tests.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh api_model protocol_request::` → `PASS 5`.
+- `cargo check --workspace --all-targets` → exit 0.
+
+### S50b — Workspace files per request kind
+**Goal:** the workspace store saves and loads each new kind under its own suffix: `.graphql.json`,
+`.websocket.json`, `.socketio.json` and `.grpc.json`. Files with these suffixes show in the tree.
+**Depends on:** S50a. **Deploy delta:** none.
+**Edits:** `crates/workspace_store/src/request_kinds.rs`, `crates/workspace_store/src/request_kinds_tests.rs`,
+`crates/workspace_store/src/workspace_store.rs`.
+
+```
+Read docs/PRD.md §6.1, crates/workspace_store/src/workspace_store.rs (REQUEST_SUFFIX, Shape::Leaf,
+the suffix matching, save_item; grep, since M2 changed this file). src/request_kinds.rs:
+`suffix_for(&Request) -> &'static str` and `kind_for_file_name(&str) -> Option<RequestKind>`, the
+one table of suffixes. workspace_store.rs: route save and load through it, so an item's file suffix
+follows its kind. Saving an item whose kind changed renames the file atomically, like the existing
+rename path. Deterministic JSON as today.
+
+Tests (request_kinds_tests.rs): each_kind_saves_under_its_suffix,
+snapshot_loads_every_kind_from_disk, unknown_suffix_is_not_a_request,
+changing_kind_renames_the_file.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh workspace_store request_kinds::` → `PASS 4`.
+
+### S50c — Postman import and export of GraphQL requests
+**Goal:** a Postman v2.1 request with `body.mode = "graphql"` imports as `Request::GraphQl` and
+exports back unchanged. WebSocket, Socket.IO and gRPC items, which Postman stores outside v2.1, stay
+preserved as before.
+**Depends on:** S50a. **Deploy delta:** none. **High-stakes (import).**
+**Edits:** `crates/api_model/src/postman_graphql.rs`, `crates/api_model/src/postman_graphql_tests.rs`,
+`crates/api_model/src/postman.rs`, `crates/api_model/src/api_model.rs` (append `mod` only).
+
+```
+Read docs/PRD.md §6.4 (REQ-IO-01/06), crates/api_model/src/postman.rs (grep the import and export
+item mapping). src/postman_graphql.rs: from_postman(item) -> Option<GraphQlRequest> when body.mode
+is graphql, and to_postman(&GraphQlRequest) -> serde_json::Value.
+- body.graphql.variables is a string in Postman. Keep it a string, invalid JSON included.
+- Fields we do not model go into the item's preserved extras, as for HTTP.
+postman.rs: call both functions; nothing else changes. Imported data is untrusted: no script
+execution, size limits as today.
+
+Tests (postman_graphql_tests.rs): graphql_body_imports_as_graphql_request,
+graphql_request_exports_to_postman_graphql_body, invalid_variables_text_survives_round_trip.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh api_model postman_graphql::` → `PASS 3`.
+
+### S50d — "New" menu and actions for every request kind
+**Goal:** the "+" new-tab button opens a "New" menu listing HTTP, GraphQL, WebSocket, Socket.IO and
+gRPC (REQ-UI-03), and each entry is also a palette action. An entry whose kind has no editor yet is
+disabled.
+**Depends on:** S49. **Deploy delta:** none.
+**Edits:**
+- `crates/pustman_actions/src/pustman_actions.rs`;
+- `crates/workspace/src/new_menu.rs`, `crates/workspace/src/new_menu_tests.rs`;
+- `crates/workspace/src/pane_tabs.rs`;
+- `crates/workspace/src/workspace.rs` (append `mod`/init lines only).
+
+```
+Load rust-gpui-ui-ux and gpui-actions-keymaps. Read crates/pustman_actions/src/pustman_actions.rs
+(NewRequest), crates/workspace/src/pane_tabs.rs and workspace.rs (new_tab hands over to NewRequest),
+crates/ui ContextMenu.
+
+pustman_actions: add NewGraphQlRequest, NewWebSocketRequest, NewSocketIoRequest and NewGrpcRequest
+next to NewRequest. Add no keybindings (the keymaps do not change), and leave out MQTT (STUB-M6).
+src/new_menu.rs: a ContextMenu anchored on the "+" button, listing the five kinds. Each entry:
+- dispatches its action;
+- is disabled when `!cx.is_action_available(action)`, with a tooltip saying "Not available yet".
+pane_tabs.rs: "+" opens the menu. Its existing Ctrl/Cmd-T path still opens HTTP directly.
+
+Tests (new_menu_tests.rs): new_menu_lists_every_request_kind,
+kind_without_editor_is_disabled, choosing_http_dispatches_new_request.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh workspace new_menu::` → `PASS 3`.
+
+### S50e — Open any request kind from the tree and quick open
+**Goal:** opening a saved request of any kind, from the tree or from quick open, opens the editor for
+that kind. A kind with no editor yet shows a toast that names the kind, instead of opening nothing.
+**Depends on:** S50a, S50b. **Deploy delta:** none.
+**Edits:**
+- `crates/request_editor/src/open_item.rs`, `crates/request_editor/src/open_item_tests.rs`;
+- `crates/request_editor/src/request_editor.rs` (append `mod`/init lines only);
+- `crates/collections_panel/src/navigation.rs`;
+- `crates/command_palette/src/quick_open.rs`.
+
+```
+Load rust-gpui-ui-ux. Read the current open path:
+grep -rn "HttpRequest" crates/collections_panel/src/navigation.rs crates/command_palette/src/quick_open.rs
+(S39b and S46). Also read crates/request_editor/src/new_request.rs.
+
+src/open_item.rs:
+- a global OpenerRegistry mapping RequestKind → fn(Request, &mut Window, &mut App) -> Result<()>;
+- `register_opener(kind, f, cx)`;
+- `open_item(request, window, cx)`. HTTP registers the existing opener. An unregistered kind returns
+  an error that the caller shows as a toast naming the kind.
+Re-opening an item already open focuses its tab, as S39b does for HTTP.
+navigation.rs and quick_open.rs call open_item and nothing else changes in them. Do not touch any
+other M2 file.
+
+Tests (open_item_tests.rs): http_item_opens_through_registry,
+unregistered_kind_reports_an_error_naming_it, registered_kind_opens_its_editor,
+reopening_focuses_existing_tab.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh request_editor open_item::` → `PASS 4`.
+- `cargo test -p collections_panel -p command_palette` → exit 0, so their existing tests still pass.
+
+### S51a — Session events: the shared streaming model
+**Goal:** the PRD §9 `SessionEvent` shape exists as plain data that serialises to one JSON line per
+event, with redaction applied to payloads marked secret.
+**Depends on:** S49. **Deploy delta:** none.
+**Edits:** `crates/api_model/src/session.rs`, `crates/api_model/src/session_tests.rs`,
+`crates/api_model/src/api_model.rs` (append `mod`/`pub use` only).
+
+```
+Read docs/PRD.md §9 (SessionEvent), §8.4 (REQ-LOG-01/02), crates/api_model/src/redact.rs.
+
+src/session.rs:
+- SessionEvent{Connecting{target}, Connected{details: ConnectionDetails}, Sent(Message),
+  Received(Message), Error(SessionError), Closed{reason: CloseReason}};
+- Message{at: timestamp ms, kind: Text|Json|Binary|Event, payload: Payload, size,
+  fields: ProtocolFields};
+- ProtocolFields: none / SocketIo{event, ack_id} / Grpc{message_index} / Sse{event, id, retry} /
+  WebSocket{opcode}. Leave room for MQTT, but add no MQTT variant;
+- Payload: Inline(Vec<u8>) or Spilled{path, len, prefix}. Large payloads are spilled by the store
+  (S51b), not here;
+- ConnectionDetails{request_headers, response_status, response_headers, protocol}, redacted with
+  the existing redact();
+- `to_jsonl_line(&SessionEvent) -> String`. Binary payloads are base64 (the base64 crate), and
+  spilled payloads are read on export by S51c.
+No GPUI.
+
+Tests (session_tests.rs): each_event_serialises_to_one_json_line, binary_payload_exports_as_base64,
+connection_details_redact_authorization.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh api_model session::` → `PASS 3`.
+
+### S51b — Message log store
+**Goal:** a store holds 100,000 session events with bounded memory. Payloads over 1 MB live in temp
+files and keep an in-memory preview, and search and filter come from incrementally built indices.
+**Depends on:** S51a. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/session_store.rs`, `crates/response_viewer/src/session_store_tests.rs`,
+`crates/response_viewer/src/response_viewer.rs` (append `mod` only), `crates/response_viewer/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md REQ-LOG-03/04, REQ-NFR-03, crates/http_engine/src/spill.rs (reuse its temp-file
+spill and deletion; do not write a second one).
+
+src/session_store.rs: SessionStore{events, …}.
+- push(event): payloads over 1 MB are spilled through http_engine's spill, keeping a 4 KB prefix.
+- filter(direction, kind, text) -> Vec<usize> of matching row indices, computed when data changes,
+  never in render.
+- clear(): deletes the spill files.
+- export_jsonl(writer): streamed, so spilled payloads are copied, not loaded.
+- Dropping the store deletes its temp files.
+
+Tests (session_store_tests.rs): hundred_thousand_events_keep_inline_bytes_bounded (asserts the
+inline byte total stays under a stated cap), payload_over_one_megabyte_is_spilled_with_prefix,
+filter_by_direction_and_text, clear_deletes_spill_files, export_jsonl_streams_spilled_payloads.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh response_viewer session_store::` → `PASS 5`.
+
+### S51c — Message log view
+**Goal:** the Message log renders a session as a virtualized list: direction, time, type, size and
+preview. Expanding a row shows the full payload (pretty JSON, text or hex) and its protocol fields.
+**Depends on:** S51b. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/session_log.rs`, `crates/response_viewer/src/session_log_tests.rs`,
+`crates/response_viewer/src/response_viewer.rs` (append `mod` only).
+
+```
+Load rust-gpui-ui-ux. Read docs/PRD.md REQ-LOG-01/02, REQ-WS-04, crates/ui VirtualList,
+crates/response_viewer/src/pretty.rs and hex_view.rs (reuse; do not re-implement pretty-printing
+or hex), and the tree's ten_thousand_items_render_only_visible_rows test (same assertion shape).
+
+src/session_log.rs: SessionLog view over an Entity<SessionStore>.
+- Rows: ↑ / ↓ / system glyph with an accessible label, absolute or relative time (a toggle),
+  type, size, and a one-line preview. A truncated preview has the full value in a tooltip.
+- Element ids come from the event sequence number, not the row index.
+- Enter or a click expands a row. Expanded JSON is pretty-printed when the row is expanded, not in
+  render, and spilled payloads show their prefix plus "Open full payload".
+- Auto-scroll follows new rows.
+
+Tests (session_log_tests.rs): hundred_thousand_events_render_only_visible_rows,
+expanding_json_row_pretty_prints, binary_row_expands_to_hex,
+socketio_row_shows_event_name_and_ack_id.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh response_viewer session_log::` → `PASS 4`.
+
+### S51d — Message log toolbar
+**Goal:** the log can be searched, filtered by direction and type, paused, cleared, and its rows
+copied; the session exports as JSON lines.
+**Depends on:** S51c. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/log_toolbar.rs`, `crates/response_viewer/src/log_toolbar_tests.rs`,
+`crates/response_viewer/src/session_log.rs`, `crates/response_viewer/src/response_viewer.rs` (append `mod` only).
+
+```
+Load rust-gpui-ui-ux and gpui-actions-keymaps. Read docs/PRD.md REQ-LOG-03,
+crates/response_viewer/src/find.rs (reuse its search field pattern).
+
+src/log_toolbar.rs:
+- a search field and direction/type filter chips;
+- Pause, which stops auto-scroll while events keep arriving, and Resume;
+- Clear, and Copy (the payload of the selected row);
+- Export, which writes the session to a JSONL file through a file dialog on a background task.
+  A failure shows a toast.
+Every control is keyboard-reachable and is an action with a palette name. session_log.rs only
+mounts the toolbar.
+
+Tests (log_toolbar_tests.rs): search_narrows_rows, pause_keeps_scroll_position_while_events_arrive,
+clear_empties_log, export_writes_one_line_per_event.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh response_viewer log_toolbar::` → `PASS 4`.
+
+### S51e — One Console entry per session
+**Goal:** every protocol session records one Console entry: the target, the handshake details,
+message counts and the close reason, with secrets redacted.
+**Depends on:** S51a. **Deploy delta:** none.
+**Edits:** `crates/console/src/session_entry.rs`, `crates/console/src/session_entry_tests.rs`,
+`crates/console/src/console.rs` (append `mod` only), `crates/console/Cargo.toml` (append deps).
+
+```
+Read crates/console/src/store.rs (ConsoleEntry has protocol: String), docs/PRD.md §8.1, REQ-WS-02,
+REQ-NFR-04.
+
+src/session_entry.rs: `SessionRecorder::new(protocol, target)` returns a ConsoleEntry. Feeding it
+SessionEvents updates that entry:
+- Connected records the redacted handshake;
+- counts sent and received;
+- Error and Closed record their reason.
+Payloads are never copied into the Console, only counts and sizes.
+
+Tests (session_entry_tests.rs): session_records_one_entry_with_counts,
+failed_upgrade_records_status_and_body_size, handshake_authorization_is_redacted.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh console session_entry::` → `PASS 3`.
+
+---
+
+# Phase 7 — M3: GraphQL, SSE and full auth
+
+### S52a — Auth kinds: Digest, OAuth 2.0, AWS SigV4, JWT Bearer
+**Goal:** `Auth` models Digest, OAuth 2.0 (four grants, implicit flagged legacy), AWS Signature v4 and
+JWT Bearer. They round-trip through our JSON and Postman v2.1, and secrets stay keychain references.
+**Depends on:** S50c. **Deploy delta:** none. **High-stakes (secrets, import).**
+**Edits:**
+- `crates/api_model/src/auth_extended.rs`, `crates/api_model/src/auth_extended_tests.rs`;
+- `crates/api_model/src/auth.rs`;
+- `crates/api_model/src/postman.rs`;
+- `crates/api_model/src/api_model.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-HTTP-06/07, crates/api_model/src/auth.rs (Auth, effective_auth, Unsupported),
+crates/api_model/src/postman.rs (auth mapping; grep).
+
+src/auth_extended.rs:
+- DigestAuth{username, password, realm?, nonce?, algorithm: Md5|Sha256 (+ -sess), qop?};
+- OAuth2Auth{grant: AuthorizationCode{auth_url, use_pkce: bool (default true)}|ClientCredentials|
+  Password{username, password}|Implicit{auth_url} (legacy), token_url, client_id, client_secret,
+  scope, audience?, client_authentication: Header|Body, token_ref: Option<SecretRef>};
+- AwsSigV4Auth{access_key, secret_key, session_token?, region, service};
+- JwtBearerAuth{algorithm (HS256/384/512, RS256/384/512, ES256/384), secret_or_key,
+  payload: String (JSON), header_prefix (default "Bearer"), add_to: Header|Query}.
+Secret fields hold values or {{var}} references like Basic does today. Tokens live only in the
+keychain (S56c). auth.rs gains the four variants and their kind() names; Unsupported keeps the rest
+(Hawk, NTLM, OAuth1, …). postman.rs maps Postman's digest, oauth2, awsv4 and jwt auth types both ways.
+
+Tests (auth_extended_tests.rs): each_new_kind_round_trips_json,
+postman_oauth2_imports_with_grant_and_pkce_flag, implicit_grant_marked_legacy,
+postman_awsv4_and_jwt_round_trip, ntlm_stays_unsupported.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh api_model auth_extended::` → `PASS 5`.
+
+### S52b — Network model: proxy, client certificates, CA bundle
+**Goal:** settings can express:
+- a proxy: system, manual (HTTP, HTTPS or SOCKS5, auth in the keychain) or none, with `NO_PROXY`;
+- client certificates per host: PEM, or PFX with its passphrase in the keychain;
+- a custom CA bundle;
+- a per-request proxy bypass.
+**Depends on:** S49. **Deploy delta:** none.
+**Edits:**
+- `crates/api_model/src/network.rs`, `crates/api_model/src/network_tests.rs`;
+- `crates/api_model/src/settings.rs`;
+- `crates/api_model/src/api_model.rs` (append `mod` only);
+- `assets/settings/default.json`.
+
+```
+Read docs/PRD.md REQ-HTTP-10/11, REQ-PROXY-02, crates/api_model/src/settings.rs (RequestSettings),
+assets/settings/default.json, the pustman-settings-persistence skill.
+
+src/network.rs:
+- ProxyConfig{mode: System|Manual{scheme: Http|Https|Socks5, host, port, auth_secret:
+  Option<SecretRef>}|None, no_proxy: Vec<String>};
+- ClientCertificate{host_pattern, kind: Pem{cert_path, key_path}|Pfx{path,
+  passphrase_secret: Option<SecretRef>}};
+- NetworkSettings{proxy, client_certificates, ca_bundle_path: Option<PathBuf>}, with serde defaults
+  (proxy System, no certs, no CA);
+- `matches_no_proxy(host)` and `certificate_for(host)`.
+No secret value is ever stored here, only references. RequestSettings gains
+`proxy_bypass: Option<bool>`. default.json gains a "network" section with the defaults.
+
+Tests (network_tests.rs): defaults_are_system_proxy_and_no_certs, no_proxy_matches_suffix_and_exact,
+certificate_for_host_picks_most_specific, network_settings_never_serialise_a_secret_value.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh api_model network::` → `PASS 4`.
+
+### S53 — GraphQL over the HTTP engine
+**Goal:** a `GraphQlRequest` sends as `POST application/json {query, variables, operationName}`
+through the normal pipeline. It shows in History and the Console as protocol `graphql`, and a document
+with several operations lists their names.
+**Depends on:** S50a. **Deploy delta:** none.
+**Edits:**
+- `crates/http_engine/src/graphql.rs`, `crates/http_engine/src/graphql_tests.rs`;
+- `crates/http_engine/src/client.rs`;
+- `crates/http_engine/src/http_engine.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-GQL-01, crates/http_engine/src/client.rs (send_request; grep), history.rs
+(PROTOCOL const; "plan D7 gives later protocols their own row shapes"), prepare.rs.
+
+src/graphql.rs:
+- `to_http_request(&GraphQlRequest) -> Result<HttpRequest, GraphQlError>`. Invalid variables JSON
+  is an error naming the line and column, and {{vars}} inside the query and variables resolve via
+  the normal prepare;
+- `operation_names(query) -> Vec<String>`, a small scanner for `query|mutation|subscription Name`
+  that skips comments and strings. Do not pull in a GraphQL parser crate for this.
+client.rs: `send_graphql(...)` reuses send_request and records history and Console with protocol
+"graphql".
+
+Tests (graphql_tests.rs): posts_query_variables_and_operation_name,
+invalid_variables_json_reports_line_and_column, operation_names_listed_in_document_order,
+history_records_protocol_graphql.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine graphql::` → `PASS 4`.
+
+### S54a — Server-sent events parser
+**Goal:** an incremental parser turns `text/event-stream` bytes into events (`event`, `id`, `data`,
+`retry`) per the WHATWG rules, across arbitrary chunk boundaries.
+**Depends on:** S51a. **Deploy delta:** none.
+**Edits:** `crates/http_engine/src/event_source.rs`, `crates/http_engine/src/event_source_tests.rs`,
+`crates/http_engine/src/http_engine.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-SSE-01 and the WHATWG HTML "event stream interpretation" rules (Context7 or the
+spec).
+
+src/event_source.rs: EventSourceParser::feed(&[u8]) -> Vec<SseEvent>.
+- Handles CRLF/LF/CR line ends, multi-line data, comment lines (":"), and a BOM at the start.
+- A field without a colon is a field with an empty value; `retry` takes digits only.
+- A trailing partial line is buffered until its line ends.
+- `finish()` handles the stream end: an unterminated event is dropped, per the spec.
+Mapping SseEvent → session::Message with ProtocolFields::Sse goes here too.
+
+Tests (event_source_tests.rs): multi_line_data_joined_with_newlines,
+event_split_across_every_byte_boundary, comments_and_bom_ignored, retry_accepts_digits_only.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine event_source::` → `PASS 4`.
+
+### S54b — Stream an event-stream response
+**Goal:** a response with `Content-Type: text/event-stream` streams its events as `SessionEvent`s until
+the server closes it or the user stops it. Stopping closes the connection.
+**Depends on:** S54a, S53. **Deploy delta:** none.
+**Edits:**
+- `crates/http_engine/src/event_stream.rs`, `crates/http_engine/src/event_stream_tests.rs`;
+- `crates/http_engine/src/reqwest_transport.rs`;
+- `crates/http_engine/src/client.rs`;
+- `crates/http_engine/src/http_engine.rs` (append `mod` only).
+
+```
+Read crates/http_engine/src/reqwest_transport.rs (body streaming, spill; grep), client.rs (cancel),
+transport.rs, test_server.rs.
+
+reqwest_transport.rs: when the response content type is text/event-stream, hand the body stream to
+event_stream instead of buffering or spilling it. The Response carries
+`ResponseBody::EventStream` (new variant) with a receiver of SessionEvent.
+
+src/event_stream.rs:
+- the receiver side;
+- `stop()` drops the stream, which closes the connection;
+- a Closed{reason} event when the server ends or the user stops.
+Keep the variant's derives consistent with ResponseBody; match it everywhere grep finds a
+ResponseBody match. client.rs: cancel() stops an open stream.
+
+Tests (event_stream_tests.rs, using the in-process test_server sending SSE):
+events_arrive_before_the_stream_ends, server_close_emits_closed, stop_closes_the_connection.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine event_stream::` → `PASS 3`.
+
+### S54c — Event-stream mode in the response viewer
+**Goal:** an SSE response switches the response viewer into a live Message log with a Stop control,
+and 10,000 events stay smooth.
+**Depends on:** S54b, S51d. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/event_stream_view.rs`, `crates/response_viewer/src/event_stream_view_tests.rs`,
+`crates/response_viewer/src/response_viewer.rs`.
+
+```
+Load rust-gpui-ui-ux. Read crates/response_viewer/src/response_viewer.rs (body modes; grep),
+session_log.rs, log_toolbar.rs.
+
+src/event_stream_view.rs: for ResponseBody::EventStream, feed a SessionStore from the receiver on a
+stored Task, and render SessionLog with the toolbar plus a Stop button (an action). The status line
+shows "Streaming…" until Closed, then the close reason. response_viewer.rs picks this view for the
+variant.
+
+Tests (event_stream_view_tests.rs): sse_response_shows_live_log_rows,
+stop_button_closes_stream_and_shows_reason, ten_thousand_sse_events_render_only_visible_rows.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh response_viewer event_stream_view::` → `PASS 3`.
+
+### S55a — Digest auth
+**Goal:** a Digest request answers the server's 401 challenge once, with MD5 or SHA-256 (and their
+`-sess` forms), `qop=auth` and a nonce count. A second 401 is returned to the user.
+**Depends on:** S52a, S54b. **Deploy delta:** none. **High-stakes (auth).**
+**Edits:**
+- `crates/http_engine/src/digest.rs`, `crates/http_engine/src/digest_tests.rs`;
+- `crates/http_engine/src/client.rs`;
+- `crates/http_engine/src/http_engine.rs` (append `mod` only).
+
+```
+Read RFC 7616, crates/http_engine/src/request_auth.rs, client.rs (send path; grep), test_server.rs.
+Use the digest crate S49 declared. Do not hand-roll MD5/SHA-256.
+
+src/digest.rs: parse WWW-Authenticate, build the Authorization header, and compute the response per
+RFC 7616 (its §3.9.1 example is a test vector). client.rs: a Digest-auth request that gets a 401
+with a Digest challenge retries exactly once with the computed header. Never log the header.
+
+Tests (digest_tests.rs): rfc7616_md5_vector_matches, rfc7616_sha256_vector_matches,
+challenge_answered_once_then_401_returned, digest_header_never_logged.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine digest::` → `PASS 4`.
+
+### S55b — AWS Signature v4
+**Goal:** a request with AWS SigV4 auth is signed per AWS's test suite: canonical request,
+`X-Amz-Date`, optional session token, and an unsigned-payload option.
+**Depends on:** S52a. **Deploy delta:** none. **High-stakes (auth).**
+**Edits:** `crates/http_engine/src/sigv4.rs`, `crates/http_engine/src/sigv4_tests.rs`,
+`crates/http_engine/src/http_engine.rs` (append `mod` only).
+
+```
+Read the aws-sigv4 crate docs via Context7 (declared in S49), docs/PRD.md REQ-HTTP-06,
+crates/http_engine/src/request_auth.rs.
+
+src/sigv4.rs: `sign(&AwsSigV4Auth, &mut ResolvedRequest, now)` through aws-sigv4. Do not
+re-implement canonicalisation. The clock is injected so tests are deterministic.
+
+Tests (sigv4_tests.rs), using the AWS SigV4 test-suite cases checked in under tests/fixtures/ with
+their provenance noted: get_vanilla_matches_aws_suite, post_with_body_matches_aws_suite,
+session_token_adds_security_token_header.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine sigv4::` → `PASS 3`.
+
+### S55c — JWT Bearer
+**Goal:** a JWT Bearer request signs its payload with the chosen algorithm and key, and adds the token
+as a header with the chosen prefix, or as a query parameter.
+**Depends on:** S52a. **Deploy delta:** none. **High-stakes (auth).**
+**Edits:** `crates/http_engine/src/jwt.rs`, `crates/http_engine/src/jwt_tests.rs`,
+`crates/http_engine/src/http_engine.rs` (append `mod` only).
+
+```
+Read the jsonwebtoken crate via Context7, crates/http_engine/src/request_auth.rs.
+
+src/jwt.rs: `sign(&JwtBearerAuth) -> Result<String, JwtError>`.
+- An invalid payload JSON or key is an error naming which.
+- iat/exp are not added unless the payload says so.
+Never log the token or the key.
+
+Tests (jwt_tests.rs): hs256_token_verifies_with_same_secret, rs256_token_verifies_with_public_key,
+invalid_payload_json_names_the_problem.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine jwt::` → `PASS 3`.
+
+### S55d — Apply the new auth kinds when sending
+**Goal:** sending a request with Digest, SigV4 or JWT auth applies it in the pipeline, after variable
+resolution and before the request leaves. History and the Console show the auth kind without its
+secrets.
+**Depends on:** S55a, S55b, S55c. **Deploy delta:** none. **High-stakes (auth).**
+**Edits:** `crates/http_engine/src/auth_pipeline.rs`, `crates/http_engine/src/auth_pipeline_tests.rs`,
+`crates/http_engine/src/request_auth.rs`, `crates/http_engine/src/http_engine.rs` (append `mod` only).
+
+```
+Read crates/http_engine/src/request_auth.rs (apply_auth), digest.rs, sigv4.rs, jwt.rs, redact usage.
+request_auth.rs: apply_auth dispatches the three kinds; Digest marks the request for the client's
+challenge path. src/auth_pipeline.rs holds the dispatch helpers.
+
+Tests (auth_pipeline_tests.rs; FakeTransport): sigv4_request_leaves_signed,
+jwt_header_prefix_applied, auth_secrets_absent_from_history_and_console.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine auth_pipeline::` → `PASS 3`.
+
+### S56a — OAuth 2.0: client credentials and password grants
+**Goal:** "Get new access token" for the client-credentials and password grants POSTs to the token
+URL through our engine, with client auth as a Basic header or in the body. It returns the token,
+expiry and refresh token.
+**Depends on:** S55d. **Deploy delta:** none. **High-stakes (auth).**
+**Edits:** `crates/http_engine/src/oauth2_grants.rs`, `crates/http_engine/src/oauth2_grants_tests.rs`,
+`crates/http_engine/src/http_engine.rs` (append `mod` only).
+
+```
+Read RFC 6749 §4.3/§4.4/§5, docs/PRD.md REQ-HTTP-07, crates/http_engine/src/client.rs (send path).
+OAuth runs on our own engine (Phase 6 decision); do not add an OAuth client crate.
+
+src/oauth2_grants.rs: `request_token(&OAuth2Auth, transport) -> Result<TokenSet{access_token,
+token_type, expires_at, refresh_token?, scope?}, OAuthError>`.
+- An error response maps RFC 6749 §5.2 `error`/`error_description` into OAuthError, which the UI
+  shows.
+- `refresh(&TokenSet)` runs the refresh_token grant.
+No token or secret in logs.
+
+Tests (oauth2_grants_tests.rs; in-process test server as IdP): client_credentials_returns_token_set,
+password_grant_sends_credentials_in_body, client_auth_header_mode_uses_basic,
+error_response_maps_rfc6749_error.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine oauth2_grants::` → `PASS 4`.
+
+### S56b — OAuth 2.0: authorization code with PKCE
+**Goal:** the authorization-code grant:
+- opens the system browser to the authorize URL with PKCE S256 and a random `state`;
+- receives the code on a one-shot loopback `http://127.0.0.1:<port>/callback`;
+- checks `state`;
+- exchanges the code.
+The implicit grant works too and is flagged legacy.
+**Depends on:** S56a. **Deploy delta:** none. **High-stakes (auth).**
+**Edits:** `crates/http_engine/src/oauth2_pkce.rs`, `crates/http_engine/src/oauth2_pkce_tests.rs`,
+`crates/http_engine/src/http_engine.rs` (append `mod` only).
+
+```
+Read RFC 7636, RFC 8252 §7.3 (loopback redirect), docs/PRD.md REQ-HTTP-07 (system browser, no
+embedded browser).
+
+src/oauth2_pkce.rs:
+- code_verifier from rand, 43–128 chars; challenge = base64url(sha256(verifier)), using the sha2 and
+  base64 crates;
+- a loopback listener bound to 127.0.0.1:0 that accepts one /callback request. It answers with a
+  small "You can close this tab" page and shuts down. It rejects a mismatched state, and times out
+  after 5 minutes (injectable);
+- `authorize(&OAuth2Auth, open_url: impl Fn(Url)) -> Result<TokenSet>`. The caller passes
+  cx.open_url, and tests pass a fake that drives the callback.
+Implicit grant: token from the fragment, via the same listener serving a page that posts the
+fragment back.
+
+Tests (oauth2_pkce_tests.rs): challenge_is_s256_of_verifier, callback_with_wrong_state_rejected,
+code_exchanged_with_verifier, listener_binds_loopback_only.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine oauth2_pkce::` → `PASS 4`.
+
+### S56c — OAuth 2.0 tokens: keychain and refresh
+**Goal:** obtained tokens are stored only in the keychain. A request using OAuth 2.0 sends the stored
+token, and an expired token is refreshed before the send when a refresh token exists. When none
+exists, the send stops with an actionable error.
+**Depends on:** S56b. **Deploy delta:** none. **High-stakes (secrets).**
+**Edits:**
+- `crates/http_engine/src/oauth2_tokens.rs`, `crates/http_engine/src/oauth2_tokens_tests.rs`;
+- `crates/http_engine/src/client.rs`;
+- `crates/http_engine/src/http_engine.rs` (append `mod` only).
+
+```
+Read crates/secrets (SecretStore, MemorySecretStore), crates/http_engine/src/client.rs.
+
+src/oauth2_tokens.rs: TokenSet ↔ SecretStore under a key derived from the request id plus the grant.
+Only expires_at and the token type are kept outside the keychain, so the UI can show token status.
+client.rs:
+- before sending an OAuth 2.0 request, load the token and refresh it if it expires within 30 s;
+- on no token or a failed refresh, return SendError::OAuthTokenMissing{reason};
+- apply as `Authorization: <token_type> <token>`.
+
+Tests (oauth2_tokens_tests.rs): token_saved_only_in_secret_store, expired_token_refreshed_before_send,
+missing_token_fails_with_actionable_error.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine oauth2_tokens::` → `PASS 3`.
+
+### S56d — M3 OAuth AC: PKCE against a local test IdP, and OAuth tokens in the redaction test
+**Goal:** the M3 exit criterion "OAuth 2.0 PKCE against a local test IdP" passes end to end in a test,
+and OAuth tokens join the redaction fixture.
+**Depends on:** S56c. **Deploy delta:** none. **High-stakes (secrets).**
+**Edits:** `crates/integration_tests/tests/oauth_pkce.rs`, `crates/integration_tests/tests/oauth_redaction.rs`,
+`crates/integration_tests/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md §11 M3, §10 "Redaction test", crates/integration_tests/tests/redaction.rs (read
+only; do not edit it).
+
+tests/oauth_pkce.rs: an in-process test IdP that issues codes only for a matching S256 challenge
+and redirects to the loopback callback. It drives authorize() with a fake browser that follows the
+redirect, then sends a request to a protected endpoint that requires the issued token. Test:
+oauth_pkce_against_local_idp.
+
+tests/oauth_redaction.rs: obtain a token and refresh token, send, record history and export the
+Console. Assert that neither value appears in any workspace file, the SQLite database or the
+export. Test: oauth_tokens_never_persist_outside_keychain.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh integration_tests oauth_pkce_against_local_idp` → `PASS 1`.
+- `scripts/pustman-v1-test.sh integration_tests oauth_tokens_never_persist_outside_keychain` → `PASS 1`.
+
+### S57a — Proxy
+**Goal:** requests go through the configured proxy (system, manual HTTP/HTTPS/SOCKS5 with keychain
+auth, or none). `NO_PROXY` and the per-request bypass are honoured, and the Console shows which
+proxy was used.
+**Depends on:** S52b, S54b. **Deploy delta:** none. **High-stakes (secrets).**
+**Edits:**
+- `crates/http_engine/src/proxy.rs`, `crates/http_engine/src/proxy_tests.rs`;
+- `crates/http_engine/src/reqwest_transport.rs`;
+- `crates/http_engine/src/request.rs`;
+- `crates/http_engine/src/http_engine.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-HTTP-11, crates/http_engine/src/reqwest_transport.rs (client building and
+caching; grep), request.rs (SendSettings), crates/api_model/src/network.rs.
+
+SendSettings gains `network: NetworkSettings` and `proxy_bypass`. src/proxy.rs:
+- builds reqwest::Proxy values. System reads the environment's HTTP(S)_PROXY/NO_PROXY through
+  reqwest's system proxy;
+- Manual resolves its password from the SecretStore;
+- bypass and NO_PROXY skip the proxy.
+reqwest_transport.rs keys its cached clients by the network config.
+
+Tests (proxy_tests.rs; in-process HTTP CONNECT proxy and SOCKS5 test servers):
+manual_http_proxy_used, socks5_proxy_used, no_proxy_host_goes_direct, per_request_bypass_goes_direct,
+proxy_password_comes_from_secret_store.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine proxy::` → `PASS 5`.
+
+### S57b — Client certificates and a custom CA bundle
+**Goal:** a host with a configured client certificate (PEM, or PFX with a keychain passphrase) passes
+mutual TLS. A custom CA bundle is trusted in addition to the system roots, and TLS verification stays
+on unless disabled per request.
+**Depends on:** S57a. **Deploy delta:** none. **High-stakes (TLS, secrets).**
+**Edits:** `crates/http_engine/src/client_identity.rs`, `crates/http_engine/src/client_identity_tests.rs`,
+`crates/http_engine/src/reqwest_transport.rs`, `crates/http_engine/src/http_engine.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-HTTP-10, crates/http_engine/src/reqwest_transport.rs (S28c's TLS handling; grep),
+the p12-keystore crate via Context7.
+
+src/client_identity.rs:
+- PEM files are read on a background task;
+- PFX is decoded with p12-keystore and its passphrase from the SecretStore, then converted to a
+  reqwest Identity;
+- the CA bundle is added as extra roots.
+An error names the file and the cause ("wrong passphrase", "not a PFX file"). reqwest_transport
+picks the identity per host via certificate_for(host).
+
+Tests (client_identity_tests.rs; rcgen CA + an in-process mTLS server):
+pem_identity_passes_mutual_tls, pfx_with_keychain_passphrase_passes, wrong_passphrase_names_the_file,
+custom_ca_trusts_private_server.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh http_engine client_identity::` → `PASS 4`.
+
+### S57c — Proxy and certificate secrets from the palette; per-request bypass toggle
+**Goal:** the user can:
+- set or clear the proxy password and each PFX passphrase from the command palette, stored in the
+  keychain;
+- toggle "Bypass proxy" in a request's Settings tab.
+**Depends on:** S57b, S50d. **Deploy delta:** none. **High-stakes (secrets).**
+**Edits:**
+- `crates/request_editor/src/network_secrets.rs`, `crates/request_editor/src/network_secrets_tests.rs`;
+- `crates/request_editor/src/settings_tab.rs`;
+- `crates/request_editor/src/request_editor.rs` (append `mod`/init lines only);
+- `crates/pustman_actions/src/pustman_actions.rs`.
+
+```
+Load rust-gpui-ui-ux. Read crates/request_editor/src/settings_tab.rs, crates/secrets, docs/PRD.md
+REQ-HTTP-10/11.
+
+pustman_actions: SetProxyPassword and SetCertificatePassphrase.
+src/network_secrets.rs: each action opens a masked-input modal and writes to the SecretStore on a
+background task. A failure shows a toast. The value is never logged or kept in a view field after
+the write.
+settings_tab.rs adds a "Bypass proxy" toggle bound to RequestSettings.proxy_bypass.
+
+Tests (network_secrets_tests.rs): proxy_password_written_to_secret_store,
+passphrase_modal_clears_value_after_save, bypass_toggle_saves_setting.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor network_secrets::` → `PASS 3`.
+
+### S58a — Auth tab: Digest, AWS SigV4 and JWT forms
+**Goal:** the Auth tab's type picker offers Digest, AWS Signature v4 and JWT Bearer, each with an
+aligned form that supports `{{var}}` fields.
+**Depends on:** S52a, S57c. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/auth_forms.rs`, `crates/request_editor/src/auth_forms_tests.rs`,
+`crates/request_editor/src/auth_tab.rs`, `crates/request_editor/src/request_editor.rs` (append `mod` only).
+
+```
+Load rust-gpui-ui-ux. Read crates/request_editor/src/auth_tab.rs (current aligned-form layout; grep),
+variable_highlight.rs, docs/postman_redesign_pack/01_specs/screen_specs.md (auth section).
+
+src/auth_forms.rs: one form builder per kind, using the label-column layout auth_tab already uses.
+Secret fields are masked with a reveal toggle. auth_tab.rs adds the kinds to its picker and calls
+the builders.
+
+Tests (auth_forms_tests.rs): picker_offers_digest_sigv4_jwt, sigv4_form_edits_region_and_service,
+jwt_algorithm_change_updates_auth, secret_fields_masked_by_default.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor auth_forms::` → `PASS 4`.
+
+### S58b — Auth tab: OAuth 2.0
+**Goal:** the OAuth 2.0 form:
+- picks a grant (implicit labelled "legacy");
+- edits URLs, client, scope and PKCE;
+- has "Get new access token", which runs the flow;
+- shows token status (valid until …, expired, none) without showing the token.
+**Depends on:** S58a, S56c. **Deploy delta:** none. **High-stakes (secrets).**
+**Edits:** `crates/request_editor/src/oauth2_form.rs`, `crates/request_editor/src/oauth2_form_tests.rs`,
+`crates/request_editor/src/auth_tab.rs`, `crates/request_editor/src/request_editor.rs` (append `mod` only).
+
+```
+Load rust-gpui-ui-ux. Read crates/request_editor/src/auth_tab.rs, auth_forms.rs,
+crates/http_engine/src/oauth2_grants.rs, oauth2_pkce.rs, oauth2_tokens.rs.
+
+src/oauth2_form.rs:
+- "Get new access token" runs on a stored Task, and the browser grants call cx.open_url;
+- progress shows while it waits for the callback, and Cancel stops it;
+- errors (OAuthError description) show inline;
+- token status reads expires_at only;
+- "Clear token" deletes it from the keychain.
+auth_tab.rs adds OAuth 2.0 to the picker.
+
+Tests (oauth2_form_tests.rs; fake IdP transport): get_token_shows_valid_until,
+implicit_grant_labelled_legacy, idp_error_shown_inline, clear_token_removes_it.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor oauth2_form::` → `PASS 4`.
+
+### S59a — GraphQL editor
+**Goal:** a GraphQL tab has the URL, headers and auth, a query editor, a variables JSON editor with
+inline validation, and an operation picker when the document has several operations. Send runs
+it, and `NewGraphQlRequest` opens one.
+**Depends on:** S53, S50d, S50e, S58b. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/graphql_editor.rs`, `crates/request_editor/src/graphql_editor_tests.rs`,
+`crates/request_editor/src/request_editor.rs` (append `mod`/init lines only).
+
+```
+Load rust-gpui-ui-ux. Read docs/PRD.md REQ-GQL-01, crates/request_editor/src/request_editor.rs (tab
+item shape), new_request.rs, headers.rs, auth_tab.rs, open_item.rs (register_opener),
+crates/text_input (multi-line), crates/http_engine/src/graphql.rs.
+
+src/graphql_editor.rs: a GraphQlEditor item that reuses the URL bar, headers table and auth tab. It
+adds:
+- the query and variables editors with {{var}} highlighting;
+- a variables error that names line and column;
+- an operation picker (hidden when there is one operation).
+Send calls send_graphql and shows the result in the response viewer. init registers the
+NewGraphQlRequest handler and the GraphQl opener. Save writes a .graphql.json item.
+
+Tests (graphql_editor_tests.rs): new_graphql_request_opens_editor,
+invalid_variables_shows_line_and_column, operation_picker_lists_names_when_several,
+send_posts_graphql_body.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor graphql_editor::` → `PASS 4`.
+
+### S59b — GraphQL errors panel
+**Goal:** a GraphQL response with an `errors[]` array shows the errors in their own panel above
+`data`, with message, path and locations, even when the HTTP status is 200.
+**Depends on:** S54c. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/graphql_errors.rs`, `crates/response_viewer/src/graphql_errors_tests.rs`,
+`crates/response_viewer/src/response_viewer.rs`.
+
+```
+Load rust-gpui-ui-ux. Read docs/PRD.md REQ-GQL-05, crates/response_viewer/src/response_viewer.rs,
+error_panel.rs.
+
+src/graphql_errors.rs: parse errors[] when the response is JSON (computed on data change, not in
+render). Render a warning-severity panel listing each error's message, path joined with "." and
+line:column. Partial data still shows below. response_viewer.rs mounts it for responses of
+protocol graphql.
+
+Tests (graphql_errors_tests.rs): errors_shown_on_http_200, partial_data_still_rendered,
+no_errors_hides_panel.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh response_viewer graphql_errors::` → `PASS 3`.
+
+### S59w — Wire GraphQL into the app (M3 E2E)
+**Goal:** in the app as `pustman::init` builds it, `NewGraphQlRequest` opens a GraphQL tab whose
+Send reaches a local server and shows the `errors[]` panel.
+**Depends on:** S59a, S59b, S56d. **Deploy delta:** none.
+**Edits:** `crates/pustman/tests/wire_graphql.rs`, `crates/pustman/Cargo.toml` (hotspot; append dev-deps only).
+
+```
+Read crates/pustman/tests/wire_request_editor.rs (same shape). tests/wire_graphql.rs: init the app
+with the in-memory store, dispatch NewGraphQlRequest, type a query against an in-process server that
+answers 200 with errors[], send, and assert the errors panel. Test:
+wire_graphql_new_request_sends_and_shows_errors.
+Do not edit crates/pustman/src (request_editor and response_viewer are wired already).
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh pustman wire_graphql` → `PASS 1`.
+- `cargo build -p pustman` → exit 0.
+
+### S60 — M3 SIGN-OFF (HUMAN)
+**Goal:** the M3 exit criteria are proven on real machines.
+**Depends on:** S54c, S57c, S58b, S59w. **Deploy delta:** none. **Edits:** none.
+
+```
+Human validation on Linux and macOS.
+- GraphQL against a public API: variables, several operations, and an errors[] response on 200.
+- An SSE endpoint streams 10k events smoothly, and Stop closes it.
+- OAuth 2.0 auth code + PKCE against a real IdP (e.g. a local Keycloak) through the system browser.
+  The token survives a restart via the keychain and refreshes when expired.
+- Digest against httpbin's /digest-auth.
+- An SigV4 request to an AWS endpoint (or a recorded signature).
+- Manual proxy and SOCKS5.
+- A client certificate against an mTLS test host.
+Record M3 GO/NO-GO, then /promote → the next free release tag (Phase 6 rule).
+```
+
+**Verify:** the log records `M3 GO`. CI is green at the merge SHA.
+
+---
+
+# Phase 8 — M4: WebSocket and Socket.IO
+
+### S61a — WebSocket connect
+**Goal:** `websocket_client::connect(request, network)` opens `ws://` or `wss://` with the
+request's headers, query params, subprotocols, auth, TLS, client certificate and proxy settings. It
+returns a handle and a `SessionEvent` stream, and dropping the stream closes the connection.
+**Depends on:** S50a, S51a, S52b. **Deploy delta:** none.
+**Edits:** `crates/websocket_client/src/connect.rs`, `crates/websocket_client/src/connect_tests.rs`,
+`crates/websocket_client/src/test_echo_server.rs`, `crates/websocket_client/src/websocket_client.rs` (append `mod` only),
+`crates/websocket_client/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md REQ-WS-01, §9 (SessionEvent; connect returns a handle and a stream),
+crates/api_model/src/session.rs and network.rs, tokio-tungstenite via Context7, AGENTS.md (no
+secrets in logs).
+
+src/connect.rs: build the upgrade request (Basic, Bearer or API key as header or query via the
+existing auth helpers), apply the TLS/cert/proxy settings (reuse http_engine's identity and proxy
+builders through a pub fn; do not copy them), and connect on gpui_tokio's runtime handle passed in.
+- Emit Connecting, then Connected{details} with the 101 headers.
+- `SessionHandle::send(Message)` and `close(code, reason)`.
+src/test_echo_server.rs (cfg(any(test, feature = "test-support"))): an in-process echo server that
+records the upgrade headers.
+
+Tests (connect_tests.rs): connects_with_headers_and_subprotocol, bearer_auth_sent_on_upgrade,
+dropping_stream_closes_connection.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh websocket_client connect::` → `PASS 3`.
+
+### S61b — WebSocket messages and close
+**Goal:** the user can send Text, JSON (validated) and Binary messages (from Base64, hex or a file) and
+receive them. Ping and pong surface as events, and closing with a code and reason (or a server
+close) emits Closed with both.
+**Depends on:** S61a. **Deploy delta:** none.
+**Edits:** `crates/websocket_client/src/frames.rs`, `crates/websocket_client/src/frames_tests.rs`,
+`crates/websocket_client/src/websocket_client.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-WS-03/05, crates/websocket_client/src/connect.rs.
+
+src/frames.rs: Composer → Message.
+- JSON is validated, and an error names line and column.
+- Binary is parsed from base64 or hex with the base64/hex crates; a file is read on a background
+  task.
+- Received frames map to Received with ProtocolFields::WebSocket{opcode}.
+- Ping and pong are events flagged so the log can hide them.
+- Closed{code, reason} is emitted for a local or remote close.
+
+Tests (frames_tests.rs): text_json_binary_echoed, invalid_json_rejected_before_send,
+close_code_and_reason_reported, ping_pong_events_emitted.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh websocket_client frames::` → `PASS 4`.
+
+### S61c — WebSocket handshake failures
+**Goal:** a refused upgrade reports the HTTP status and body. TLS and DNS errors are actionable
+`SessionError`s.
+**Depends on:** S61a. **Deploy delta:** none.
+**Edits:** `crates/websocket_client/src/handshake.rs`, `crates/websocket_client/src/handshake_tests.rs`,
+`crates/websocket_client/src/websocket_client.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-WS-02, crates/http_engine/src/error.rs (reuse its error taxonomy wording).
+src/handshake.rs: map tungstenite's Http(response) error to SessionError::UpgradeRefused{status,
+headers, body_prefix}, and map TLS and connect errors to the same wording the HTTP engine uses.
+
+Tests (handshake_tests.rs): non_101_reports_status_and_body, tls_error_is_actionable.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh websocket_client handshake::` → `PASS 2`.
+
+### S62a — Socket.IO connect
+**Goal:** a Socket.IO v4 session connects with path, namespace, headers, auth payload and handshake
+timeout, and logs the lifecycle events `connect`, `connect_error` and `disconnect` with its reason.
+**Depends on:** S61a. **Deploy delta:** none.
+**Edits:** `crates/websocket_client/src/socketio.rs`, `crates/websocket_client/src/socketio_tests.rs`,
+`crates/websocket_client/src/test_socketio_server.rs`, `crates/websocket_client/src/websocket_client.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-SIO-01/04, rust_socketio and socketioxide via Context7, and S49's Decision line
+on supported protocol versions.
+
+src/socketio.rs: `connect_socketio(&SocketIoRequest, network) -> (SocketIoHandle, stream of
+SessionEvent)` via rust_socketio's async client. Lifecycle events are system rows.
+src/test_socketio_server.rs (test-support): a socketioxide server on hyper that records the auth
+payload, rejects a bad token, and echoes.
+
+Tests (socketio_tests.rs): connects_to_namespace_with_auth_payload, rejected_auth_emits_connect_error,
+server_disconnect_reports_reason.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh websocket_client socketio::` → `PASS 3`.
+
+### S62b — Socket.IO emit, acknowledgements and listeners
+**Goal:** the user can emit an event with one or more Text, JSON or Binary arguments and an optional
+ack, with the ack reply linked to its emit. Received events log with their name, filtered by the
+listen list unless all-events mode is on.
+**Depends on:** S62a. **Deploy delta:** none.
+**Edits:** `crates/websocket_client/src/socketio_emit.rs`, `crates/websocket_client/src/socketio_emit_tests.rs`,
+`crates/websocket_client/src/websocket_client.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-SIO-02/03, crates/websocket_client/src/socketio.rs.
+src/socketio_emit.rs: `emit(event, args, ack: bool)`. The Sent row carries ack_id, and the ack
+reply is a Received row with the same ack_id. The listener filter applies the listen list, or all
+events.
+
+Tests (socketio_emit_tests.rs): emit_with_ack_links_reply, multiple_args_sent_in_order,
+listen_list_filters_events, all_events_mode_receives_everything.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh websocket_client socketio_emit::` → `PASS 4`.
+
+### S63a — WebSocket editor
+**Goal:** a WebSocket tab has URL, headers, params, subprotocols and auth, plus Connect/Disconnect
+(with code and reason), a composer (Text, JSON or Binary), and the live Message log with ping/pong
+behind a toggle. `NewWebSocketRequest` opens one.
+**Depends on:** S61b, S61c, S51d, S50d, S50e. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/websocket_editor.rs`, `crates/request_editor/src/websocket_editor_tests.rs`,
+`crates/request_editor/src/request_editor.rs` (append `mod`/init lines only), `crates/request_editor/Cargo.toml` (append deps).
+
+```
+Load rust-gpui-ui-ux. Read docs/PRD.md REQ-WS-01..05, crates/request_editor/src/graphql_editor.rs
+if merged (same tab shape), otherwise request_editor.rs. Also read
+crates/response_viewer/src/session_log.rs and log_toolbar.rs, crates/websocket_client.
+
+src/websocket_editor.rs:
+- The session runs on a stored Task, and closing the tab drops it, which disconnects.
+- Connection state shows in the tab title and status (connecting, connected, closed with code).
+- Errors (UpgradeRefused etc.) show inline and in the Console.
+init registers the NewWebSocketRequest handler and the WebSocket opener. Save writes a
+.websocket.json item.
+
+Tests (websocket_editor_tests.rs; test echo server): connect_send_and_receive_in_log,
+disconnect_with_code_and_reason, closing_tab_disconnects, ping_pong_hidden_until_toggled.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor websocket_editor::` → `PASS 4`.
+
+### S63b — Saved messages
+**Goal:** a composed WebSocket message can be saved by name inside the request, and resent with one
+click or from the keyboard.
+**Depends on:** S63a. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/saved_messages.rs`, `crates/request_editor/src/saved_messages_tests.rs`,
+`crates/request_editor/src/websocket_editor.rs`, `crates/request_editor/src/request_editor.rs` (append `mod` only).
+
+```
+Load rust-gpui-ui-ux. Read docs/PRD.md REQ-WS-03, crates/request_editor/src/websocket_editor.rs.
+
+src/saved_messages.rs: a list of saved messages with send, rename and delete, stored in
+WebSocketRequest.saved_messages and written on save. The list is keyboard-navigable.
+websocket_editor.rs mounts it.
+
+Tests (saved_messages_tests.rs): save_composed_message_by_name, resend_saved_message_with_enter,
+saved_messages_persist_in_request_file.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor saved_messages::` → `PASS 3`.
+
+### S64 — Socket.IO editor
+**Goal:** a Socket.IO tab has URL, path, namespace, headers, auth payload and timeout; an emit composer
+(event, arguments, ack); a listen list with an all-events toggle; and the Message log showing event
+names and acks. `NewSocketIoRequest` opens one.
+**Depends on:** S62b, S63a. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/socketio_editor.rs`, `crates/request_editor/src/socketio_editor_tests.rs`,
+`crates/request_editor/src/request_editor.rs` (append `mod`/init lines only).
+
+```
+Load rust-gpui-ui-ux. Read docs/PRD.md REQ-SIO-01..04, crates/request_editor/src/websocket_editor.rs
+(reuse its connection-state and log mounting; extract a shared helper only if both editors would
+otherwise copy more than a few lines).
+
+src/socketio_editor.rs: init registers the NewSocketIoRequest handler and the SocketIo opener. Save
+writes a .socketio.json item.
+
+Tests (socketio_editor_tests.rs; test Socket.IO server): emit_with_ack_shows_linked_reply,
+listen_list_edits_filter_live, new_socketio_request_opens_editor.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor socketio_editor::` → `PASS 3`.
+
+### S65 — Sessions in the Console and History
+**Goal:** every WebSocket and Socket.IO session leaves one Console entry (handshake, counts, close
+reason) and one History row (protocol, target, duration, counts). Reopening the History row opens the
+request.
+**Depends on:** S51e, S63a, S63b, S64. **Deploy delta:** none.
+**Edits:**
+- `crates/request_editor/src/session_recording.rs`, `crates/request_editor/src/session_recording_tests.rs`;
+- `crates/request_editor/src/websocket_editor.rs`;
+- `crates/request_editor/src/socketio_editor.rs`;
+- `crates/request_editor/src/request_editor.rs` (append `mod` only).
+
+```
+Read crates/console/src/session_entry.rs, crates/storage (HistoryEntry has protocol), plan D7
+(later protocols get their own row shapes), crates/http_engine/src/history.rs.
+
+src/session_recording.rs: feed each session's events to a SessionRecorder, and on Closed write one
+HistoryEntry with protocol "websocket" or "socketio". No payloads in history; counts only.
+websocket_editor.rs and socketio_editor.rs call it.
+
+Tests (session_recording_tests.rs): websocket_session_writes_one_history_row,
+socketio_session_console_entry_has_counts, history_never_contains_payloads.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor session_recording::` → `PASS 3`.
+
+### S65w — Wire WebSocket and Socket.IO into the app (M4 E2E)
+**Goal:** in the app as `pustman::init` builds it, `NewWebSocketRequest` connects to a local echo
+server and the Message log shows the echo. `NewSocketIoRequest` opens a Socket.IO tab.
+**Depends on:** S65, S63b. **Deploy delta:** none.
+**Edits:** `crates/pustman/tests/wire_websocket.rs`, `crates/pustman/Cargo.toml` (hotspot; append dev-deps only).
+
+```
+Read crates/pustman/tests/wire_request_editor.rs. tests/wire_websocket.rs: init the app with the
+in-memory store, dispatch NewWebSocketRequest, connect to websocket_client's test echo server, send
+"hello", and assert a received row. Then dispatch NewSocketIoRequest and assert the tab opened.
+Test: wire_websocket_echo_and_socketio_tab. Do not edit crates/pustman/src.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh pustman wire_websocket` → `PASS 1`.
+- `cargo build -p pustman` → exit 0.
+
+### S66 — M4 ACs: echo server, Socket.IO server and a 100k-event log
+**Goal:** the M4 exit criteria pass as automated tests.
+**Depends on:** S65w. **Deploy delta:** none.
+**Edits:** `crates/integration_tests/tests/m4_sessions.rs`, `crates/integration_tests/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md §11 M4, §5.4/§5.5 ACs, crates/websocket_client test servers,
+crates/response_viewer session_store.rs and session_log.rs.
+
+tests/m4_sessions.rs:
+- websocket_echo_ac: connect with a subprotocol, send text, JSON and binary, receive the echoes,
+  and close with 4000 "bye"; assert the log rows and Closed.
+- socketio_ac: emit with an ack, receive the linked reply, and receive a named event.
+- hundred_thousand_event_log_ac: push 100k events, including 3 over 1 MB, into a SessionStore
+  rendered by SessionLog. Assert that only visible rows render, the inline byte total stays under
+  the S51b cap, the spill files exist, and that clearing deletes them.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh integration_tests websocket_echo_ac` → `PASS 1`.
+- `scripts/pustman-v1-test.sh integration_tests socketio_ac` → `PASS 1`.
+- `scripts/pustman-v1-test.sh integration_tests hundred_thousand_event_log_ac` → `PASS 1`.
+
+### S67 — M4 SIGN-OFF (HUMAN)
+**Goal:** the M4 exit criteria are proven on real machines.
+**Depends on:** S66. **Deploy delta:** none. **Edits:** none.
+
+```
+Human validation on Linux and macOS.
+- WebSocket: wss://echo.websocket.org (or a local one) with a subprotocol; text, JSON and binary
+  from a file; saved message resend; ping/pong toggle; close code and reason; a refused upgrade
+  shows its status and body; the Console handshake entry.
+- Socket.IO: a local v4 server with namespace and auth; emit with ack; named listeners.
+- Log: 100k events scroll smoothly; search, filter, pause, clear and export to JSONL.
+Record M4 GO/NO-GO, then /promote → the next free release tag.
+```
+
+**Verify:** the log records `M4 GO`. CI is green at the merge SHA.
+
+---
+
+# Phase 9 — M5: gRPC
+
+### S68a — Descriptors from `.proto` files and descriptor sets
+**Goal:** `grpc_client` compiles `.proto` files with import paths in process (protox), or loads a
+FileDescriptorSet, and lists services and methods with their streaming kind.
+**Depends on:** S50a. **Deploy delta:** none.
+**Edits:** `crates/grpc_client/src/descriptors.rs`, `crates/grpc_client/src/descriptors_tests.rs`,
+`crates/grpc_client/src/grpc_client.rs` (append `mod` only), `crates/grpc_client/tests/fixtures/` (test protos).
+
+```
+Read docs/PRD.md REQ-GRPC-01/02, protox and prost-reflect via Context7. No build.rs, no protoc
+(Phase 6 decision).
+
+src/descriptors.rs:
+- `load(source) -> Result<DescriptorPool, DescriptorError>` for ProtoFiles{files, import_paths}
+  (protox) and DescriptorSet{path}. Errors name the file, line and column from protox;
+- `methods(pool) -> Vec<MethodInfo{service, method, kind: Unary|ServerStreaming|ClientStreaming|
+  Bidi, input, output}>`, sorted by service then method.
+Fixtures: helloworld.proto (Greeter/SayHello) and a streaming.proto with all four kinds, importing
+a common.proto through an import path.
+
+Tests (descriptors_tests.rs): compiles_protos_with_import_path, lists_all_four_method_kinds,
+syntax_error_names_file_and_line, loads_descriptor_set_file.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh grpc_client descriptors::` → `PASS 4`.
+
+### S68b — Server reflection and the in-process test server
+**Goal:** descriptors load from server reflection (`grpc.reflection.v1`, falling back to `v1alpha`).
+A server without reflection yields "Server reflection not available — import .proto files".
+**Depends on:** S68a. **Deploy delta:** none.
+**Edits:** `crates/grpc_client/src/reflection.rs`, `crates/grpc_client/src/reflection_tests.rs`,
+`crates/grpc_client/src/test_server.rs`, `crates/grpc_client/src/grpc_client.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-GRPC-01 and the §5.6 AC, tonic and tonic-reflection via Context7.
+
+src/reflection.rs: a client for the reflection service built from tonic-reflection's protobuf types.
+It lists services and fetches file descriptors transitively into a DescriptorPool.
+- Unimplemented on v1 retries v1alpha.
+- Unimplemented on both maps to DescriptorError::ReflectionUnavailable, whose Display is exactly
+  "Server reflection not available — import .proto files".
+src/test_server.rs (cfg(any(test, feature = "test-support"))): a tonic server with no generated code.
+- Services route by path through a tower Service using a DynamicMessage codec over the fixture
+  pool.
+- Implements Greeter.SayHello and the four streaming kinds.
+- Reflection v1 is served via tonic-reflection's builder from the protox-encoded descriptor set,
+  and it can start with reflection off.
+
+Tests (reflection_tests.rs): reflection_v1_lists_greeter, falls_back_to_v1alpha,
+no_reflection_reports_exact_message.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh grpc_client reflection::` → `PASS 3`.
+
+### S68c — Messages as JSON
+**Goal:** request messages are edited as proto3 JSON. "Generate example message" fills every field
+from the descriptor, and validation errors name the field path.
+**Depends on:** S68a. **Deploy delta:** none.
+**Edits:** `crates/grpc_client/src/message_json.rs`, `crates/grpc_client/src/message_json_tests.rs`,
+`crates/grpc_client/src/grpc_client.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-GRPC-03, prost-reflect's serde support via Context7.
+
+src/message_json.rs:
+- `parse(json, descriptor) -> Result<DynamicMessage, MessageError{path, reason}>`;
+- `to_json(&DynamicMessage) -> String` (proto3 JSON mapping, pretty);
+- `example(descriptor) -> String`: every field set to a type-appropriate sample. Recursion stops
+  at depth 3 for recursive types; enums take their first value.
+
+Tests (message_json_tests.rs): example_message_parses_back, unknown_field_error_names_path,
+wrong_type_error_names_nested_path, recursive_message_example_terminates.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh grpc_client message_json::` → `PASS 4`.
+
+### S68d — Unary calls
+**Goal:** a unary call sends metadata (ASCII and `-bin`), auth as metadata, a deadline, over TLS or
+plaintext h2c, with client certificates and CA. It returns the response, status name and number,
+message, headers, trailers and decoded `google.rpc.Status` details.
+**Depends on:** S68b, S68c, S52b. **Deploy delta:** none.
+**Edits:** `crates/grpc_client/src/unary.rs`, `crates/grpc_client/src/unary_tests.rs`,
+`crates/grpc_client/src/grpc_client.rs` (append `mod` only), `crates/grpc_client/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md REQ-GRPC-04/05, tonic (Channel, Endpoint, Grpc client with a custom codec),
+tonic-types (Status details), crates/api_model/src/network.rs, crates/http_engine client_identity.rs
+(reuse its PEM/PFX/CA loading through a pub fn; do not copy it).
+
+src/unary.rs:
+- `call_unary(&GrpcRequest, pool, network, secrets) -> Result<GrpcResponse{message_json, status:
+  {code_name, code, message, details_json}, headers, trailers, elapsed}>`;
+- metadata keys ending in -bin take base64 values;
+- Bearer, Basic or API key become metadata;
+- the deadline maps to grpc-timeout.
+Never log metadata values that came from secrets.
+
+Tests (unary_tests.rs; test_server): say_hello_returns_ok_0_with_headers_and_trailers,
+deadline_exceeded_maps_status_4, binary_metadata_round_trips,
+rich_status_details_decoded.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh grpc_client unary::` → `PASS 4`.
+
+### S68e — Streaming calls
+**Goal:** server-streaming, client-streaming and bidirectional calls run as a `SessionEvent`
+session: send messages, half-close, cancel. Each message carries its index, and the final status and
+trailers end the session.
+**Depends on:** S68d, S51a. **Deploy delta:** none.
+**Edits:** `crates/grpc_client/src/streaming.rs`, `crates/grpc_client/src/streaming_tests.rs`,
+`crates/grpc_client/src/grpc_client.rs` (append `mod` only).
+
+```
+Read docs/PRD.md REQ-GRPC-06, §9 (SessionEvent), crates/grpc_client/src/unary.rs.
+
+src/streaming.rs: `start_stream(...) -> (GrpcStreamHandle{send, half_close, cancel}, stream of
+SessionEvent)`.
+- Messages map to ProtocolFields::Grpc{message_index}.
+- Closed carries the status and trailers.
+- Dropping the stream cancels the call.
+
+Tests (streaming_tests.rs): server_streaming_receives_indexed_messages,
+client_streaming_half_close_returns_response, bidi_interleaves_send_and_receive,
+cancel_reports_cancelled_status.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh grpc_client streaming::` → `PASS 4`.
+
+### S69a — gRPC status panel
+**Goal:** a gRPC response shows:
+- the status name and number with a success or error colour, and the status message;
+- the response headers and trailers as two tables;
+- decoded status details.
+**Depends on:** S59b, S68d. **Deploy delta:** none.
+**Edits:** `crates/response_viewer/src/grpc_status.rs`, `crates/response_viewer/src/grpc_status_tests.rs`,
+`crates/response_viewer/src/response_viewer.rs`, `crates/response_viewer/Cargo.toml` (append deps).
+
+```
+Load rust-gpui-ui-ux. Read docs/PRD.md REQ-GRPC-05, crates/response_viewer/src/status_line.rs,
+headers_view.rs (reuse), response_viewer.rs.
+
+src/grpc_status.rs renders a GrpcResponse: the body (message JSON via pretty.rs), Headers, Trailers,
+and Status details. response_viewer.rs shows it for gRPC responses.
+
+Tests (grpc_status_tests.rs): ok_status_shows_name_and_zero, error_status_shows_message_and_details,
+trailers_listed_separately_from_headers.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh response_viewer grpc_status::` → `PASS 3`.
+
+### S69b — gRPC editor
+**Goal:** a gRPC tab has:
+- the target, a TLS toggle and a descriptor source (reflection, protos or descriptor set);
+- a method picker with a kind badge;
+- a JSON message editor with "Generate example message" and inline validation;
+- metadata, auth and a deadline.
+Invoke runs a unary call. `NewGrpcRequest` opens one, and History and the Console record protocol
+`grpc`.
+**Depends on:** S68d, S69a, S50d, S50e. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/grpc_editor.rs`, `crates/request_editor/src/grpc_editor_tests.rs`,
+`crates/request_editor/src/request_editor.rs` (append `mod`/init lines only), `crates/request_editor/Cargo.toml` (append deps).
+
+```
+Load rust-gpui-ui-ux. Read docs/PRD.md REQ-GRPC-01..05, crates/request_editor/src/request_editor.rs,
+key_value_table.rs (metadata), auth_tab.rs, open_item.rs, crates/grpc_client.
+
+src/grpc_editor.rs:
+- Descriptors load on a background task when the target or source changes. A reflection failure
+  shows the exact message with an "Import .proto files" button (S69d).
+- Invoke runs call_unary on a stored Task; Cancel drops it.
+- History and Console record protocol "grpc" through the S51e recorder.
+init registers the NewGrpcRequest handler and the Grpc opener. Save writes a .grpc.json item.
+
+Tests (grpc_editor_tests.rs; test_server): reflection_fills_method_picker_with_kinds,
+generate_example_fills_editor, invalid_message_shows_field_path, invoke_shows_ok_status.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor grpc_editor::` → `PASS 4`.
+
+### S69c — gRPC streaming in the editor
+**Goal:** for streaming methods, the editor shows the Message log with Send (client and bidi),
+"End stream" (half-close) and Cancel. The final status shows when the call ends.
+**Depends on:** S69b, S68e, S51d. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/grpc_streaming.rs`, `crates/request_editor/src/grpc_streaming_tests.rs`,
+`crates/request_editor/src/grpc_editor.rs`, `crates/request_editor/src/request_editor.rs` (append `mod` only).
+
+```
+Load rust-gpui-ui-ux. Read crates/request_editor/src/grpc_editor.rs,
+crates/grpc_client/src/streaming.rs, crates/response_viewer session_log.rs.
+
+src/grpc_streaming.rs: mounted by grpc_editor.rs when the method kind is not unary. The controls are
+actions with palette names, and the session Task lives in the editor.
+
+Tests (grpc_streaming_tests.rs): server_stream_rows_show_message_index,
+client_stream_send_then_end_stream_shows_response, cancel_shows_cancelled_status.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor grpc_streaming::` → `PASS 3`.
+
+### S69d — Import `.proto` files into the workspace
+**Goal:** "Import .proto files" copies the chosen files into the workspace's `protos/` folder,
+preserving relative paths. It sets the request's import paths, and the protos are then committed with
+the workspace like any other file.
+**Depends on:** S69b, S69c. **Deploy delta:** none.
+**Edits:** `crates/request_editor/src/proto_import.rs`, `crates/request_editor/src/proto_import_tests.rs`,
+`crates/request_editor/src/grpc_editor.rs`, `crates/request_editor/src/request_editor.rs` (append `mod` only).
+
+```
+Load rust-gpui-ui-ux. Read docs/PRD.md REQ-GRPC-01, §6.1 (protos/), crates/workspace_store (atomic
+writes; grep), crates/request_editor/src/grpc_editor.rs.
+
+src/proto_import.rs:
+- a file dialog (multi-select, .proto), then a copy on a background task with atomic writes;
+- a name collision asks before overwriting;
+- then switch the request's source to ProtoFiles with import_paths = ["protos"] and reload
+  descriptors.
+Failures show a toast naming the file.
+
+Tests (proto_import_tests.rs): import_copies_into_protos_and_sets_import_paths,
+collision_asks_before_overwrite, imported_protos_reload_method_list.
+```
+
+**Verify:** `scripts/pustman-v1-test.sh request_editor proto_import::` → `PASS 3`.
+
+### S69w — Wire gRPC into the app (M5 E2E)
+**Goal:** in the app as `pustman::init` builds it, `NewGrpcRequest` opens a gRPC tab. Reflection
+against the test server lists `helloworld.Greeter/SayHello`, and Invoke shows `OK (0)`.
+**Depends on:** S69c, S69d. **Deploy delta:** none.
+**Edits:** `crates/pustman/tests/wire_grpc.rs`, `crates/pustman/Cargo.toml` (hotspot; append dev-deps only).
+
+```
+Read crates/pustman/tests/wire_request_editor.rs. tests/wire_grpc.rs: init the app with the
+in-memory store, start grpc_client's test server with reflection, dispatch NewGrpcRequest, set the
+target, pick SayHello, generate an example, invoke, and assert "OK (0)". Test:
+wire_grpc_reflection_and_unary_ok. Do not edit crates/pustman/src.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh pustman wire_grpc` → `PASS 1`.
+- `cargo build -p pustman` → exit 0.
+
+### S70 — gRPC AC: reflection, proto import and all four call kinds
+**Goal:** the PRD §5.6 AC and the M5 exit criterion pass as automated tests.
+**Depends on:** S69w. **Deploy delta:** none.
+**Edits:** `crates/integration_tests/tests/grpc_ac.rs`, `crates/integration_tests/Cargo.toml` (append deps).
+
+```
+Read docs/PRD.md §5.6 AC, §11 M5, crates/grpc_client (test_server, descriptors, unary, streaming).
+
+tests/grpc_ac.rs:
+- grpc_reflection_ac: reflection lists Greeter; SayHello returns OK (0) with headers and trailers.
+- grpc_proto_import_ac: with reflection off, the exact message shows; after importing
+  helloworld.proto, the same call succeeds.
+- grpc_all_four_kinds_ac: unary, server, client and bidi streaming each complete with OK and the
+  expected message counts.
+```
+
+**Verify:**
+- `scripts/pustman-v1-test.sh integration_tests grpc_reflection_ac` → `PASS 1`.
+- `scripts/pustman-v1-test.sh integration_tests grpc_proto_import_ac` → `PASS 1`.
+- `scripts/pustman-v1-test.sh integration_tests grpc_all_four_kinds_ac` → `PASS 1`.
+
+### S71 — M5 SIGN-OFF (HUMAN)
+**Goal:** the M5 exit criteria are proven on real machines.
+**Depends on:** S70. **Deploy delta:** none. **Edits:** none.
+
+```
+Human validation on Linux and macOS.
+- A real gRPC server with reflection (e.g. grpcb.in): unary and streaming calls.
+- A server without reflection, after importing its .proto files; the protos/ folder commits
+  cleanly with Git.
+- -bin metadata; a deadline exceeded; TLS with a client certificate; h2c to localhost.
+Record M5 GO/NO-GO, then /promote → the next free release tag.
+```
+
+**Verify:** the log records `M5 GO`. CI is green at the merge SHA.
+
+---
+
+# Phase 10+ — Later milestones (STUBS: not dispatchable)
+
+Each stub is expanded into full `S<N>` steps by a human-approved planning session, following the same
+shape and appending after the last step. A driver must **never** dispatch a STUB row; reaching one is
+a stop condition.
 
 | Stub | Milestone | Crates | Depends on | Verify source (PRD) |
 |---|---|---|---|---|
-| STUB-M3 | GraphQL + SSE + full auth (OAuth2 PKCE, Digest, SigV4, JWT, client certs, CA, proxy) | http_engine, request_editor, response_viewer, secrets | S48 | §5.2, §5.3, REQ-HTTP-06/07/10/11; M3 exit: OAuth2 PKCE against a local test IdP, 10k-event SSE smooth |
-| STUB-M4 | WebSocket + Socket.IO + Message log | websocket_client ★, response_viewer (Message log), console | S48 | §5.4, §5.5, §8.4; echo + Socket.IO server ACs; 100k-event log smooth |
-| STUB-M5 | gRPC | grpc_client ★, request_editor | S48 | §5.6; reflection + proto import, all four call kinds |
-| STUB-M6 | MQTT | mqtt_client ★ | S48 | §5.7; pub/sub round trip v3.1.1 + v5 on a local broker |
-| STUB-M7 | v1 hardening (Git panel, GraphQL introspection, OpenAPI import, HAR export + its redaction assertion, OAuth1, NTLM) | git, collections_panel, console, api_model | STUB-M3, STUB-M4, STUB-M5, STUB-M6 | §11 M7; v2.1 import corpus ≥ 99%; accessibility checklist |
+| STUB-M6 | MQTT | mqtt_client ★, request_editor | S51d, S50e | §5.7; pub/sub round trip v3.1.1 + v5 on a local broker. Adds an `Mqtt` `Request` variant (the only step editing `api_model/src/request.rs` then) and `.mqtt.json`. |
+| STUB-M7 | v1 hardening: Git panel, GraphQL introspection/explorer/subscriptions (REQ-GQL-02/03/04), SSE raw view and reconnect (REQ-SSE-02/03), WS connection settings (REQ-WS-06), gRPC-Web (REQ-GRPC-07), Socket.IO v2/v3, OpenAPI import, HAR export and its redaction assertion, OAuth 1.0, NTLM, draft autosave/restore for non-HTTP tabs | git, collections_panel, console, api_model, request_editor | S60, S67, S71, STUB-M6 | §11 M7; v2.1 import corpus ≥ 99%; accessibility checklist |
 
-STUB-M4, STUB-M5 and STUB-M6 can be expanded and run in parallel (PRD §11). Each needs its own hotspot
-review, because each adds a `Request` enum variant in `crates/api_model/src/request.rs`.
+STUB-M6 can be expanded and run in parallel with M3–M5 once Phase 6 has passed. It reuses the
+SessionEvent model and the Message log, and needs no new root dependency step beyond declaring
+`rumqttc`, which its expansion adds as its own first step.
 
 ## Notes on "standalone & verifiable"
 

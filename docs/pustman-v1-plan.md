@@ -10,10 +10,12 @@
 **End state of this plan.** We build Pustman from an empty repository through PRD milestones
 **M0 Shell → M1 HTTP core + debugging → M2 Workspaces + sharing**. Every step is fully specified,
 and at the end Pustman is a usable HTTP client with Git-shareable workspaces on Linux and macOS.
-M3–M7 (GraphQL/SSE/advanced auth, WebSocket + Socket.IO, gRPC, MQTT, hardening) appear as **stub
-milestones**: each has its goal, crates, depends-on and Verify source. Each is expanded into full
-steps at a human expansion gate once the milestone before it is signed off. Detail written today
-for M5 would be wrong by the time M5 starts.
+M3–M7 (GraphQL/SSE/advanced auth, WebSocket + Socket.IO, gRPC, MQTT, hardening) started as **stub
+milestones**: each has its goal, crates, depends-on and Verify source, and is expanded into full steps
+at a human expansion gate. **M3, M4 and M5 were expanded early, on 2026-11-21** (S49–S71), on the
+user's "go" while progress stood at S38 and M2 was unbuilt. Their prompts tell workers to grep the
+current code first, because M2 may change signatures they name. MQTT (M6) and hardening (M7) remain
+stubs.
 
 **Why now.** The repository has its agent guide, skills, rules and PRD, but no code. The PRD
 decisions are fresh. Building the domain crates first, while GPUI system dependencies are still
@@ -72,7 +74,7 @@ run now. The graph orders them first.
 | Code | none | Cargo workspace with ~16 crates, `cargo run -p pustman` launches |
 | Verification | none | CI on Linux + macOS (fmt, clippy `-D warnings`, test); tripwire; protection hooks |
 | Product | PRD only | HTTP requests with variables, auth (Basic/Bearer/API key), cookies, cURL, response viewer, timeline, Console, history; Git-shareable folder workspaces with secrets in the keychain; Postman v2.1 import/export |
-| Later | — | M3–M7 expanded at gates into steps of the same shape |
+| Later | — | M3–M5 as steps S49–S71 (expanded 2026-11-21); M6–M7 expanded at gates into steps of the same shape |
 
 ## 4. Decided forks
 
@@ -95,7 +97,7 @@ run now. The graph orders them first.
 ```rust
 // api_model (no IO, no GPUI)
 pub struct ItemId(ulid::Ulid);
-pub enum Request { Http(HttpRequest) /* M3+: Graphql, WebSocket, SocketIo, Grpc, Mqtt */, Unsupported(serde_json::Value) }
+pub enum Request { Http(HttpRequest) /* S50a: GraphQl, WebSocket, SocketIo, Grpc; M6: Mqtt */, Unsupported(serde_json::Value) }
 pub enum Auth { Inherit, None, Basic{..}, Bearer{..}, ApiKey{..}, Unsupported(serde_json::Value) }
 pub struct Variable { key, value: Option<String>, kind: VariableKind /* Default|Secret */, enabled, description }
 pub fn redact(text: &str, secrets: &SecretValues) -> String;
@@ -131,10 +133,15 @@ pub enum TransportError { InvalidUrl, Dns, Connect, Tls, Timeout, TooManyRedirec
 | P3 App shell [GPUI] | S17–S24 | **M0** | launch < 1 s, tabs/layout restore → **S25 M0 sign-off** |
 | P4 HTTP UI + debugging [GPUI] | S26–S37 | **M1** | HTTP ACs + redaction test (S37) → **S38 M1 sign-off** |
 | P5 Workspaces + sharing [GPUI] | S39–S47 | **M2** | sharing AC with two clones (S47) → **S48 M2 sign-off** |
-| P6+ | STUB-M3 … STUB-M7 | M3–M7 | expanded at a human gate after the previous milestone's sign-off |
+| P6 Protocol foundation [GPUI] | S49–S51 | M3/M4/M5 foundations | deps declared once (S49); request kinds, files, New menu; SessionEvent + Message log |
+| P7 GraphQL, SSE, full auth [GPUI] | S52–S59w | **M3** | OAuth2 PKCE against a local IdP (S56d), 10k-event SSE → **S60 M3 sign-off** |
+| P8 WebSocket + Socket.IO [GPUI] | S61–S66 | **M4** | echo, Socket.IO and 100k-event log ACs (S66) → **S67 M4 sign-off** |
+| P9 gRPC [GPUI] | S68–S70 | **M5** | reflection, proto import, four call kinds (S70) → **S71 M5 sign-off** |
+| P10+ | STUB-M6, STUB-M7 | M6–M7 | expanded at a human gate |
 
 M0's sign-off comes after P2 in the graph only because P2 is independent of the shell. S25 does not
-depend on P2. M4, M5 and M6 can be expanded and run in parallel once M2 is signed off (PRD §11).
+depend on P2. After P6, M3, M4 and M5 run in parallel; tags are cut in sign-off order (`-5`, `-6`,
+`-7`). STUB-M6 can be expanded once S51d and S50e pass (PRD §11).
 
 ## 7. Decommission
 
@@ -174,7 +181,8 @@ None. This plan is greenfield and additive.
 | `reqwest` exposes too few timing phases | D2: omit those phases; a connector inside `ReqwestTransport` only |
 | Keychain unavailable in CI or headless Linux | `SecretStore` trait with `MemorySecretStore` in tests; live keyring test is `#[ignore]` and run in sign-off |
 | Hotspot contention on `crates/pustman/{Cargo.toml,src/main.rs}` | Serialized by the driver; 9 of 49 steps touch it (18%) |
-| Scope creep into M3+ | Stubs are undispatchable; expansion needs a human "go" |
+| Scope creep into M6+ | Stubs are undispatchable; expansion needs a human "go" |
+| M3–M5 steps go stale while M2 lands (expanded early, 2026-11-21) | Prompts grep current code first; a worker reports a `Decision:` line and the driver corrects the step before dispatching its dependents |
 
 **Rollback:** each step is one squash commit on `pustman-v1/main`, so revert that commit. A release is a
 tag (`release/pustman-v1-<n>`), and rolling back means rebuilding the previous tag.

@@ -1,4 +1,4 @@
-# Pustman v1 (M0–M2) — Progress
+# Pustman v1 (M0–M5) — Progress
 
 **Session-start ritual:** `pwd` → `scripts/pustman-v1-init.sh` (exists after S0) → `git log --oneline -15` →
 read this file → `tail -n 30 docs/progress/pustman-v1/log.md` → `scripts/pustman-v1-verify.sh | tail -1`
@@ -25,8 +25,8 @@ fixers and reviewers never do.
   (`libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libvulkan-dev`) until
   `scripts/pustman-v1-init.sh --require-gpui` exits 0; push for CI (or waive it in writing); then
   promote `release/pustman-v1-1` (no app smoke). This blocks S11, S17, S21 and everything after them.
-- **Human sign-offs:** S25 (M0), S38 (M1), S48 (M2). Each one needs `M<k> GO` from the human.
-- **STUB-M3..M7:** never dispatchable. They are expanded in a separate planning session.
+- **Human sign-offs:** S25 (M0), S38 (M1), S48 (M2), S60 (M3), S67 (M4), S71 (M5). Each one needs `M<k> GO` from the human.
+- **STUB-M6, STUB-M7:** never dispatchable. They are expanded in a separate planning session. M3–M5 were expanded on 2026-11-21 into S49–S71.
 - **Budgets:** 4 review cycles per step, plus at most 2 on measurable progress. The turn budget comes from the segment's `/goal` line.
 - **Window cap:** unapplied deploy deltas ≥ 3 or unpromoted steps ≥ 16. "Applied" follows plan D11:
   - S0 hooks and S6 migrations are marked applied at merge, with evidence from the full verify.
@@ -38,6 +38,7 @@ fixers and reviewers never do.
   - persistence: S5, S6, S8
   - TLS: S12, S28
   - import: S9, S45
+  - M3 (2026-11-21 expansion): S50c, S52a, S55a–S55d, S56a–S56d, S57a–S57c, S58b
 - **Severity:** MEDIUM and HIGH findings stop the step. LOW findings become `gh issue create --label "pustman-v1,low"`.
 - **Dispatch protocol — single-phase runs** (one subagent run = one phase; the driver owns the
   cycle; the reply is a receipt; empty-reply policy). Validated 2026-11-18 at S10. The single source
@@ -127,10 +128,30 @@ Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending)
 | S46 | Quick open (`Ctrl/Cmd-P`) | pending | 0 | | |  |
 | S47 | Sharing AC: two clones of one Git repository | pending | 0 | | |  |
 | S48 | M2 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off |
-| STUB-M3 | GraphQL + SSE + full auth (OAuth2 PKCE, Digest, SigV4, JWT, client certs, CA, proxy) | not dispatchable | – | | | expand in a planning session |
-| STUB-M4 | WebSocket + Socket.IO + Message log | not dispatchable | – | | | expand in a planning session |
-| STUB-M5 | gRPC | not dispatchable | – | | | expand in a planning session |
-| STUB-M6 | MQTT | not dispatchable | – | | | expand in a planning session |
+| S49 | Declare the M3–M5 dependencies | pending | 0 | | |  |
+| S50 | Protocol request kinds, files, import, New menu, open from tree | pending | 0 | | | S50a–S50e |
+| S51 | Session events, Message log store/view/toolbar, Console entry | pending | 0 | | | S51a–S51e |
+| S52 | Auth kinds and network model (proxy, client certs, CA) | pending | 0 | | | S52a, S52b |
+| S53 | GraphQL over the HTTP engine | pending | 0 | | |  |
+| S54 | Server-sent events: parser, streaming, viewer mode | pending | 0 | | | S54a–S54c |
+| S55 | Digest, AWS SigV4, JWT Bearer auth applied on send | pending | 0 | | | S55a–S55d |
+| S56 | OAuth 2.0 grants, PKCE, keychain/refresh, local-IdP AC | pending | 0 | | | S56a–S56d |
+| S57 | Proxy, client certificates, CA bundle, palette secrets | pending | 0 | | | S57a–S57c |
+| S58 | Auth tab forms: Digest, SigV4, JWT, OAuth 2.0 | pending | 0 | | | S58a, S58b |
+| S59 | GraphQL editor, errors panel, wire (M3 E2E) | pending | 0 | | | S59a, S59b, S59w |
+| S60 | M3 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off |
+| S61 | WebSocket connect, messages, handshake failures | pending | 0 | | | S61a–S61c |
+| S62 | Socket.IO connect, emit, acks, listeners | pending | 0 | | | S62a, S62b |
+| S63 | WebSocket editor and saved messages | pending | 0 | | | S63a, S63b |
+| S64 | Socket.IO editor | pending | 0 | | |  |
+| S65 | Sessions in Console and History; wire (M4 E2E) | pending | 0 | | | S65, S65w |
+| S66 | M4 ACs: echo, Socket.IO, 100k-event log | pending | 0 | | |  |
+| S67 | M4 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off |
+| S68 | gRPC descriptors, reflection, JSON messages, unary and streaming calls | pending | 0 | | | S68a–S68e |
+| S69 | gRPC status panel, editor, streaming UI, proto import; wire (M5 E2E) | pending | 0 | | | S69a–S69d, S69w |
+| S70 | gRPC AC: reflection, proto import, four call kinds | pending | 0 | | |  |
+| S71 | M5 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off |
+| STUB-M6 | MQTT (after S51d, S50e) | not dispatchable | – | | | expand in a planning session |
 | STUB-M7 | v1 hardening (Git panel, GraphQL introspection, OpenAPI import, HAR export + its redaction assertion, OAuth1, NTLM) | not dispatchable | – | | | expand in a planning session |
 
 ## Open work

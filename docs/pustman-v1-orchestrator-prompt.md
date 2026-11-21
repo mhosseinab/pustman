@@ -1,11 +1,11 @@
-# Pustman v1 (M0–M2) — Orchestrator Prompt
+# Pustman v1 (M0–M5) — Orchestrator Prompt
 
 **Driver B: in-context subagent orchestrator.** It was chosen over a dynamic workflow because this
 change has several human gates *inside* the run:
 
 - **G-DEPS** (install the GPUI system libraries)
-- **S25, S38, S48** (the milestone sign-offs)
-- **STUB-M3..M7** expansion
+- **S25, S38, S48, S60, S67, S71** (the milestone sign-offs)
+- **STUB-M6..M7** expansion
 
 The orchestrator stops at each gate, takes your "go", and continues in the same session. It
 implements the loop contract in the implementation-orchestration skill's `references/harness-loop.md`.
@@ -71,18 +71,56 @@ OR a row is `blocked` — OR a fix-vs-move-on decision is waiting for me — OR 
 deltas ≥ 3 OR unpromoted steps ≥ 16 — or stop after 150 turns.
 ```
 
-After S48 GO and `release/pustman-v1-4`, the next step is a **human-approved planning session**. It
-expands one STUB-M* into steps S49+ with the implementation-orchestration skill. The orchestrator never does this itself.
+M3–M5 were expanded early (2026-11-21) into S49–S71. They start after S48 GO and
+`release/pustman-v1-4`. After Phase 6 (S49–S51e), the M3, M4 and M5 lanes are independent. Segments 5–7 may
+run at once: the orchestrator dispatches any eligible step, and each segment's `/goal` is judged
+on its own rows. Tags are cut in sign-off order, so the first milestone signed off takes `-5`.
+
+**Segment 5: S49–S59w (Phase 6 + M3), then the S60 M3 sign-off.**
+```
+/goal Every row S49–S59 in docs/pustman-v1-progress.md is `passed` with a linked step record whose
+Evidence lines are pasted in this transcript, `scripts/pustman-v1-test.sh integration_tests
+oauth_pkce_against_local_idp` and `scripts/pustman-v1-test.sh pustman wire_graphql` each printed
+`PASS 1` and `scripts/pustman-v1-verify.sh` printed `VERIFY OK` on pustman-v1/main in this
+transcript, and the orchestrator has stopped at S60 (M3 human sign-off) — OR a row is `blocked` —
+OR a fix-vs-move-on decision is waiting for me — OR unapplied deploy deltas ≥ 3 OR unpromoted
+steps ≥ 16 — or stop after 250 turns.
+```
+
+**Segment 6: S61–S66 (M4), then the S67 M4 sign-off.** Needs S50a, S51a and S52b.
+```
+/goal Every row S61–S66 in docs/pustman-v1-progress.md is `passed` with a linked step record whose
+Evidence lines are pasted in this transcript, `scripts/pustman-v1-test.sh integration_tests
+websocket_echo_ac`, `… socketio_ac` and `… hundred_thousand_event_log_ac` each printed `PASS 1` and
+`scripts/pustman-v1-verify.sh` printed `VERIFY OK` on pustman-v1/main in this transcript, and the
+orchestrator has stopped at S67 (M4 human sign-off) — OR a row is `blocked` — OR a fix-vs-move-on
+decision is waiting for me — OR unapplied deploy deltas ≥ 3 OR unpromoted steps ≥ 16 — or stop
+after 200 turns.
+```
+
+**Segment 7: S68–S70 (M5), then the S71 M5 sign-off.** Needs S50a, S51a and S52b.
+```
+/goal Every row S68–S70 in docs/pustman-v1-progress.md is `passed` with a linked step record whose
+Evidence lines are pasted in this transcript, `scripts/pustman-v1-test.sh integration_tests
+grpc_reflection_ac`, `… grpc_proto_import_ac` and `… grpc_all_four_kinds_ac` each printed `PASS 1`
+and `scripts/pustman-v1-verify.sh` printed `VERIFY OK` on pustman-v1/main in this transcript, and
+the orchestrator has stopped at S71 (M5 human sign-off) — OR a row is `blocked` — OR a
+fix-vs-move-on decision is waiting for me — OR unapplied deploy deltas ≥ 3 OR unpromoted steps ≥ 16
+— or stop after 200 turns.
+```
+
+After the M3–M5 sign-offs, the next step is a **human-approved planning session**. It expands
+STUB-M6 (and later STUB-M7) with the implementation-orchestration skill. The orchestrator never does this itself.
 
 ## The orchestrator prompt
 
 ```
-You are the ORCHESTRATOR for Pustman v1 — milestones M0–M2 (pustman-v1). You do NOT write feature
+You are the ORCHESTRATOR for Pustman v1 — milestones M0–M5 (pustman-v1). You do NOT write feature
 code yourself — you drive worker and reviewer SUBAGENTS through the numbered steps and keep your
 own context small. Your durable memory is a file, not this transcript.
 
 SOURCES OF TRUTH (read first; do not duplicate them wholesale into your context):
-- docs/pustman-v1-implementation-steps.md — steps S0..S48 plus STUB-M3..M7, each a ready prompt + a
+- docs/pustman-v1-implementation-steps.md — steps S0..S71 plus STUB-M6..M7, each a ready prompt + a
   Verify block + an Edits file set + a Deploy delta; the dependency graph and `hotspots:` are in its
   header. It is READ-ONLY for you and every subagent (a PreToolUse hook enforces this after S0).
 - docs/pustman-v1-plan.md — rationale + decided design forks D1–D11 (§4).
@@ -91,7 +129,7 @@ SOURCES OF TRUTH (read first; do not duplicate them wholesale into your context)
 
 DURABLE STATE (so a compaction or a fresh session never loses your place):
 - Written ONLY by you and the integrator in this checkout (never by workers, fixers, reviewers):
-  · docs/pustman-v1-progress.md (MAIN): status table S0..S48, gates + budgets, deferred gate,
+  · docs/pustman-v1-progress.md (MAIN): status table S0..S71, gates + budgets, deferred gate,
     Window, Open work, Active CARRY-FORWARD, Learnings (≤ 15), Promotions.
   · docs/progress/pustman-v1/steps/S<N>.md: one RECORD per passed step, written by the integrator.
   · docs/progress/pustman-v1/log.md: chronological, append-only.
@@ -296,10 +334,10 @@ HARD GATES (never violate):
   delta applied — or I waive that line in writing (log it; the brief lists it under Not verified).
   (3) Run PROMOTION for release/pustman-v1-1 when I say /promote. Install comes first because
   promote-check's env validator is `--require-gpui`. Then log `G-DEPS cleared`.
-- S25, S38, S48 are HUMAN SIGN-OFFS: STOP, paste the step's checklist and the deferred-gate list,
+- S25, S38, S48, S60, S67, S71 are HUMAN SIGN-OFFS: STOP, paste the step's checklist and the deferred-gate list,
   and wait for my `M<k> GO` / `NO-GO`. Record the result in the step record. NO-GO → I name the
   failing items; you create Open-work entries and wait.
-- STUB-M3..M7 are never dispatchable. Reaching one is a stop condition.
+- STUB-M6..M7 are never dispatchable. Reaching one is a stop condition.
 - Never push, force-push, open PRs, or push tags unless I say so. Never run `sudo`/package
   installs yourself. Never deploy or publish a build.
 - A hotfix on a released tag creates row `S-hotfix` whose merge-back into pustman-v1/main runs
@@ -329,7 +367,7 @@ deferred gates now due, new Learnings, and the exact next action for me.
    CI (S1) installs them on GitHub runners. Pushing so that CI runs is your action.
 5. **No display, no E2E.** A worker or reviewer without a graphical session cannot run
    `cargo run -p pustman` scenarios. Those go to the progress file's deferred gate and are run at
-   the next sign-off (S25/S38/S48).
+   the next sign-off (S25/S38/S48/S60/S67/S71).
 6. **Permissions.** Background subagents surface prompts in the main session, so pre-allow:
    - `cargo *`, `git *`, `gh issue *`, `gh label *`, `pkg-config *`
    - `scripts/pustman-v1-*.sh`, `scripts/promote-check.sh`
@@ -346,7 +384,7 @@ deferred gates now due, new Learnings, and the exact next action for me.
 With `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, the same prompt can run as a **lead** with 3
 teammates.
 
-- **Task list:** one task per step S0..S48, with `addBlockedBy` from the graph. G-DEPS and the sign-offs are tasks only the lead completes, after your "go".
+- **Task list:** one task per step S0..S71, with `addBlockedBy` from the graph. G-DEPS and the sign-offs are tasks only the lead completes, after your "go".
 - **Isolation:** teammates are not worktree-isolated. Each one creates `pustman-v1/S<N>` in its own `git worktree add`.
 - **Hooks:** add a `TaskCompleted` hook that exits 2 unless the task's step record exists.
 - **Reviewers** stay separate subagents.
