@@ -49,6 +49,8 @@ const FILTER_WIDTH_REMS: f32 = 14.;
 pub(crate) const TEXT_FILTER_SELECTOR: &str = "console-text-filter";
 pub(crate) const ENTRIES_AREA_SELECTOR: &str = "console-entries-area";
 pub(crate) const EMPTY_STATE_SELECTOR: &str = "console-empty-state";
+pub(crate) const ENTRY_ROW_SELECTOR: &str = "console-entry-row";
+pub(crate) const DETAILS_SELECTOR: &str = "console-details";
 
 /// The Console panel: the entry list, its filters and the expanded raw view.
 pub struct ConsolePanel {
@@ -218,8 +220,9 @@ impl ConsolePanel {
             .role(Role::Button)
             .aria_label("Expand request and response details")
             .aria_toggled(expanded.into())
+            .debug_selector(|| ENTRY_ROW_SELECTOR.to_owned())
             .w_full()
-            .h(px_to_rems(ROW_HEIGHT_REMS))
+            .h(rems(ROW_HEIGHT_REMS))
             .min_w_0()
             .gap(DynamicSpacing::Base04.rems(cx))
             .px(DynamicSpacing::Base04.rems(cx))
@@ -289,7 +292,8 @@ impl ConsolePanel {
         };
         v_flex()
             .id(SharedString::new_static("console-details"))
-            .h(px_to_rems(DETAILS_HEIGHT_REMS))
+            .debug_selector(|| DETAILS_SELECTOR.to_owned())
+            .h(rems(DETAILS_HEIGHT_REMS))
             .overflow_y_scroll()
             .gap(DynamicSpacing::Base04.rems(cx))
             .p(DynamicSpacing::Base04.rems(cx))
@@ -611,3 +615,7 @@ mod tests;
 #[cfg(test)]
 #[path = "panel_layout_tests.rs"]
 mod layout_tests;
+
+#[cfg(test)]
+#[path = "panel_row_height_tests.rs"]
+mod row_height_tests;
