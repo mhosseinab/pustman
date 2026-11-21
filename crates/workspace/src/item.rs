@@ -55,9 +55,6 @@ pub trait ItemHandle {
     fn persistent_id(&self, _cx: &App) -> Option<SharedString> {
         None
     }
-
-    /// A second handle to the same item.
-    fn boxed_clone(&self) -> Box<dyn ItemHandle>;
 }
 
 impl<T: Item> ItemHandle for Entity<T> {
@@ -83,10 +80,6 @@ impl<T: Item> ItemHandle for Entity<T> {
 
     fn persistent_id(&self, cx: &App) -> Option<SharedString> {
         self.read(cx).persistent_id(cx)
-    }
-
-    fn boxed_clone(&self) -> Box<dyn ItemHandle> {
-        Box::new(self.clone())
     }
 }
 
@@ -122,11 +115,5 @@ impl ItemHandle for AnyViewItem {
 
     fn serialize_draft(&self, _cx: &App) -> Option<String> {
         None
-    }
-
-    fn boxed_clone(&self) -> Box<dyn ItemHandle> {
-        Box::new(Self {
-            view: self.view.clone(),
-        })
     }
 }
