@@ -48,5 +48,4 @@ gpui = { workspace = true, features = ["test-support"] }
 http_engine = { workspace = true, features = ["test-support"] }
 secrets = { workspace = true, features = ["test-support"] }
 ui = { workspace = true, features = ["test-support"] }
-url.workspace = true
 variables.workspace = true

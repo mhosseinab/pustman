@@ -4966,7 +4966,6 @@ dependencies = [
  "text_input",
  "theme",
  "ui",
- "url",
  "variables",
  "workspace",
 ]
