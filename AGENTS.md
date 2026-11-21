@@ -161,7 +161,7 @@ crates with no GPUI views, sharing the `SessionEvent` shape from `docs/PRD.md` �
 - Run cargo from inside your worktree and let it use the worktree's own `target/`; don't set `CARGO_TARGET_DIR`
   to a shared path (parallel builds then block on one cache).
 - Each worktree's `target/` costs 4–10 GB, so the driver runs `scripts/pustman-v1-cleanup.sh` after every
-  merge (removes merged steps' worktrees, keeps branches) and before every dispatch (fails under 80 GB free).
+  merge (removes merged steps' worktrees, keeps branches) and before every dispatch (fails under 80 GB free; 15 GB in a cloud session, where `CLAUDE_CODE_REMOTE=true`).
   Test: `bun test ./scripts/pustman-v1-cleanup.test.ts`.
 - Releases are tags `release/pustman-v1-<n>` (plan D11). This is a desktop app — "staging" is the
   build host: tag → `cargo build --release -p pustman` → package with the app icon → human manual smoke on

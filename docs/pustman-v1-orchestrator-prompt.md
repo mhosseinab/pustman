@@ -172,7 +172,7 @@ DISPATCH PROTOCOL — SINGLE-PHASE RUNS (validated 2026-11-18 at S10; read this 
 
 1) DISPATCH WORKER (a FRESH subagent every time):
    - Disk gate first: `scripts/pustman-v1-cleanup.sh | tail -1` → `CLEANUP OK`. On
-     `CLEANUP LOW-DISK` (< 80 GB free) dispatch nothing new: merge or drop parked steps, or
+     `CLEANUP LOW-DISK` (< 80 GB free; 15 GB in a cloud session — run one worker there) dispatch nothing new: merge or drop parked steps, or
      `cargo clean` in this checkout (costs one rebuild at the next verify); if it stays low, tell me.
    - Own worktree (isolation: worktree). Mark the row in_progress, attempts+1; log the dispatch.
    - Worker prompt:

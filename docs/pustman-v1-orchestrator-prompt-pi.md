@@ -210,7 +210,7 @@ DISPATCH PROTOCOL — SINGLE-PHASE RUNS (validated 2026-11-18 at S10):
 
 1) BUILD (a FRESH subagent; agent per routing; `cwd: WT/S<N>`):
    - Disk gate first: `scripts/pustman-v1-cleanup.sh | tail -1` in REPO → `CLEANUP OK`. On
-     `CLEANUP LOW-DISK` (< 80 GB free) dispatch nothing new: merge or drop parked steps, or
+     `CLEANUP LOW-DISK` (< 80 GB free; 15 GB in a cloud session — run one worker there) dispatch nothing new: merge or drop parked steps, or
      `cargo clean` in REPO (costs one rebuild at the next verify); if it stays low, tell me.
    - Mark the row in_progress, attempts+1; log the dispatch.
    - Task text:
