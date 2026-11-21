@@ -1,10 +1,11 @@
 //! The dock: the container a workspace edge's panels live in (PRD §3).
 //!
 //! A dock is pinned to one edge of the workspace, is open or closed, and holds the
-//! [`PanelHandle`]s feature crates register for its edge: a selector strip of one entry
-//! per panel above the active one. An open dock with no panel renders an empty container
-//! of its fixed size — and a closed dock renders nothing at all, so the shell lays out
-//! around it.
+//! [`PanelHandle`]s feature crates register for its edge: a full-width panel header row
+//! above the active one — the panel's title in the default text colour at the left, the
+//! dock's actions at the right — like the workbench blueprint's sidebar and Console bar
+//! headers. An open dock with no panel renders an empty container of its fixed size — and
+//! a closed dock renders nothing at all, so the shell lays out around it.
 
 use gpui::{AnyView, Context, IntoElement, ParentElement, Render, Window, div};
 use ui::prelude::*;
@@ -53,7 +54,7 @@ impl DockPosition {
 }
 
 /// One edge of the workspace: open or closed, holding the panels registered for it and
-/// showing one of them at a time behind the selector strip.
+/// showing one of them at a time behind its panel header row.
 pub struct Dock {
     position: DockPosition,
     is_open: bool,
@@ -164,33 +165,39 @@ impl Dock {
         }
     }
 
-    /// The selector strip above the active panel: one entry per registered panel, the
-    /// active one selected. A dock draws it only while it holds at least one panel.
-    fn selector_strip(&self, cx: &Context<Self>) -> Option<impl IntoElement> {
+    /// The panel header row above the active panel: the active panel's title in the
+    /// default text colour at the left and the dock's actions at the right. The other
+    /// panels this dock holds are actions too — their entries switch to them. A dock
+    /// draws the row only while it holds at least one panel.
+    fn panel_header(&self, cx: &Context<Self>) -> Option<impl IntoElement> {
         if self.panels.is_empty() {
             return None;
         }
         let colors = cx.theme().colors();
-        let entries: Vec<_> = self
-            .panels
-            .iter()
-            .enumerate()
-            .map(|(index, panel)| {
-                let panel_id = panel.panel_id(cx);
-                selector_entry(
-                    panel_id,
-                    panel.title(cx),
-                    panel.icon(cx),
-                    self.active_panel == Some(index),
-                    // The handler runs when the click is dispatched — never inside
-                    // render — and reaches the dock through `cx.listener`, so no view
-                    // is updated re-entrantly.
-                    cx.listener(move |dock, _: &ClickEvent, window, cx| {
-                        dock.activate_panel(panel_id, window, cx);
-                    }),
-                )
-            })
-            .collect();
+        let active_index = self.active_panel.unwrap_or(0);
+        let mut title = None;
+        let mut actions = Vec::new();
+        for (index, panel) in self.panels.iter().enumerate() {
+            let panel_id = panel.panel_id(cx);
+            let entry = panel_entry(
+                panel_id,
+                panel.title(cx),
+                panel.icon(cx),
+                index == active_index,
+                // The handler runs when the click is dispatched — never inside
+                // render — and reaches the dock through `cx.listener`, so no view
+                // is updated re-entrantly.
+                cx.listener(move |dock, _: &ClickEvent, window, cx| {
+                    dock.activate_panel(panel_id, window, cx);
+                }),
+            );
+            if index == active_index {
+                title = Some(entry);
+            } else {
+                actions.push(entry);
+            }
+        }
+        let position = self.position;
         Some(
             h_flex()
                 .w_full()
@@ -200,7 +207,30 @@ impl Dock {
                 .gap(DynamicSpacing::Base02.rems(cx))
                 .border_b_1()
                 .border_color(colors.border_variant)
-                .children(entries),
+                .debug_selector(move || dock_header_selector(position))
+                .children(title)
+                .child(div().flex_1())
+                .children(actions)
+                .child(self.hide_action(cx)),
+        )
+    }
+
+    /// The panel header's rightmost action: hide the dock — what `ToggleSidebar` /
+    /// `ToggleConsole` do from the keyboard. Without it the dock could only be hidden
+    /// from the keyboard.
+    fn hide_action(&self, cx: &Context<Self>) -> impl IntoElement {
+        let selector = dock_hide_selector(self.position);
+        let (icon, label) = match self.position {
+            DockPosition::Left => (IconName::ChevronLeft, "Hide sidebar"),
+            DockPosition::Bottom => (IconName::ChevronDown, "Hide console"),
+        };
+        div().debug_selector(move || selector.clone()).child(
+            IconButton::new(
+                format!("dock-hide-button-{}", self.position.element_id()),
+                icon,
+                Tooltip::text(label),
+            )
+            .on_click(cx.listener(|dock, _event, _window, cx| dock.set_open(false, cx))),
         )
     }
 }
@@ -211,7 +241,7 @@ impl Render for Dock {
             return div().into_any_element();
         }
 
-        let selector = self.selector_strip(cx);
+        let header = self.panel_header(cx);
         let active_panel = self.panel();
         let colors = cx.theme().colors();
         let element_id = self.position.element_id();
@@ -232,30 +262,44 @@ impl Render for Dock {
                     .border_t_1()
                     .border_color(colors.border_variant),
             })
-            .children(selector)
+            .children(header)
             .children(active_panel.map(|panel| div().flex_1().min_h_0().child(panel)))
             .into_any_element()
     }
 }
 
-/// The debug selector [`selector_entry`] puts on one panel's entry — the one string
+/// The debug selector [`panel_entry`] puts on one panel's entry — the one string
 /// tests hand to `VisualTestContext::debug_bounds` — and the entry's element id.
 pub(crate) fn dock_panel_selector(panel_id: &str) -> String {
     format!("dock-panel-{panel_id}")
 }
 
-/// One selector entry: the panel's icon and title, the active one selected through the
-/// theme's selection tokens. The hitbox is keyed by the panel id — never by an index —
-/// so hover, focus and test hitboxes survive panels being added or replaced.
-fn selector_entry(
+/// The debug selector the dock's panel header row carries.
+pub(crate) fn dock_header_selector(position: DockPosition) -> String {
+    format!("dock-header-{}", position.element_id())
+}
+
+/// The debug selector the panel header's hide action carries.
+pub(crate) fn dock_hide_selector(position: DockPosition) -> String {
+    format!("dock-hide-{}", position.element_id())
+}
+
+/// One entry in a dock's panel header: the active panel's title — bare text in the
+/// default text colour — or, for the dock's other panels, a right-hand action that
+/// switches to them. The hitbox is keyed by the panel id — never by an index — so hover,
+/// focus and test hitboxes survive panels being added or replaced.
+fn panel_entry(
     panel_id: &'static str,
     title: SharedString,
     icon: IconName,
-    is_active: bool,
+    is_title: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    let style = if is_active {
-        ButtonStyle::Tinted(TintColor::Accent)
+    // The title is not a tinted selector chip: `Transparent` keeps the default text
+    // colour (`ButtonStyle::text_color`), and `Medium` makes it a header row, not a
+    // tiny pill.
+    let style = if is_title {
+        ButtonStyle::Transparent
     } else {
         ButtonStyle::Subtle
     };
@@ -266,6 +310,11 @@ fn selector_entry(
             Button::new(format!("dock-panel-button-{panel_id}"), title)
                 .start_icon(Icon::new(icon))
                 .style(style)
+                .size(ButtonSize::Medium)
                 .on_click(on_click),
         )
 }
+
+#[cfg(test)]
+#[path = "dock_header_tests.rs"]
+mod header_tests;
