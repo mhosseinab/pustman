@@ -3,8 +3,9 @@
 //!
 //! The Headers and Cookies tables each carried their own copy of both (S30e review 1
 //! finding 3); one implementation keeps their look, their truncation and their test
-//! hooks in step, and is where the Timeline tab's and the cookie dialog's cells move to
-//! (S31a review 1, S36a review 1).
+//! hooks in step. The Timeline tab's cells are the same cell in the shape its table
+//! needs — laid out around itself rather than sized by a [`ColumnWidth`]
+//! ([`selectable_text_cell`], S31a review 1).
 //!
 //! `Decision:` a heading paints under `column-heading-<heading>` and a cell under the id
 //! its table passes in — the debug-selector contract [`crate::text_selection`] already
@@ -58,6 +59,16 @@ pub(crate) fn column_heading(heading: &'static str, width: ColumnWidth) -> impl 
         )
 }
 
+/// The text every response table cell shares: the content font at the tables' text size,
+/// in the theme's text colour (`01_specs/design_system.md`). A cell that mutes itself or
+/// one value says so after this.
+pub(crate) fn cell_text<E: StyledTypography>(element: E, cx: &App) -> E {
+    element
+        .font_buffer(cx)
+        .text_ui_sm(cx)
+        .text_color(cx.theme().colors().text)
+}
+
 /// One table cell: selectable text in the content font, truncated with the full value
 /// behind a tooltip, in a column of its table's own width. `index` is its place in the
 /// flattened cells the table's [`CellSelector`] was built from; the table adds the id and
@@ -71,16 +82,22 @@ pub(crate) fn cell<V: SelectableCells>(
     view: &WeakEntity<V>,
     cx: &App,
 ) -> Stateful<Div> {
-    width
-        .sized(selectable_cell(
-            id,
-            index,
-            text,
-            selection.range_on(index),
-            view.clone(),
-            cx,
-        ))
-        .font_buffer(cx)
-        .text_ui_sm(cx)
-        .text_color(cx.theme().colors().text)
+    width.sized(selectable_text_cell(id, index, text, selection, view, cx))
+}
+
+/// [`cell`] before its table sizes it: the selectable cell of a table — the Timeline
+/// tab's — that lays its columns out around the cell instead of asking the cell for a
+/// [`ColumnWidth`].
+pub(crate) fn selectable_text_cell<V: SelectableCells>(
+    id: ElementId,
+    index: usize,
+    text: SharedString,
+    selection: &CellSelector,
+    view: &WeakEntity<V>,
+    cx: &App,
+) -> Stateful<Div> {
+    cell_text(
+        selectable_cell(id, index, text, selection.range_on(index), view.clone(), cx),
+        cx,
+    )
 }

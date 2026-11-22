@@ -56,9 +56,9 @@ use ui::prelude::*;
 
 use crate::child_id;
 use crate::request_as_sent::{self, RequestAsSentRow};
-use crate::text_selection::{
-    CellSelector, SelectableCells, TEXT_CONTEXT, selectable_cell, selection_handlers,
-};
+use crate::status_line::format_duration;
+use crate::table_cells::selectable_text_cell;
+use crate::text_selection::{CellSelector, SelectableCells, TEXT_CONTEXT, selection_handlers};
 
 /// Shown for a fact nobody observed: an absent `Location`, an unmeasured hop timing.
 const ABSENT: &str = "—";
@@ -207,11 +207,11 @@ struct Cells<'a> {
 }
 
 impl Cells<'_> {
-    /// One selectable cell of the tab: the selection painted behind it, truncated with the
-    /// full value in a tooltip. Callers add the width and colour.
+    /// One selectable cell of the tab: the shared [`crate::table_cells`] cell — the
+    /// selection painted behind it, truncated with the full value in a tooltip. Callers
+    /// add the width and colour.
     fn cell(&self, id: ElementId, index: usize, text: SharedString, cx: &App) -> Stateful<Div> {
-        let selected = self.selection.range_on(index);
-        selectable_cell(id, index, text, selected, self.view.clone(), cx).text_ui_sm(cx)
+        selectable_text_cell(id, index, text, self.selection, self.view, cx)
     }
 }
 
@@ -658,7 +658,7 @@ fn phase_rows(timings: &Timings) -> Vec<PhaseRow> {
         .into_iter()
         .map(|(slug, label, duration)| PhaseRow {
             label: label.into(),
-            time: format_duration(Some(duration)),
+            time: format_duration(Some(duration)).into(),
             width: bar_fraction(duration, scale),
             slug,
         })
@@ -807,7 +807,7 @@ fn hop_rows(hops: &[RedirectHop]) -> Vec<HopRow> {
                 Some(location) => location.as_str().into(),
                 None => ABSENT.into(),
             },
-            timing: format_duration(hop.timing),
+            timing: format_duration(hop.timing).into(),
             headers: hop
                 .headers
                 .iter()
@@ -1173,27 +1173,6 @@ impl Focusable for TimelineTab {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
-}
-
-/// A duration as the rows show it: milliseconds under a second, seconds above one,
-/// minutes and seconds for anything over a minute (the `status_line` shape; that helper
-/// is private to a file another step owns, so this is the same shape rather than a call).
-fn format_duration(duration: Option<Duration>) -> SharedString {
-    let Some(duration) = duration else {
-        return ABSENT.into();
-    };
-    if duration < Duration::from_secs(1) {
-        format!("{:.0} ms", duration.as_secs_f64() * 1000.0)
-    } else if duration < Duration::from_secs(60) {
-        format!("{:.2} s", duration.as_secs_f64())
-    } else {
-        format!(
-            "{} m {:02} s",
-            duration.as_secs() / 60,
-            duration.as_secs() % 60
-        )
-    }
-    .into()
 }
 
 #[cfg(test)]

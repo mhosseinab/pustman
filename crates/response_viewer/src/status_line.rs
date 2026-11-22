@@ -247,9 +247,10 @@ fn tabular_numbers() -> FontFeatures {
     FontFeatures(Arc::new(vec![("tnum".to_string(), 1)]))
 }
 
-/// A duration as the status line shows it: milliseconds under a second, seconds above
-/// one, minutes and seconds for anything over a minute.
-fn format_duration(total: Option<Duration>) -> String {
+/// A duration as the response shows it: milliseconds under a second, seconds above one,
+/// minutes and seconds for anything over a minute. The status line's times and the
+/// Timeline tab's rows show one shape, from this one helper (S31a review 1).
+pub(crate) fn format_duration(total: Option<Duration>) -> String {
     let Some(total) = total else {
         return UNMEASURED.to_owned();
     };
@@ -262,8 +263,9 @@ fn format_duration(total: Option<Duration>) -> String {
     }
 }
 
-/// A byte count as the status line shows it: 1024-based `B`, `KB`, `MB`, `GB`.
-fn format_size(bytes: Option<u64>) -> String {
+/// A byte count as the response shows it: 1024-based `B`, `KB`, `MB`, `GB` —
+/// [`format_duration`]'s size twin.
+pub(crate) fn format_size(bytes: Option<u64>) -> String {
     let Some(bytes) = bytes else {
         return UNMEASURED.to_owned();
     };
