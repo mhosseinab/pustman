@@ -29,7 +29,9 @@ settings.workspace = true
 storage.workspace = true
 text_input.workspace = true
 theme.workspace = true
-time.workspace = true
+# `parsing` is declared here, not borrowed from feature unification: `cookie_form`
+# parses RFC 2822 expiry text (`OffsetDateTime::parse`) and must compile on its own.
+time = { workspace = true, features = ["parsing"] }
 ui.workspace = true
 workspace.workspace = true
 
