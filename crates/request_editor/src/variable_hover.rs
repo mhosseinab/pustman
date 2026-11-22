@@ -28,20 +28,23 @@
 //! the Params/Headers cells, the raw body and the Auth fields follow in a later wiring
 //! step, each wrapping its input the same way.
 //!
-//! Dismissal (known limitation): the popover closes when the pointer moves over the
-//! field outside every placeholder, when the field's text changes, when the scopes
-//! change and when the mouse leaves the window. GPUI has no element-level "mouse left"
-//! event, so a pointer that leaves the field entirely leaves the popover open until the
-//! next move over the field; a dismissal timer belongs to the later wiring step.
+//! Dismissal: the popover closes when the pointer moves over the field outside every
+//! placeholder, when a move lands outside the field and the popover — the window-level
+//! mouse-move watch below, since GPUI has no element-level "mouse left" event — when
+//! the field's text changes, when the scopes change and when the mouse leaves the
+//! window. The popover surface itself is one of the two places the pointer keeps it
+//! open, so its reveal toggle stays clickable.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use api_model::{MASK, VariableKind};
 use gpui::{
-    Anchor, AnyElement, AnyView, Context, ElementId, Entity, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, MouseExitEvent, MouseMoveEvent, ParentElement, Render, Role,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Task, Window, anchored,
-    deferred,
+    Anchor, AnyElement, AnyView, Bounds, Context, DispatchPhase, ElementId, Entity, FocusHandle,
+    Focusable, InteractiveElement, IntoElement, MouseExitEvent, MouseMoveEvent, ParentElement,
+    Pixels, Render, Role, SharedString, StatefulInteractiveElement, Styled, Subscription, Task,
+    Window, anchored, canvas, deferred,
 };
 use http_engine::SecretKeyLookup;
 use secrets::{SecretError, SecretKey, SecretStore, SecretValue};
@@ -114,10 +117,12 @@ impl Default for SecretSources {
     }
 }
 
-/// The "a store that has nothing" default of [`SecretSources`] — the same shape as
-/// `headers`' preview store, kept local because that file is outside this step's edits.
-/// Nothing can be stored in it, so a hover through it can only ever say "unset".
-struct NoStoredSecrets;
+/// The one "a store that has nothing" store (#193): [`SecretSources`]' default and
+/// `headers`' auto-header preview both resolve against this single definition. Nothing
+/// can be stored in it and nothing can be read from it, so a hover through it can only
+/// ever say "unset" and the preview can never reach the OS keychain (a keychain read
+/// can prompt, macOS).
+pub(crate) struct NoStoredSecrets;
 
 impl SecretStore for NoStoredSecrets {
     fn get(&self, key: &SecretKey) -> Result<SecretValue, SecretError> {
@@ -126,7 +131,7 @@ impl SecretStore for NoStoredSecrets {
 
     fn set(&self, _key: &SecretKey, _value: &SecretValue) -> Result<(), SecretError> {
         Err(SecretError::BackendUnavailable {
-            reason: String::from("the variable hover stores no secrets"),
+            reason: String::from("this store is read-only and stores no secrets"),
         })
     }
 
@@ -245,6 +250,11 @@ pub struct VariableHover {
     /// The reveal toggle's focus handle: what makes the toggle a tab stop of the open
     /// popover and what the keyboard reaches it with.
     reveal_focus: FocusHandle,
+    /// The popover surface's bounds as the last frame painted them, for the
+    /// pointer-leave watch below (the `text_input` `last_bounds` shape: paint-time
+    /// geometry through interior mutability, never `Entity::update` from
+    /// `render`/`paint`). [`None`] while no popover is painted.
+    popover_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     // Kept so the field's edits keep reaching us; dropping it would silently stop the
     // hover from closing when the text under it changes.
     _input_subscription: Subscription,
@@ -268,6 +278,7 @@ impl VariableHover {
             status_lookup: None,
             reveal_lookup: None,
             reveal_focus: cx.focus_handle(),
+            popover_bounds: Rc::new(Cell::new(None)),
             _input_subscription: subscription,
         }
     }
@@ -491,6 +502,7 @@ impl VariableHover {
             return;
         }
         self.hovered = None;
+        self.popover_bounds.set(None);
         self.status_lookup = None;
         self.reveal_lookup = None;
         // The toggle is out of the render tree now; it must leave the tab order with it.
@@ -538,7 +550,8 @@ impl VariableHover {
                     .size(LabelSize::XSmall)
                     .color(Color::Muted),
             )
-            .child(value_row);
+            .child(value_row)
+            .child(self.render_popover_bounds());
         Some(
             div()
                 .absolute()
@@ -629,6 +642,61 @@ impl VariableHover {
                 .into_any_element(),
         )
     }
+    /// The popover surface's bounds, learned while painting: the pointer-leave watch
+    /// keeps the hover open while the pointer is anywhere on the surface — its reveal
+    /// toggle must stay clickable (REQ-VAR-03).
+    fn render_popover_bounds(&self) -> AnyElement {
+        let popover_bounds = Rc::clone(&self.popover_bounds);
+        canvas(
+            |_, _, _| {},
+            move |bounds, _, _, _| {
+                popover_bounds.set(Some(bounds));
+            },
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .into_any_element()
+    }
+
+    /// The window-wide pointer watch behind the pointer-leave dismissal (REQ-VAR-03):
+    /// GPUI dispatches [`MouseMoveEvent`]s only to the element under the pointer, so a
+    /// move outside the field never reaches [`Self::on_mouse_move`] and the popover
+    /// used to stay open until the pointer came back. A [`canvas`] paint hook is the
+    /// one place that both sees the field's own bounds and may register a window-level
+    /// listener — the shape `response_viewer::body_view` watches a drag beyond its rows
+    /// with. The hover stays open for a move over the field or over the popover
+    /// surface; anything else dismisses it.
+    fn render_pointer_watch(&self, cx: &mut Context<Self>) -> AnyElement {
+        let hover = cx.weak_entity();
+        let popover_bounds = Rc::clone(&self.popover_bounds);
+        canvas(
+            |_, _, _| {},
+            move |field_bounds, _, window, _| {
+                window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                    if phase != DispatchPhase::Bubble {
+                        return;
+                    }
+                    let over_popover = popover_bounds
+                        .get()
+                        .is_some_and(|popover| popover.contains(&event.position));
+                    if field_bounds.contains(&event.position) || over_popover {
+                        return;
+                    }
+                    if hover.update(cx, |this, cx| this.close(cx)).is_err() {
+                        // Handled: the hover went away with its window; there is
+                        // nothing left to close.
+                    }
+                });
+            },
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .into_any_element()
+    }
 }
 
 impl Render for VariableHover {
@@ -640,6 +708,7 @@ impl Render for VariableHover {
             .on_mouse_exit(cx.listener(Self::on_mouse_exit))
             .child(self.wrapped.clone())
             .children(self.render_popover(cx))
+            .child(self.render_pointer_watch(cx))
     }
 }
 
@@ -716,3 +785,7 @@ fn read_failure(error: &SecretError) -> String {
 #[cfg(test)]
 #[path = "variable_hover_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "variable_hover_pointer_leave_tests.rs"]
+mod pointer_leave_tests;

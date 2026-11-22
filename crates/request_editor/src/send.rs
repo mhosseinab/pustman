@@ -38,11 +38,11 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use api_model::HttpRequest;
-use console::{ConsoleStore, record_error, record_outcome};
+use console::{ConsoleStore, record_error, record_outcome, record_warnings};
 use gpui::{App, Context, Entity, Global, Role, Window};
 use http_engine::{
     HttpClient, PipelineError, Response, ResponseBody, SendInput, SendOutcome, TransportError,
-    resolve_request,
+    Warning, resolve_request,
 };
 use pustman_actions::request;
 use ui::prelude::*;
@@ -234,7 +234,7 @@ impl RequestEditor {
         let warnings = match resolve_request(&self.draft, &self.scopes, &mut DynamicValues::new()) {
             Ok((_, warnings)) => warnings,
             Err(error) => {
-                self.fail_send(&sent, &error, cx);
+                self.fail_send(&sent, &error, &[], cx);
                 return;
             }
         };
@@ -268,7 +268,9 @@ impl RequestEditor {
         self.tls_offer_error = None;
         self.pending_send = Some(cx.spawn(async move |this, cx| {
             let result = send_task.await;
-            let landed = this.update(cx, |editor, cx| editor.finish_send(result, sent, cx));
+            let landed = this.update(cx, |editor, cx| {
+                editor.finish_send(result, sent, warnings, cx)
+            });
             if landed.is_err() {
                 // Handled: the tab closed while the request was in flight; there is no
                 // status line left to write to.
@@ -319,17 +321,26 @@ impl RequestEditor {
     /// A send that failed before or at the transport: one Console Error entry
     /// (REQ-CON-01/04) and the failure shown inline, exactly as a transport failure is
     /// shown. This is the one place a failed send lands and the one place its Console
-    /// entry is written — [`console::feed`]'s [`record_error`] does the redacting.
+    /// entry is written — [`console::feed`]'s [`record_error`] does the redacting — and
+    /// the warnings the send carried are recorded with it (REQ-VAR-07): a "Send anyway"
+    /// failure names its unresolved variables exactly as a finished send's outcome does.
     /// `sent` is the request as the send had it, for the entry's summary line.
     ///
     /// `Decision:` the write keeps the [`ConsoleStore`]-global guard of the warned-send
     /// write it replaces: a host that has not installed the console store (an editor
     /// test without `console::init`) records nothing rather than crashing the send path.
-    fn fail_send(&mut self, sent: &HttpRequest, error: &PipelineError, cx: &mut Context<Self>) {
+    fn fail_send(
+        &mut self,
+        sent: &HttpRequest,
+        error: &PipelineError,
+        warnings: &[Warning],
+        cx: &mut Context<Self>,
+    ) {
         self.pending_send = None;
         self.clear_previous_response(cx);
         if cx.try_global::<ConsoleStore>().is_some() {
             record_error(Some(sent), error, cx);
+            record_warnings(Some(sent), warnings, cx);
         }
         match error {
             PipelineError::Transport(error) => self.show_transport_error(error, cx),
@@ -368,11 +379,15 @@ impl RequestEditor {
     /// failure shows inline and in the viewer's error panel through [`Self::fail_send`].
     /// Either way this is the send's one Console write (REQ-CON-01): a finished send's
     /// [`record_outcome`] carries its warnings into the Console with it (REQ-VAR-07),
-    /// and a failed send's entry comes from [`Self::fail_send`].
+    /// and a failed send's entry comes from [`Self::fail_send`], which records the
+    /// warnings `begin_send` resolved the request with alongside the error. Those
+    /// warnings are the pre-send check's own (REQ-VAR-07): empty unless the user sent
+    /// past the warning bar.
     fn finish_send(
         &mut self,
         result: Result<SendOutcome, PipelineError>,
         sent: HttpRequest,
+        warnings: Vec<Warning>,
         cx: &mut Context<Self>,
     ) {
         self.pending_send = None;
@@ -394,7 +409,7 @@ impl RequestEditor {
             Err(PipelineError::Transport(TransportError::Cancelled)) => {
                 self.show_cancelled_state(cx)
             }
-            Err(error) => self.fail_send(&sent, &error, cx),
+            Err(error) => self.fail_send(&sent, &error, &warnings, cx),
         }
         cx.notify();
     }
@@ -612,3 +627,7 @@ mod pipeline_tests;
 #[cfg(test)]
 #[path = "send_row_height_tests.rs"]
 mod row_height_tests;
+
+#[cfg(test)]
+#[path = "send_warned_failure_tests.rs"]
+mod warned_failure_tests;

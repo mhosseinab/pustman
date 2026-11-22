@@ -49,20 +49,11 @@ pub fn record_outcome(outcome: &SendOutcome, cx: &mut App) {
         },
     );
     for warning in &outcome.warnings {
-        let message = match warning {
-            Warning::UnresolvedVariables(names) => {
-                // Names only, never the values they failed to resolve (REQ-VAR-07).
-                format!("Unresolved variables: {}", names.join(", "))
-            }
-            Warning::TlsVerifyDisabled => {
-                "TLS certificate verification is disabled for this request.".to_string()
-            }
-        };
         push_notice(
             cx,
             ConsoleLevel::Warning,
             &outcome.request,
-            &message,
+            &warning_message(warning),
             secrets,
         );
     }
@@ -117,6 +108,58 @@ pub fn record_error(request: Option<&HttpRequest>, error: &PipelineError, cx: &m
             raw_response: redact_text(&error.to_string(), &secrets),
         },
     );
+}
+
+/// What one [`Warning`] says to the user: names only, never the values they failed to
+/// resolve (REQ-VAR-07), and the TLS state verbatim (REQ-HTTP-10). One wording for every
+/// entry that carries a warning, finished send or failed.
+fn warning_message(warning: &Warning) -> String {
+    match warning {
+        Warning::UnresolvedVariables(names) => {
+            format!("Unresolved variables: {}", names.join(", "))
+        }
+        Warning::TlsVerifyDisabled => {
+            "TLS certificate verification is disabled for this request.".to_string()
+        }
+    }
+}
+
+/// Record the warnings a failed send carried (REQ-VAR-07) as one Warning entry per
+/// [`Warning`], the same wording [`record_outcome`] gives a finished send's. The caller
+/// is a "Send anyway" failure: its unresolved names reach the Console whether the send
+/// succeeded or not. With no warnings this records nothing.
+///
+/// `request` names the entries exactly as [`record_error`] names its own; pass `None`
+/// when the request is gone. No secret was ever substituted on a failed send, so the
+/// empty set redacts the pre-resolution URL and the message, as in [`record_error`].
+pub fn record_warnings(request: Option<&HttpRequest>, warnings: &[Warning], cx: &mut App) {
+    if warnings.is_empty() {
+        return;
+    }
+    let secrets = SecretValues::new();
+    let (method, url) = match request {
+        Some(request) => (
+            Some(request.method.clone()),
+            redact_url(&request.url, &secrets),
+        ),
+        None => (None, String::new()),
+    };
+    for warning in warnings {
+        ConsoleStore::push(
+            cx,
+            ConsoleEntry {
+                level: ConsoleLevel::Warning,
+                protocol: PROTOCOL.to_string(),
+                method: method.clone(),
+                url: url.clone(),
+                status: None,
+                time: None,
+                size: None,
+                raw_request: String::new(),
+                raw_response: redact_text(&warning_message(warning), &secrets),
+            },
+        );
+    }
 }
 
 /// Watch `client` and record every cancellation as an entry (REQ-HTTP-12). The caller
