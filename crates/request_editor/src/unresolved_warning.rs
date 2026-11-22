@@ -7,19 +7,27 @@
 //! `console::feed`): one write, never a second one beside it.
 //!
 //! `Decision:` the bar's names come from `resolve_request` against the editor's own
-//! scopes (`RequestEditor`'s `scopes`) — the very stack the send resolves with (S33e),
-//! so the check always agrees with the send it guards. Nothing outside tests calls
+//! scopes (`RequestEditor`'s `scopes`) — the very stack the send resolves with (S33e) —
+//! minus the secret names the editor's [`SecretSources`](crate::variable_hover::SecretSources)
+//! would resolve at send (#198):
+//! `http_engine::prepare` fetches those from the keychain before it resolves, so
+//! listing them would hold back a send that would resolve them. The rule is the one
+//! `prepare` reads by — a secret-kind variable with no local value and a keychain key
+//! — and a secret with no key stays on the bar, where `prepare` fails the send as an
+//! unresolved secret. Nothing outside tests calls
 //! `RequestEditor::set_scopes` until the M2 environment wire (S43w), so that stack is
 //! empty in practice and every name is unresolved — the truth today. Cmd/Ctrl-Enter
 //! while the bar shows re-checks and shows the bar again; only the bar's own "Send anyway"
 //! sends with unresolved names.
 
+use api_model::VariableKind;
 use gpui::{AnyElement, Context, Window};
 use http_engine::{Warning, resolve_request};
 use ui::prelude::*;
 use variables::DynamicValues;
 
 use crate::RequestEditor;
+use crate::variable_hover::scope_kind_of;
 
 /// Test hook: the warning bar above the URL bar while a send would use unresolved
 /// variables.
@@ -86,6 +94,44 @@ pub(super) fn unresolved_names(warnings: &[Warning]) -> Option<&[String]> {
 }
 
 impl RequestEditor {
+    /// The pre-send check's [`Warning`]s as the bar and the send's Console entry see
+    /// them (REQ-VAR-07): the names [`Self::keychain_resolves`] are dropped — the send
+    /// resolves them, so they are not unresolved (#198) — and a
+    /// [`Warning::UnresolvedVariables`] the drop empties goes with them, so nothing
+    /// warns about a send that had nothing to warn about.
+    pub(super) fn drop_keychain_resolved(&self, warnings: Vec<Warning>) -> Vec<Warning> {
+        warnings
+            .into_iter()
+            .filter_map(|warning| match warning {
+                Warning::UnresolvedVariables(names) => {
+                    let names: Vec<String> = names
+                        .into_iter()
+                        .filter(|name| !self.keychain_resolves(name))
+                        .collect();
+                    (!names.is_empty()).then_some(Warning::UnresolvedVariables(names))
+                }
+                other => Some(other),
+            })
+            .collect()
+    }
+
+    /// Whether the send's keychain resolves `name` although the editor's scopes cannot
+    /// (#198): the winning variable is a secret with no local value and
+    /// [`SecretSources`](crate::variable_hover::SecretSources) names its keychain entry. `http_engine::prepare` reads exactly these before it
+    /// resolves, so they are resolved at send. Only the key is asked here, never the
+    /// value: every keychain read can prompt the user (macOS). A key with nothing
+    /// stored still passes — `prepare` then fails the send as an unresolved secret,
+    /// which reaches the user.
+    fn keychain_resolves(&self, name: &str) -> bool {
+        let Some(binding) = self.scopes.find(name) else {
+            return false;
+        };
+        binding.value.is_none()
+            && binding.variable.kind == VariableKind::Secret
+            && scope_kind_of(&self.scopes, name)
+                .is_some_and(|kind| (self.secret_sources.key_of)(kind, name).is_some())
+    }
+
     /// The warning bar's state — [`Some`] while a send would use unresolved variables
     /// (REQ-VAR-07).
     pub fn unresolved_warning(&self) -> Option<&UnresolvedWarning> {
@@ -95,13 +141,15 @@ impl RequestEditor {
     /// Re-run the pre-send check on the draft as it is now (REQ-VAR-07): an edit or a
     /// send re-checks, so the bar lists the names the request has after the change — or
     /// disappears once the change resolved them. The check resolves against the editor's
-    /// scopes — the same stack the send uses (S33e) — so only names really unresolved
+    /// scopes — the same stack the send uses (S33e) — and knows the keychain the send
+    /// reads ([`Self::drop_keychain_resolved`], #198), so only names really unresolved
     /// raise the bar. A draft that does not resolve at all (an unparseable URL mid-edit,
     /// a variable cycle) has no warning to show: the send itself reports that failure
     /// when the user tries it.
     pub(super) fn recheck_unresolved(&mut self, cx: &mut Context<Self>) {
         let checked = match resolve_request(&self.draft, &self.scopes, &mut DynamicValues::new()) {
             Ok((_, warnings)) => {
+                let warnings = self.drop_keychain_resolved(warnings);
                 unresolved_names(&warnings).map(|names| UnresolvedWarning::new(names.to_vec()))
             }
             // A request that cannot resolve has no names to warn about; `begin_send`
@@ -202,3 +250,7 @@ impl RequestEditor {
 #[cfg(test)]
 #[path = "unresolved_warning_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "unresolved_warning_keychain_tests.rs"]
+mod keychain_tests;
