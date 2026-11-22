@@ -6,7 +6,8 @@
 //! is a [`text_input::TextInput`]; two toggles turn on regex matching and case
 //! sensitivity, the step buttons (and Enter / Shift-Enter) walk the matches wrapping
 //! around, and the count reads "3 of 12" or "No matches". A query that does not compile
-//! shows its error inline, under the field — never only in a log.
+//! shows its error alone, inline under the field — the count stays silent beside it,
+//! and the error is never only in a log.
 //!
 //! Matching is the `regex` crate and nothing else: a regex query is compiled as written,
 //! a plain-text query goes through [`regex::escape`]. The match list ([`FindMatch`]:
@@ -144,9 +145,10 @@ impl FindBar {
     }
 
     /// What the count beside the controls says: "3 of 12", "No matches", or nothing
-    /// before the first query.
+    /// before the first query and while the query does not compile — there the inline
+    /// error speaks alone (#161).
     pub fn count_label(&self, cx: &App) -> Option<SharedString> {
-        if self.query.read(cx).text().is_empty() {
+        if self.query.read(cx).text().is_empty() || self.error.is_some() {
             return None;
         }
         let Some(current) = self.current else {
@@ -430,3 +432,11 @@ impl ResponseView {
 #[cfg(test)]
 #[path = "find_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "find_error_tests.rs"]
+mod error_tests;
+
+#[cfg(test)]
+#[path = "find_keyboard_tests.rs"]
+mod keyboard_tests;
