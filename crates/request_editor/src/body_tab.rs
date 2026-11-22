@@ -211,6 +211,9 @@ pub struct BodyTab {
     /// The file-dialog task: replacing it cancels the dialog's answer before it,
     /// because dropping a `Task` cancels it (AGENTS.md › Async).
     pick_task: Option<Task<()>>,
+    /// The in-flight Beautify format, likewise: a second click cancels the format
+    /// before it.
+    beautify_task: Option<Task<()>>,
     /// The scopes the body fields highlight their `{{variables}}` against (REQ-VAR-03).
     scopes: Arc<ScopeStack>,
     _urlencoded_subscription: Subscription,
@@ -248,6 +251,7 @@ impl BodyTab {
             mode_focus_handle: cx.focus_handle().tab_stop(true),
             language_focus_handle: cx.focus_handle().tab_stop(true),
             pick_task: None,
+            beautify_task: None,
             scopes: Arc::new(ScopeStack::new()),
             _urlencoded_subscription,
             _raw_subscription,
@@ -781,10 +785,13 @@ impl BodyTab {
         cx.notify();
     }
 
-    /// Re-format the raw body (Beautify). A body the formatters cannot parse — and a
-    /// language that has no formatter at all — is left exactly as it is while the tab
-    /// says why inline under the controls: a button that silently does nothing is not
-    /// an answer (AGENTS.md — errors reach the user).
+    /// Re-format the raw body (Beautify). Formatting is heavy work, so it runs on a
+    /// background task the way `response_viewer`'s Pretty view runs it — the body
+    /// stays as it is until the formatted text lands, and a second click cancels the
+    /// format before it. A body the formatters cannot parse — and a language that has
+    /// no formatter at all — is left exactly as it is while the tab says why inline
+    /// under the controls: a button that silently does nothing is not an answer
+    /// (AGENTS.md — errors reach the user).
     fn beautify(&mut self, cx: &mut Context<Self>) {
         let Some(formatter) = formatter_for(self.raw_language) else {
             self.error = Some(SharedString::new_static(
@@ -795,22 +802,37 @@ impl BodyTab {
             return;
         };
         let text = self.raw_text.read(cx).text();
-        match formatter.format(text.as_bytes()) {
-            Ok(formatted) => {
-                self.error = None;
-                if formatted != text {
-                    self.raw_text
-                        .update(cx, |area, cx| area.set_text(&formatted, cx));
+        self.beautify_task = Some(cx.spawn(async move |this, cx| {
+            let to_format = text.clone();
+            let outcome = cx
+                .background_spawn(async move { formatter.format(to_format.as_bytes()) })
+                .await;
+            if let Err(_released) = this.update(cx, |tab, cx| {
+                // The body changed while it was formatting: the user's typing is the
+                // truth and the formatted text would clobber it.
+                if tab.raw_text.read(cx).text() != text {
+                    return;
+                }
+                match outcome {
+                    Ok(formatted) => {
+                        tab.error = None;
+                        if formatted != text {
+                            tab.raw_text
+                                .update(cx, |area, cx| area.set_text(&formatted, cx));
+                        }
+                    }
+                    Err(error) => {
+                        tab.error = Some(SharedString::from(format!(
+                            "Beautify could not format this body: {error}."
+                        )));
+                    }
                 }
                 cx.notify();
+            }) {
+                // Handled: the tab went away with its window; there is nobody left to
+                // show the formatted body to.
             }
-            Err(error) => {
-                self.error = Some(SharedString::from(format!(
-                    "Beautify could not format this body: {error}."
-                )));
-                cx.notify();
-            }
-        }
+        }));
     }
 
     /// The one toolbar row over the body editor: the mode picker at the left, and —

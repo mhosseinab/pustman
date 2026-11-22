@@ -10,8 +10,9 @@ use gpui::{
     size,
 };
 
-use crate::components::context_menu::{ContextMenu, floating_menu};
+use crate::components::context_menu::{ContextMenu, MENU_SELECTOR, floating_menu};
 use crate::h_flex;
+use crate::spacing::DynamicSpacing;
 use crate::test_support::{draw_window, init_test};
 use crate::units::px_to_rems;
 
@@ -21,6 +22,11 @@ const TRIGGER_WIDTH_PX: f32 = 160.;
 
 /// The height of the probe's trigger: what the menu floats below.
 const TRIGGER_HEIGHT_PX: f32 = 28.;
+
+/// A menu entry wide enough that the menu cannot fit between a trigger at the
+/// window's right edge and that edge — so only the snap path can place it and the
+/// snap-line assertion below has teeth.
+const WIDE_ENTRY: &str = "Open the collection's request in a new tab";
 
 /// A window with one picker trigger and the menu floating under it — the shape every
 /// `floating_menu` caller renders.
@@ -67,7 +73,11 @@ fn open_probe(
 ) -> &mut VisualTestContext {
     cx.update(init_test);
     let (_probe, cx) = cx.add_window_view(|_window, cx| FloatingMenuProbe {
-        menu: cx.new(|cx| ContextMenu::new(cx).entry("Open", |_, _, _| {})),
+        menu: cx.new(|cx| {
+            ContextMenu::new(cx)
+                .entry("Open", |_, _, _| {})
+                .entry(WIDE_ENTRY, |_, _, _| {})
+        }),
         pin_right,
     });
     cx.simulate_resize(window_size);
@@ -109,18 +119,38 @@ fn test_the_floating_menu_stays_inside_the_window(cx: &mut TestAppContext) {
     let cx = open_probe(cx, true, window);
 
     let trigger = bounds("menu-trigger", cx);
-    let entry = entry_bounds(cx);
+    let menu = bounds(MENU_SELECTOR, cx);
+    let margin = cx.read(|cx| DynamicSpacing::Base04.px(cx));
 
-    assert!(
-        trigger.origin.x + trigger.size.width == px(800.),
-        "the trigger ends the row, where a menu would overflow the window: {trigger:?}"
+    assert_eq!(
+        trigger.origin.x + trigger.size.width,
+        px(800.),
+        "the trigger ends the row, where a menu left at its anchor would overflow the \
+         window"
     );
     assert!(
-        entry.origin.x >= px(0.) && entry.origin.x + entry.size.width <= px(800.),
-        "the menu snaps back inside the window: {entry:?}"
+        menu.size.width > px(800.) - trigger.origin.x,
+        "the menu is wider than the gap between its anchor and the window's right edge \
+         — only then does placing it take the snap path at all, so the assertion below \
+         is not vacuous: {menu:?}"
+    );
+
+    // `snap_to_window_with_margin` slides an overflowing menu to the window edge inset
+    // by the margin. Without it, `anchored`'s default fit switches the anchor corner
+    // instead — the menu's right edge lands on the trigger's left edge — or, when that
+    // does not help, clamps flush to the window edge. Neither reaches the margin line,
+    // so this assertion is what the snap call is for.
+    let snap_line = px(800.) - margin;
+    let menu_right = menu.origin.x + menu.size.width;
+    assert!(
+        menu_right <= snap_line && menu_right >= snap_line - px(1.),
+        "the menu snaps to the window edge inset by the margin ({snap_line:?}) — not \
+         over the edge, not flush against it, and not flipped back over its trigger \
+         (whose left edge is {:?}): {menu:?}",
+        trigger.origin.x
     );
     assert!(
-        entry.origin.y >= px(0.) && entry.origin.y + entry.size.height <= px(600.),
-        "the menu paints inside the window: {entry:?}"
+        menu.origin.y >= px(0.) && menu.origin.y + menu.size.height <= px(600.),
+        "the menu paints inside the window: {menu:?}"
     );
 }

@@ -33,6 +33,10 @@ use crate::v_flex;
 /// Enter and Escape.
 pub(crate) const MENU_CONTEXT: &str = "Menu";
 
+/// Test hook: the menu container itself — what the floating layer anchors and snaps
+/// (`VisualTestContext::debug_bounds`, the entries' key hooks below).
+pub const MENU_SELECTOR: &str = "context-menu";
+
 /// The narrowest a menu grows, so a two-word entry never wraps.
 const MIN_WIDTH_PX: f32 = 160.;
 
@@ -371,6 +375,7 @@ impl Render for ContextMenu {
         let focus_handle = self.focus_handle.clone();
         v_flex()
             .id(ElementId::from(&focus_handle))
+            .debug_selector(|| String::from(MENU_SELECTOR))
             .key_context(MENU_CONTEXT)
             .role(Role::Menu)
             .font_ui(cx)
