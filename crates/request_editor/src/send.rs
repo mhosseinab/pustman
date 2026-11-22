@@ -474,17 +474,19 @@ impl RequestEditor {
 
     /// The way past a self-signed or otherwise untrusted certificate: pin verification
     /// off on THIS request and send it again. A [`Button`], so it is a tab stop Enter
-    /// and Space activate.
+    /// and Space activate — a secondary warning button sized to its label (LOW #228:
+    /// a stretched `Outlined` box read like a text input).
     fn render_tls_offer(&self, cx: &Context<Self>) -> AnyElement {
-        div()
+        h_flex()
             .debug_selector(|| TLS_OFFER_SELECTOR.to_string())
+            .self_start()
             .child(
                 Button::new(
                     "disable-tls-verification",
                     SharedString::new_static("Disable verification for this request"),
                 )
                 .size(ButtonSize::Medium)
-                .style(ButtonStyle::Outlined)
+                .style(ButtonStyle::Tinted(TintColor::Warning))
                 .tooltip(Tooltip::text(SharedString::new_static(
                     "Turn TLS verification off for this request only, then send it again",
                 )))
@@ -613,3 +615,7 @@ mod row_height_tests;
 #[cfg(test)]
 #[path = "send_warned_failure_tests.rs"]
 mod warned_failure_tests;
+
+#[cfg(test)]
+#[path = "send_offer_tests.rs"]
+mod offer_tests;

@@ -125,19 +125,34 @@ fn unresolved_secret_message(names: &[String]) -> String {
     }
 }
 
+/// The reason sentence-cased: the transport's raw wording arrives lowercase from the
+/// TLS stack ("invalid peer certificate: …"), and the message the user reads must start
+/// like a sentence (LOW #228). Only the first letter changes — the reason is the
+/// transport's own text and the copy tests pin it verbatim otherwise.
+fn sentence_case(text: &str) -> String {
+    let mut characters = text.chars();
+    match characters.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + characters.as_str(),
+        None => String::new(),
+    }
+}
+
 impl TransportError {
     /// The message shown to the user (PRD §8.6). This is the only text that carries
     /// resolved values: show it in the UI, never log it.
     pub fn user_message(&self) -> String {
         // The four sensitive variants print their full sentence here and only here;
         // every other kind's sentence lives in its `#[error(...)]` attribute and comes
-        // back through `to_string()` (Display is log-safe, see the enum docs).
+        // back through `to_string()` (Display is log-safe, see the enum docs). `Tls`
+        // goes through `sentence_case` instead of the fallthrough: its reason is the
+        // transport's raw lowercase wording (LOW #228).
         match self {
             TransportError::InvalidUrl { url } => {
                 format!("Invalid URL after variable resolution: `{url}`")
             }
             TransportError::Dns { host } => format!("Could not resolve `{host}`."),
             TransportError::Connect { address } => format!("Connection refused at {address}."),
+            TransportError::Tls { reason } => sentence_case(reason),
             TransportError::FileNotFound { path } => format!("Body file not found: {path}"),
             other => other.to_string(),
         }
@@ -181,3 +196,7 @@ mod tests;
 #[cfg(test)]
 #[path = "error_copy_tests.rs"]
 mod copy_tests;
+
+#[cfg(test)]
+#[path = "error_sentence_case_tests.rs"]
+mod sentence_case_tests;
