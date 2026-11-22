@@ -196,7 +196,9 @@ pub fn watch(client: &Entity<HttpClient>, cx: &mut App) -> Subscription {
 }
 
 /// One entry that carries a message instead of wire text: its `raw_response` holds the
-/// message — what came back from the send — and its `raw_request` stays empty.
+/// message — what came back from the send — and its `raw_request` stays empty. The
+/// message is a notice, not a response: [`ConsoleEntry::notice`] is where consumers read
+/// it, so the panel draws it under its own `Notice` section (#115).
 fn push_notice(
     cx: &mut App,
     level: ConsoleLevel,
