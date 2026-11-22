@@ -11,15 +11,27 @@
 //! its raw text renders in the row's Name cell and the Value cell reads "unparseable", so
 //! the user still sees exactly what came over the wire.
 //!
-//! `Decision:` the nine columns share the row width evenly, like `headers_view`'s two.
-//! Each cell truncates with its full text in a tooltip, so nothing is lost to the layout.
+//! `Decision:` the columns are sized to what they hold, not shared evenly (#230): the
+//! text columns take a weighted share of the row — the value the user reads most gets the
+//! most room — and the short ones (Max-Age, the flags, SameSite) are pinned, so nothing
+//! is cramped. Each text cell truncates with its full text in a tooltip, so nothing is
+//! lost to the layout.
+//!
+//! `Decision:` a boolean attribute shows as a flag pill (icon and word together,
+//! REQ-NFR-06) and an attribute the `Set-Cookie` header did not set leaves its cell
+//! blank — a table read by scanning, not one filled with placeholder marks (S05/R05,
+//! `docs/postman_redesign_pack/01_specs/design_system.md`). What a copy takes is
+//! unchanged: the words the header said, marks included.
 //!
 //! Cookie values are secrets (PRD §7): nothing here logs or debug-prints them, and
 //! [`ParsedCookie`]'s [`Debug`](fmt::Debug) redacts the value — and, for unparseable rows,
-//! the raw header text their name holds.
+//! the raw header text their name holds. That text also stays out of the row's element
+//! id, which is derived from it instead (#154).
 
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use cookie_store::RawCookie;
@@ -31,12 +43,18 @@ use ui::prelude::*;
 use gpui::WeakEntity;
 
 use crate::child_id;
-use crate::text_selection::{
-    CellSelector, SelectableCells, TEXT_CONTEXT, selectable_cell, selection_handlers,
-};
+use crate::table_cells::{ColumnWidth, cell, column_heading};
+use crate::text_selection::{CellSelector, SelectableCells, TEXT_CONTEXT, selection_handlers};
 
-/// Shown where a cookie attribute is absent.
+/// The row's mark for a cookie attribute the `Set-Cookie` header did not set. The table
+/// leaves such a cell blank (#230); the mark stays in the row's cells, so what a copy
+/// takes still says what the header did.
 const ABSENT: &str = "—";
+
+/// A boolean attribute's text in the row's cells — and so in what a copy takes — and on
+/// its flag pill: set, or explicitly unset.
+const FLAG_SET: &str = "Yes";
+const FLAG_UNSET: &str = "No";
 
 /// Shown instead of the attributes when a `Set-Cookie` header does not parse.
 const UNPARSEABLE: &str = "unparseable";
@@ -46,19 +64,91 @@ const UNPARSEABLE: &str = "unparseable";
 /// output — only the UI cell.
 const UNPARSEABLE_REDACTED: &str = "<unparseable-redacted>";
 
-/// The columns the table shows, in order: the cell's id (element identity) and its
-/// heading. [`ParsedCookie::cells`] fills them in the same order.
-const COLUMNS: [(&str, &str); 9] = [
-    ("name", "Name"),
-    ("value", "Value"),
-    ("domain", "Domain"),
-    ("path", "Path"),
-    ("expires", "Expires"),
-    ("max-age", "Max-Age"),
-    ("secure", "Secure"),
-    ("http-only", "HttpOnly"),
-    ("same-site", "SameSite"),
+/// The columns the table shows, in order. [`ParsedCookie::cells`] fills them in the same
+/// order.
+const COLUMNS: [Column; 9] = [
+    Column {
+        id: "name",
+        heading: "Name",
+        kind: ColumnKind::Text,
+        width: ColumnWidth::Share(2.),
+    },
+    Column {
+        id: "value",
+        heading: "Value",
+        kind: ColumnKind::Text,
+        width: ColumnWidth::Share(3.),
+    },
+    Column {
+        id: "domain",
+        heading: "Domain",
+        kind: ColumnKind::Text,
+        width: ColumnWidth::Share(2.),
+    },
+    Column {
+        id: "path",
+        heading: "Path",
+        kind: ColumnKind::Text,
+        width: ColumnWidth::Share(2.),
+    },
+    Column {
+        id: "expires",
+        heading: "Expires",
+        kind: ColumnKind::Text,
+        width: ColumnWidth::Share(2.5),
+    },
+    Column {
+        id: "max-age",
+        heading: "Max-Age",
+        kind: ColumnKind::Text,
+        width: ColumnWidth::Fixed(Rems(NUMBER_COLUMN_REMS)),
+    },
+    Column {
+        id: "secure",
+        heading: "Secure",
+        kind: ColumnKind::Flag,
+        width: ColumnWidth::Fixed(Rems(FLAG_COLUMN_REMS)),
+    },
+    Column {
+        id: "http-only",
+        heading: "HttpOnly",
+        kind: ColumnKind::Flag,
+        width: ColumnWidth::Fixed(Rems(FLAG_COLUMN_REMS)),
+    },
+    Column {
+        id: "same-site",
+        heading: "SameSite",
+        kind: ColumnKind::Text,
+        width: ColumnWidth::Fixed(Rems(ENUM_COLUMN_REMS)),
+    },
 ];
+
+/// The short columns' widths in rems, so they scale with the UI font size (16 px per rem
+/// at the default scale, `ui::units::px_to_rems`): a number and its heading, a flag pill
+/// and the "HttpOnly" heading, a SameSite enum and its heading.
+const NUMBER_COLUMN_REMS: f32 = 4.5;
+const FLAG_COLUMN_REMS: f32 = 5.5;
+const ENUM_COLUMN_REMS: f32 = 6.;
+
+/// One column of the cookies table: the id its cells paint under, its heading, how it
+/// shows its value, and how wide it is.
+#[derive(Clone, Copy)]
+struct Column {
+    /// The cell's id (element identity) under its row.
+    id: &'static str,
+    heading: &'static str,
+    kind: ColumnKind,
+    width: ColumnWidth,
+}
+
+/// How a column shows its value.
+#[derive(Clone, Copy)]
+enum ColumnKind {
+    /// Text, truncated with the full value in its tooltip.
+    Text,
+    /// A boolean attribute: a flag pill where the header set it, blank where it did not.
+    Flag,
+}
 
 /// One `Set-Cookie` header as the tab shows it: the attributes precomputed into display
 /// strings when the response arrived, so `render` only lays them out.
@@ -134,9 +224,21 @@ impl ParsedCookie {
         }
     }
 
-    /// This row's stable name: the cookie name plus which occurrence of it it is.
+    /// This row's stable name: the cookie name plus which occurrence of it it is. An
+    /// unparseable row's name is the raw header text — the cookie value included
+    /// (PRD §7) — so its name here is a digest of that text instead: element ids surface
+    /// in debug builds and the opt-in `.debug()` overlay, and must never carry the bytes
+    /// that came over the wire (#154).
     fn key_name(&self) -> SharedString {
-        SharedString::from(format!("{}#{}", self.name, self.occurrence))
+        if self.unparseable {
+            SharedString::from(format!(
+                "unparseable-{}#{}",
+                header_digest(&self.name),
+                self.occurrence
+            ))
+        } else {
+            SharedString::from(format!("{}#{}", self.name, self.occurrence))
+        }
     }
 
     /// The name as [`Debug`](fmt::Debug) shows it: an unparseable row's name is the raw
@@ -191,6 +293,16 @@ impl fmt::Debug for ParsedCookie {
             .field("occurrence", &self.occurrence)
             .finish()
     }
+}
+
+/// A short digest of a raw `Set-Cookie` text, for the element id of a row whose name
+/// must not surface (PRD §7). The same header keeps the same digest — a row's identity
+/// survives scrolling and re-renders — while two different headers get two different
+/// ones, and neither is readable back to the text.
+fn header_digest(text: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    text.hash(&mut hasher);
+    format!("{:x}", hasher.finish())
 }
 
 /// Every `Set-Cookie` header in `headers` (name matched case-insensitively), parsed into
@@ -317,7 +429,7 @@ impl Render for CookiesTab {
             .child(
                 h_flex()
                     .w_full()
-                    .gap(DynamicSpacing::Base04.rems(cx))
+                    .gap(DynamicSpacing::Base06.rems(cx))
                     .px(DynamicSpacing::Base04.rems(cx))
                     .py(DynamicSpacing::Base02.rems(cx))
                     .border_b_1()
@@ -325,7 +437,7 @@ impl Render for CookiesTab {
                     .children(
                         COLUMNS
                             .iter()
-                            .map(|(_column, heading)| column_heading(heading)),
+                            .map(|column| column_heading(column.heading, column.width)),
                     ),
             )
             .map(|this| {
@@ -351,15 +463,6 @@ impl Render for CookiesTab {
     }
 }
 
-/// One column heading above the rows (`headers_view`'s, same shape).
-fn column_heading(heading: &str) -> impl IntoElement {
-    div().flex_1().min_w_0().child(
-        Label::new(heading)
-            .size(LabelSize::XSmall)
-            .color(Color::Muted),
-    )
-}
-
 /// One cookie row: the nine attribute cells, each truncating with its full value in a
 /// tooltip.
 fn render_row(
@@ -378,29 +481,89 @@ fn render_row(
     h_flex()
         .id(row_id.clone())
         .w_full()
-        .gap(DynamicSpacing::Base04.rems(cx))
+        .gap(DynamicSpacing::Base06.rems(cx))
         .px(DynamicSpacing::Base04.rems(cx))
-        .py(DynamicSpacing::Base02.rems(cx))
+        .py(DynamicSpacing::Base04.rems(cx))
         .border_b_1()
         .border_color(cx.theme().colors().border_variant)
-        .children(COLUMNS.iter().zip(cells).enumerate().map(
-            |(column_index, ((column, _heading), text))| {
-                let cell_index = index * COLUMNS.len() + column_index;
-                selectable_cell(
-                    child_id(&row_id, *column),
-                    cell_index,
-                    text,
-                    selection.range_on(cell_index),
-                    view.clone(),
-                    cx,
-                )
-                .flex_1()
-                .font_buffer(cx)
-                .text_ui_sm(cx)
-                .text_color(cx.theme().colors().text)
-            },
-        ))
+        .children(
+            COLUMNS
+                .iter()
+                .zip(cells)
+                .enumerate()
+                .map(|(column_index, (column, text))| {
+                    let cell_index = index * COLUMNS.len() + column_index;
+                    column.show(
+                        child_id(&row_id, column.id),
+                        cell_index,
+                        text,
+                        selection,
+                        view,
+                        cx,
+                    )
+                }),
+        )
         .into_any_element()
+}
+
+impl Column {
+    /// This column's cell of one row: the text a user reads, or a flag pill, or — where
+    /// the `Set-Cookie` header did not set the attribute — the column's width and
+    /// nothing in it, so a blank never reads as a value and the columns keep lining up
+    /// from row to row.
+    fn show<V: SelectableCells>(
+        &self,
+        id: ElementId,
+        index: usize,
+        text: SharedString,
+        selection: &CellSelector,
+        view: &WeakEntity<V>,
+        cx: &App,
+    ) -> AnyElement {
+        match self.kind {
+            ColumnKind::Text if text.as_ref() != ABSENT => {
+                cell(id, index, text, self.width, selection, view, cx).into_any_element()
+            }
+            ColumnKind::Flag => flag_cell(id, self.width, &text),
+            ColumnKind::Text => blank_cell(self.width),
+        }
+    }
+}
+
+/// A boolean attribute as a flag pill: the icon and the word carry the meaning together,
+/// never the icon or its colour alone (REQ-NFR-06). An attribute the header did not set
+/// draws nothing.
+fn flag_cell(id: ElementId, width: ColumnWidth, value: &str) -> AnyElement {
+    let pill = match value {
+        FLAG_SET => Some(
+            Badge::new(FLAG_SET)
+                .icon(IconName::Check)
+                .color(Color::Success),
+        ),
+        FLAG_UNSET => Some(
+            Badge::new(FLAG_UNSET)
+                .icon(IconName::Minus)
+                .color(Color::Muted),
+        ),
+        // The header did not set the attribute: no pill, only the blank below.
+        _ => None,
+    };
+    let Some(pill) = pill else {
+        return blank_cell(width);
+    };
+    width
+        .sized(h_flex().items_center())
+        .id(id.clone())
+        .debug_selector(move || id.to_string())
+        .child(pill)
+        .into_any_element()
+}
+
+/// An absent attribute: the column's width and nothing in it — blank, so an unfilled
+/// attribute reads as "the header did not set this" rather than as a value (#230). The
+/// row's cells still hold [`ABSENT`], so what a copy takes says what the header did.
+fn blank_cell(width: ColumnWidth) -> AnyElement {
+    width.sized(div()).into_any_element()
 }
 
 /// The state where there is nothing to list: a response that set no cookies.
@@ -424,8 +587,8 @@ fn optional(value: Option<&str>) -> SharedString {
 /// A boolean attribute (`Secure`, `HttpOnly`): set, explicitly unset, or absent.
 fn flag(value: Option<bool>) -> SharedString {
     match value {
-        Some(true) => "Yes".into(),
-        Some(false) => "No".into(),
+        Some(true) => FLAG_SET.into(),
+        Some(false) => FLAG_UNSET.into(),
         None => ABSENT.into(),
     }
 }
@@ -437,3 +600,11 @@ mod tests;
 #[cfg(test)]
 #[path = "cookies_selection_tests.rs"]
 mod selection_tests;
+
+#[cfg(test)]
+#[path = "cookies_columns_tests.rs"]
+mod columns_tests;
+
+#[cfg(test)]
+#[path = "cookies_row_id_tests.rs"]
+mod row_id_tests;

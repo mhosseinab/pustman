@@ -26,6 +26,7 @@ mod preview;
 mod request_as_sent;
 mod save_body;
 mod status_line;
+mod table_cells;
 mod text_selection;
 mod timeline;
 
@@ -366,3 +367,7 @@ mod large_body_megabyte_tests;
 #[cfg(test)]
 #[path = "selector_exports_tests.rs"]
 mod selector_exports_tests;
+
+#[cfg(test)]
+#[path = "table_cells_tests.rs"]
+mod table_cells_tests;
