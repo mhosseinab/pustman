@@ -356,3 +356,7 @@ mod set_error_tests;
 #[cfg(test)]
 #[path = "body_size_feedback_tests.rs"]
 mod body_size_feedback_tests;
+
+#[cfg(test)]
+#[path = "large_body_megabyte_tests.rs"]
+mod large_body_megabyte_tests;
