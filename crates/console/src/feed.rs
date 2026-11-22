@@ -351,3 +351,7 @@ mod tests;
 #[cfg(test)]
 #[path = "feed_order_tests.rs"]
 mod feed_order_tests;
+
+#[cfg(test)]
+#[path = "feed_raw_view_tests.rs"]
+mod raw_view_tests;
