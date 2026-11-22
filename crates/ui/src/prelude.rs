@@ -25,7 +25,7 @@ pub use crate::components::behavior::{
 pub use crate::components::button::{
     Button, ButtonSize, ButtonStyle, ClickHandler, IconButton, IconButtonShape, TintColor,
 };
-pub use crate::components::context_menu::ContextMenu;
+pub use crate::components::context_menu::{ContextMenu, floating_menu};
 pub use crate::components::divider::{Divider, DividerColor};
 pub use crate::components::empty_state::EmptyState;
 pub use crate::components::key_binding::KeyBinding;

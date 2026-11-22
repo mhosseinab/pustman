@@ -31,7 +31,7 @@
 //! stored absolute.
 //!
 //! `Decision:` the mode and language pickers compose the `ui` [`Button`] and
-//! [`ContextMenu`] in a [`gpui::deferred`] floating layer — the same shape as the
+//! [`ContextMenu`] in the shared [`floating_menu`] layer — the same shape as the
 //! method dropdown (`url_bar`) and the formatter override (`response_viewer`), because
 //! `crates/ui` has no popover-menu primitive. A file-dialog failure lands inline under
 //! the body controls (AGENTS.md — errors reach the user), never only in a log.
@@ -49,9 +49,8 @@ use std::sync::Arc;
 
 use api_model::{Body, FormField, HttpRequest, RawLanguage};
 use gpui::{
-    Anchor, AnyElement, App, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable,
-    IntoElement, ParentElement, Render, SharedString, Subscription, Task, Window, anchored,
-    deferred,
+    AnyElement, App, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
+    ParentElement, Render, SharedString, Subscription, Task, Window,
 };
 use response_viewer::pretty::Formatter;
 use text_input::{TextArea, TextInput, TextInputEvent};
@@ -864,7 +863,11 @@ impl BodyTab {
                 .focus_handle(self.mode_focus_handle.clone())
                 .on_click(cx.listener(|this, _event, window, cx| this.open_mode_menu(window, cx))),
             )
-            .children(floating_menu(&self.mode_menu, cx))
+            .children(floating_menu(
+                &self.mode_menu,
+                px_to_rems(CONTROL_HEIGHT_PX),
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -886,7 +889,11 @@ impl BodyTab {
                     cx.listener(|this, _event, window, cx| this.open_language_menu(window, cx)),
                 ),
             )
-            .children(floating_menu(&self.language_menu, cx))
+            .children(floating_menu(
+                &self.language_menu,
+                px_to_rems(CONTROL_HEIGHT_PX),
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -1312,28 +1319,6 @@ fn file_label(id: impl Into<ElementId>, path: &str) -> impl IntoElement {
                 .truncate(),
         )
         .tooltip(Tooltip::text(shown).builder())
-}
-
-/// A picker menu floating under its trigger — the shared shape of the mode and
-/// language pickers: anchored so it is never clipped by the editor below it, snapped
-/// to the window edge so it never leaves the window (`url_bar`).
-fn floating_menu(menu: &Option<Entity<ContextMenu>>, cx: &App) -> Option<AnyElement> {
-    menu.clone().map(|menu| {
-        div()
-            .absolute()
-            .top(px_to_rems(CONTROL_HEIGHT_PX))
-            .left_0()
-            .child(
-                deferred(
-                    anchored()
-                        .anchor(Anchor::TopLeft)
-                        .snap_to_window_with_margin(DynamicSpacing::Base04.px(cx))
-                        .child(menu),
-                )
-                .with_priority(1),
-            )
-            .into_any_element()
-    })
 }
 
 #[cfg(test)]

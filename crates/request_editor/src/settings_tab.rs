@@ -30,9 +30,8 @@
 
 use api_model::{HttpRequest, HttpVersion, RequestSettings};
 use gpui::{
-    Anchor, AnyElement, App, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable,
-    IntoElement, ParentElement, Render, SharedString, Subscription, WeakEntity, Window, anchored,
-    deferred,
+    AnyElement, App, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
+    ParentElement, Render, SharedString, Subscription, WeakEntity, Window,
 };
 use http_engine::SendSettings;
 use text_input::{TextInput, TextInputEvent};
@@ -659,7 +658,11 @@ impl SettingsTab {
                     cx.listener(|this, _event, window, cx| this.open_version_menu(window, cx)),
                 ),
             )
-            .children(floating_menu(&self.version_menu, cx))
+            .children(floating_menu(
+                &self.version_menu,
+                px_to_rems(CONTROL_HEIGHT_PX),
+                cx,
+            ))
             .into_any_element()
     }
 }
@@ -911,28 +914,6 @@ fn make_input(window: &mut Window, cx: &mut Context<SettingsTab>) -> Entity<Text
 /// compared into a no-op by [`SettingsTab::on_numeric_changed`].
 fn fill(input: &Entity<TextInput>, text: &str, cx: &mut Context<SettingsTab>) {
     input.update(cx, |input, cx| input.set_text(text, cx));
-}
-
-/// A picker menu floating under its trigger — the `auth_tab` shape (see that module's
-/// note on hoisting this helper into `ui`): anchored so it is never clipped by the
-/// rows below it, snapped to the window edge so it never leaves the window.
-fn floating_menu(menu: &Option<Entity<ContextMenu>>, cx: &App) -> Option<AnyElement> {
-    menu.clone().map(|menu| {
-        div()
-            .absolute()
-            .top(px_to_rems(CONTROL_HEIGHT_PX))
-            .left_0()
-            .child(
-                deferred(
-                    anchored()
-                        .anchor(Anchor::TopLeft)
-                        .snap_to_window_with_margin(DynamicSpacing::Base04.px(cx))
-                        .child(menu),
-                )
-                .with_priority(1),
-            )
-            .into_any_element()
-    })
 }
 
 #[cfg(test)]

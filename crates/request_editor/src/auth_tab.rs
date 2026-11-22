@@ -39,18 +39,17 @@
 //! placeholder scanner.
 //!
 //! `Decision:` the type and location pickers compose the `ui` [`Button`] and
-//! [`ContextMenu`] in a [`gpui::deferred`] floating layer — the `body_tab` shape,
-//! whose `floating_menu` helper this module cannot call (it is private to `body_tab`
-//! and this step's Edits do not reach that file). Follow-up: hoist that helper into
-//! `ui` and delete this copy.
+//! [`ContextMenu`] in the shared [`floating_menu`] layer — the `body_tab` shape, whose
+//! one-time copy of that helper this module used to carry is now hoisted into `ui` so
+//! no picker keeps a copy of its own (#177).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use api_model::{ApiKeyLocation, Auth, AuthSource, HttpRequest, effective_auth};
 use gpui::{
-    Anchor, AnyElement, App, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable,
-    IntoElement, ParentElement, Render, SharedString, Subscription, Window, anchored, deferred,
+    AnyElement, App, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
+    ParentElement, Render, SharedString, Subscription, Window,
 };
 use text_input::{TextInput, TextInputEvent};
 use ui::components::context_menu::ContextMenuEvent;
@@ -599,7 +598,11 @@ impl AuthTab {
                 .focus_handle(self.type_focus_handle.clone())
                 .on_click(cx.listener(|this, _event, window, cx| this.open_type_menu(window, cx))),
             )
-            .children(floating_menu(&self.type_menu, cx))
+            .children(floating_menu(
+                &self.type_menu,
+                px_to_rems(CONTROL_HEIGHT_PX),
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -625,7 +628,11 @@ impl AuthTab {
                     cx.listener(|this, _event, window, cx| this.open_location_menu(window, cx)),
                 ),
             )
-            .children(floating_menu(&self.location_menu, cx))
+            .children(floating_menu(
+                &self.location_menu,
+                px_to_rems(CONTROL_HEIGHT_PX),
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -899,28 +906,6 @@ fn has_literal_secret(text: &str) -> bool {
 fn literal_between(text: &str, start: usize, end: usize) -> bool {
     text.get(start..end)
         .is_some_and(|gap| gap.chars().any(|character| !character.is_whitespace()))
-}
-
-/// A picker menu floating under its trigger — the `body_tab` shape (see the module
-/// note on why this copy lives here): anchored so it is never clipped by the editor
-/// below it, snapped to the window edge so it never leaves the window.
-fn floating_menu(menu: &Option<Entity<ContextMenu>>, cx: &App) -> Option<AnyElement> {
-    menu.clone().map(|menu| {
-        div()
-            .absolute()
-            .top(px_to_rems(CONTROL_HEIGHT_PX))
-            .left_0()
-            .child(
-                deferred(
-                    anchored()
-                        .anchor(Anchor::TopLeft)
-                        .snap_to_window_with_margin(DynamicSpacing::Base04.px(cx))
-                        .child(menu),
-                )
-                .with_priority(1),
-            )
-            .into_any_element()
-    })
 }
 
 #[cfg(test)]

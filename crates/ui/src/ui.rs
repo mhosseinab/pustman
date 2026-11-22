@@ -38,7 +38,7 @@ pub use components::behavior::{Clickable, Disableable, FixedWidth, Toggleable, V
 pub use components::button::{
     Button, ButtonSize, ButtonStyle, ClickHandler, IconButton, IconButtonShape, TintColor,
 };
-pub use components::context_menu::ContextMenu;
+pub use components::context_menu::{ContextMenu, floating_menu};
 pub use components::divider::{Divider, DividerColor};
 pub use components::key_binding::{KeyBinding, keystroke_label};
 pub use components::label::{Headline, Label, LabelSize};
