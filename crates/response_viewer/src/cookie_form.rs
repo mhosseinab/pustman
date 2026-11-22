@@ -42,6 +42,10 @@ use crate::child_id;
 #[path = "cookie_form_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "cookie_form_keys_tests.rs"]
+mod keys_tests;
+
 /// The width of a field's visible label column, so the fields line up.
 const FIELD_LABEL_WIDTH_PX: f32 = 96.;
 
