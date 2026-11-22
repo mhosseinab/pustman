@@ -4,8 +4,9 @@
 //! save has to be polled: [`Autosave`] holds one repeating GPUI timer task whose tick
 //! writes the window's dirty tabs through the restore path ([`Restore::save_now`], which
 //! reuses `Restore`'s own `snapshot`/`write_snapshot` — there is no second serializer).
-//! A tick that finds nothing dirty writes nothing: the store is not rewritten every 2 s
-//! for nothing.
+//! A tick that finds nothing dirty writes nothing, and neither does one whose draft is
+//! unchanged since the last save — the restore path compares against its last written
+//! snapshot (issue #97): the store is not rewritten every 2 s for nothing.
 //!
 //! The task lives on [`Autosave`], whose handle the window's wiring owns next to its
 //! [`Restore`] handle (the same contract [`Restore::attach`] gives its caller): dropping
@@ -20,6 +21,10 @@ use crate::restore::{Restore, SAVE_DEBOUNCE};
 #[cfg(test)]
 #[path = "autosave_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "autosave_unchanged_tests.rs"]
+mod unchanged_tests;
 
 /// The repeating timer that keeps dirty tab drafts saved (REQ-NFR-05) — one per window;
 /// see the module docs for why a timer at all and where the task lives.
@@ -59,9 +64,9 @@ impl Autosave {
     }
 }
 
-/// One tick: write the window's dirty persistent tabs through the restore path, and say
-/// whether to keep ticking. Session-only tabs are never stored, so their dirtiness is
-/// not ours to save.
+/// One tick: write the window's dirty persistent tabs through the restore path — which
+/// skips the write when nothing changed since the last one — and say whether to keep
+/// ticking. Session-only tabs are never stored, so their dirtiness is not ours to save.
 fn tick(
     restore: &WeakEntity<Restore>,
     workspace: &WeakEntity<Workspace>,
