@@ -521,9 +521,19 @@ impl Headers {
                         "Up/Down choose - Enter accepts - Escape dismisses",
                     ))
                     .size(LabelSize::XSmall)
-                    .color(Color::Muted),
+                    .color(Self::suggestion_hint_color()),
                 ),
         )
+    }
+
+    /// The colour the keystroke hint under the suggestion list draws in: one step back
+    /// from the suggestions themselves (S03/R03 — it is secondary metadata, and
+    /// `references/design_system.md` maps that to the muted text token). `Decision:`
+    /// asserted through this accessor — the value `render` hands the label — because
+    /// GPUI's test support exposes layout and painted quads but not text colours, the
+    /// reason `crate::url_bar_method_color_tests` records for the same shape (#152).
+    pub fn suggestion_hint_color() -> Color {
+        Color::Muted
     }
 
     /// One auto header: its send switch (REQ-HTTP-03 — each auto header can be
@@ -754,3 +764,7 @@ mod tests;
 #[cfg(test)]
 #[path = "headers_value_tests.rs"]
 mod value_tests;
+
+#[cfg(test)]
+#[path = "headers_suggestion_tests.rs"]
+mod suggestion_tests;
