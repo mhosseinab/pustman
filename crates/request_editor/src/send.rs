@@ -34,7 +34,6 @@
 //! `FakeTransport`. `request_editor::init` cannot install one either: the transport is
 //! an app-level wiring decision.
 
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 use api_model::HttpRequest;
@@ -46,7 +45,7 @@ use http_engine::{
 };
 use pustman_actions::request;
 use ui::prelude::*;
-use variables::{DynamicValues, ScopeStack};
+use variables::DynamicValues;
 
 use crate::RequestEditor;
 use crate::settings_tab::SettingChange;
@@ -261,7 +260,10 @@ impl RequestEditor {
                 .iter()
                 .map(|(_, auth)| auth.clone())
                 .collect(),
-            scopes: scopes_for_send(&self.scopes),
+            // The send runs on the background executor and takes the stack by value
+            // (`SendInput`), while the editor keeps sharing its own (an `Arc`) with
+            // every field, so the send works on a `Clone` of it (#197).
+            scopes: self.scopes.as_ref().clone(),
             secrets: self.secret_sources.store.clone(),
             secret_key: self.secret_sources.key_of.clone(),
         };
@@ -594,28 +596,6 @@ impl RequestEditor {
             .child(button)
             .into_any_element()
     }
-}
-
-/// The editor's scopes as the owned [`ScopeStack`] one [`SendInput`] takes: the send
-/// runs on the background executor and takes the stack by value, while the editor keeps
-/// sharing its own (an `Arc`) with every field. The rebuild is the shape
-/// `http_engine::prepare` itself uses (`scopes_with_secrets`): copy the scopes and, with
-/// them, the local values — which resolution reads only by variable key
-/// (`ScopeStack::find`), so nothing a send can observe is lost (S33e).
-fn scopes_for_send(scopes: &ScopeStack) -> ScopeStack {
-    let mut local_values = BTreeMap::new();
-    for scope in scopes.scopes() {
-        for variable in &scope.variables {
-            if let Some(value) = scopes.local_value(&variable.key) {
-                local_values.insert(variable.key.clone(), value.to_string());
-            }
-        }
-    }
-    let mut owned = ScopeStack::with_local_values(local_values);
-    for scope in scopes.scopes() {
-        owned.push(scope.kind, scope.variables.clone());
-    }
-    owned
 }
 
 #[cfg(test)]

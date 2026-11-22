@@ -243,21 +243,11 @@ fn bound_in<'a>(scopes: &'a ScopeStack, name: &str) -> Option<(ScopeKind, Bindin
 
 /// A [`ScopeStack`] that resolves against `scopes`' variables and reads values from the
 /// caller's local values plus `secrets_fetched` (REQ-VAR-SHARE-01: a local value wins).
+/// The clone is `ScopeStack`'s own, one copy shared with every other caller (#197).
 fn scopes_with_secrets(scopes: &ScopeStack, secrets_fetched: &[(String, String)]) -> ScopeStack {
-    let mut values: BTreeMap<String, String> = BTreeMap::new();
-    for scope in scopes.scopes() {
-        for variable in &scope.variables {
-            if let Some(local) = scopes.local_value(&variable.key) {
-                values.insert(variable.key.clone(), local.to_string());
-            }
-        }
-    }
+    let mut stack = scopes.clone();
     for (name, value) in secrets_fetched {
-        values.insert(name.clone(), value.clone());
-    }
-    let mut stack = ScopeStack::with_local_values(values);
-    for scope in scopes.scopes() {
-        stack.push(scope.kind, scope.variables.clone());
+        stack.set_local_value(name, value);
     }
     stack
 }
