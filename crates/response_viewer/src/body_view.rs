@@ -1010,6 +1010,9 @@ impl BodyView {
                         matches: &row_matches,
                         selected,
                         view: Some(row_view.clone()),
+                        // The code view numbers its lines (REQ-RESP-02, #225): one
+                        // gutter column for the whole body, as wide as its widest number.
+                        number: Some(gutter_number(index, row_lines.len())),
                     },
                     cx,
                 )
@@ -1175,7 +1178,8 @@ pub(crate) fn render_line(
     render_line_with_matches(lines, index, base, LineDecorations::default(), cx)
 }
 
-/// What a body line draws over its plain text, and the pane its presses select in.
+/// What a body line draws around and over its plain text, and the pane its presses
+/// select in.
 #[derive(Default)]
 struct LineDecorations<'a> {
     spans: &'a [(Range<usize>, JsonToken)],
@@ -1184,6 +1188,9 @@ struct LineDecorations<'a> {
     selected: Option<Range<usize>>,
     /// The pane that owns the selection; [`None`] where lines are not selectable.
     view: Option<WeakEntity<BodyView>>,
+    /// The line's number in the gutter left of the code ([`gutter_number`]); [`None`]
+    /// where lines draw without a gutter — the Preview text ([`crate::preview`]).
+    number: Option<SharedString>,
 }
 
 /// One body line, coloured by its syntax spans, with the find matches on it painted as
@@ -1202,6 +1209,7 @@ fn render_line_with_matches(
         matches,
         selected,
         view,
+        number,
     } = decorations;
     let Some(line) = lines.get(index).cloned() else {
         return div().into_any_element();
@@ -1246,6 +1254,8 @@ fn render_line_with_matches(
         .unwrap_or_default();
     let highlights = layer_highlights(&layer_highlights(&syntax, &selection), &found);
     let line_id = child_id(base, format!("line-{index}"));
+    let number_selector = child_id(&line_id, "number").to_string();
+    let code_selector = child_id(&line_id, "code").to_string();
     let text = StyledText::new(line.clone()).with_highlights(highlights);
     // The layout the text fills once the list lays it out — read at hover time to see
     // what was actually drawn.
@@ -1323,21 +1333,47 @@ fn render_line_with_matches(
         .font_buffer(cx)
         .text_buffer(cx)
         .text_color(cx.theme().colors().text)
-        .child(div().w_full().min_w_0().truncate().child(
-            InteractiveText::new(child_id(&line_id, "hover"), text).tooltip(
-                move |_index, _window, cx| {
-                    // A truncation tooltip only (#268): when the drawn text is the
-                    // line we hold, the hover has nothing to add — a balloon of the
-                    // same plain text would only cover the token-coloured line it
-                    // repeats (`seg2.png`).
-                    if laid_out.text() == full_line {
-                        None
-                    } else {
-                        Some(Tooltip::text(full_line.clone()).into_any_view(cx))
-                    }
-                },
-            ),
-        ))
+        .child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .gap(DynamicSpacing::Base02.rems(cx))
+                .children(number.map(|number| {
+                    // The gutter is content-sized and deliberately narrow: the padded
+                    // numbers all take one width in the monospace buffer font, so the
+                    // code column is straight with no magic width — and the code keeps
+                    // starting close to the row's left edge, where the read-only hover
+                    // tests over these rows (body_tooltip_tests, body_multi_click_tests)
+                    // rest their pointer.
+                    div()
+                        .flex_none()
+                        .text_color(Color::Muted.color(cx))
+                        .debug_selector(move || number_selector.clone())
+                        .child(StyledText::new(number))
+                }))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .debug_selector(move || code_selector.clone())
+                        .child(
+                            InteractiveText::new(child_id(&line_id, "hover"), text).tooltip(
+                                move |_index, _window, cx| {
+                                    // A truncation tooltip only (#268): when the drawn text is the
+                                    // line we hold, the hover has nothing to add — a balloon of the
+                                    // same plain text would only cover the token-coloured line it
+                                    // repeats (`seg2.png`).
+                                    if laid_out.text() == full_line {
+                                        None
+                                    } else {
+                                        Some(Tooltip::text(full_line.clone()).into_any_view(cx))
+                                    }
+                                },
+                            ),
+                        ),
+                ),
+        )
         .into_any_element()
 }
 
@@ -1352,6 +1388,14 @@ pub(crate) fn note(text: impl Into<SharedString>, cx: &App) -> impl IntoElement 
         .px(DynamicSpacing::Base04.rems(cx))
         .py(DynamicSpacing::Base02.rems(cx))
         .child(Label::new(text.into()).color(Color::Muted))
+}
+
+/// The number a line draws in the gutter left of the code (#225): 1-based, padded with
+/// spaces to the width of the body's widest number. The buffer font is monospace, so the
+/// padding is what keeps one shared column straight for every row.
+fn gutter_number(index: usize, line_count: usize) -> SharedString {
+    let digits = line_count.max(1).to_string().len();
+    format!("{:>width$}", index + 1, width = digits).into()
 }
 
 /// The note a failed format leaves behind: what was expected, and that Raw is showing.
@@ -1442,6 +1486,10 @@ impl EventEmitter<BodyEvent> for BodyView {}
 #[cfg(test)]
 #[path = "body_tooltip_tests.rs"]
 mod tooltip_tests;
+
+#[cfg(test)]
+#[path = "body_gutter_tests.rs"]
+mod gutter_tests;
 
 #[cfg(test)]
 #[path = "find_format_tests.rs"]
