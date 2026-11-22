@@ -507,7 +507,7 @@ impl Headers {
         });
         Some(
             v_flex()
-                .id(ElementId::Name(SharedString::from(String::from(list_id))))
+                .id(ElementId::Name(SharedString::new_static(list_id)))
                 .debug_selector(|| String::from(list_id))
                 .role(Role::List)
                 .aria_label(list_label)
