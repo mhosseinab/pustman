@@ -88,6 +88,11 @@ pub struct ConsolePanel {
     level_bar: Entity<TabBar>,
     /// The buffer index of the entry whose raw text the details region shows.
     expanded: Option<usize>,
+    /// That entry's content fingerprint ([`entry_fingerprint`]). A ring-buffer eviction
+    /// shifts every buffer index, so [`Self::track_expanded_entry`] keeps the two in
+    /// step: the expansion follows its own entry and is dropped once the entry is gone
+    /// (#135).
+    expanded_fingerprint: Option<u64>,
     /// One focus handle per visible row key (the `ui::Button` per-id focus shape): rows
     /// are tab stops, and a handle follows its key, so focus survives pushes that evict
     /// the oldest entry. Kept fresh by [`Self::sync_row_focus`], never by render.
@@ -116,6 +121,7 @@ impl ConsolePanel {
             text_filter,
             level_bar,
             expanded: None,
+            expanded_fingerprint: None,
             row_focus: HashMap::new(),
             _subscriptions: subscriptions,
         };
@@ -127,7 +133,7 @@ impl ConsolePanel {
     /// call.
     pub fn set_level_filter(&mut self, level: Option<ConsoleLevel>, cx: &mut Context<Self>) {
         self.level_filter = level;
-        self.expanded = None;
+        self.clear_expansion();
         self.sync_level_bar(cx);
         self.refresh(cx);
     }
@@ -172,7 +178,7 @@ impl ConsolePanel {
     /// chip calls; v1 logs `http` only (plan D7).
     pub fn set_protocol_filter(&mut self, protocol: Option<SharedString>, cx: &mut Context<Self>) {
         self.protocol_filter = protocol;
-        self.expanded = None;
+        self.clear_expansion();
         self.refresh(cx);
     }
 
@@ -232,8 +238,40 @@ impl ConsolePanel {
     /// Re-filter and redraw. Every place that changes what the list shows funnels here,
     /// so the rows' focus handles are never stale when a frame draws them.
     fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.track_expanded_entry(cx);
         self.sync_row_focus(cx);
         cx.notify();
+    }
+
+    /// Drop the expansion entirely.
+    fn clear_expansion(&mut self) {
+        self.expanded = None;
+        self.expanded_fingerprint = None;
+    }
+
+    /// Keep the expansion on its own entry as the buffer changes (#135): a push over the
+    /// cap evicts from the front and shifts every buffer index, so the stored index is
+    /// re-pointed at the entry's new place and dropped when the entry itself is gone —
+    /// never left showing whatever now sits at the old index.
+    fn track_expanded_entry(&mut self, cx: &App) {
+        let Some(fingerprint) = self.expanded_fingerprint else {
+            return;
+        };
+        let entries = cx.global::<ConsoleStore>().entries();
+        let at_index = self
+            .expanded
+            .and_then(|entry_index| entries.get(entry_index))
+            .is_some_and(|entry| entry_fingerprint(entry) == fingerprint);
+        if at_index {
+            return;
+        }
+        match entries
+            .iter()
+            .position(|entry| entry_fingerprint(entry) == fingerprint)
+        {
+            Some(entry_index) => self.expanded = Some(entry_index),
+            None => self.clear_expansion(),
+        }
     }
 
     fn clear_entries(&mut self, _: &Clear, _window: &mut Window, cx: &mut Context<Self>) {
@@ -241,7 +279,7 @@ impl ConsolePanel {
     }
 
     fn clear(&mut self, cx: &mut Context<Self>) {
-        self.expanded = None;
+        self.clear_expansion();
         ConsoleStore::clear(cx);
         self.refresh(cx);
     }
@@ -257,11 +295,16 @@ impl ConsolePanel {
     }
 
     fn toggle_expanded(&mut self, entry_index: usize, cx: &mut Context<Self>) {
-        self.expanded = if self.expanded == Some(entry_index) {
-            None
+        if self.expanded == Some(entry_index) {
+            self.clear_expansion();
         } else {
-            Some(entry_index)
-        };
+            self.expanded = Some(entry_index);
+            self.expanded_fingerprint = cx
+                .global::<ConsoleStore>()
+                .entries()
+                .get(entry_index)
+                .map(entry_fingerprint);
+        }
         cx.notify();
     }
 
@@ -695,6 +738,10 @@ mod layout_tests;
 #[cfg(test)]
 #[path = "panel_row_height_tests.rs"]
 mod row_height_tests;
+
+#[cfg(test)]
+#[path = "panel_expanded_tests.rs"]
+mod expanded_tests;
 
 #[cfg(test)]
 #[path = "panel_notice_tests.rs"]
