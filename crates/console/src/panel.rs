@@ -698,38 +698,25 @@ fn status_color(status: u16) -> Color {
     }
 }
 
-/// The exchange time as the summary line shows it: milliseconds under a second, one
-/// decimal above. Integer math throughout — response times are user data.
+/// The exchange time as the summary line shows it: blank when the entry carries none, in
+/// the shared `ui` form every pane shows a duration in (#134).
 fn format_time(time: Option<Duration>) -> String {
-    let Some(time) = time else {
-        return String::new();
-    };
-    let millis = time.as_millis();
-    if millis < 1000 {
-        format!("{millis} ms")
-    } else {
-        format!("{}.{} s", millis / 1000, (millis % 1000) / 100)
-    }
+    time.map_or_else(String::new, ui::format_duration)
 }
 
-/// The response size as the summary line shows it. Integer math throughout — response
-/// sizes are user data, so nothing here casts one.
+/// The response size as the summary line shows it: blank when the entry carries none, in
+/// the shared `ui` form every pane shows a size in ([`format_time`]'s size twin, #134).
 fn format_size(size: Option<u64>) -> String {
-    let Some(size) = size else {
-        return String::new();
-    };
-    const KIB: u64 = 1024;
-    const MIB: u64 = KIB * 1024;
-    match size {
-        0..KIB => format!("{size} B"),
-        KIB..MIB => format!("{}.{} KB", size / KIB, (size % KIB) * 10 / KIB),
-        _ => format!("{}.{} MB", size / MIB, (size % MIB) * 10 / MIB),
-    }
+    size.map_or_else(String::new, ui::format_size)
 }
 
 #[cfg(test)]
 #[path = "panel_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "panel_format_tests.rs"]
+mod format_tests;
 
 #[cfg(test)]
 #[path = "panel_layout_tests.rs"]
