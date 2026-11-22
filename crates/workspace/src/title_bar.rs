@@ -127,7 +127,9 @@ pub(crate) fn client_frame(
 pub struct TitleBar {
     /// Set by a press on the drag area and spent by the first move after it: starting the
     /// compositor's move on the press itself would swallow the second click of a
-    /// double-click, so maximize-by-double-click could never fire.
+    /// double-click, so maximize-by-double-click could never fire. Any left-button release
+    /// disarms it — `on_mouse_up` over the drag area, `on_mouse_up_out` anywhere else — so a
+    /// press released elsewhere can never arm a move on a later hover.
     should_move: bool,
 }
 
@@ -191,6 +193,10 @@ impl Render for TitleBar {
                         MouseButton::Left,
                         cx.listener(|this, _event, _window, _cx| this.should_move = false),
                     )
+                    .on_mouse_up_out(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, _cx| this.should_move = false),
+                    )
                     .on_mouse_move(cx.listener(|this, _event, window, _cx| {
                         if this.should_move {
                             this.should_move = false;
@@ -236,3 +242,7 @@ impl Render for TitleBar {
 #[cfg(test)]
 #[path = "title_bar_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "title_bar_move_tests.rs"]
+mod move_tests;
