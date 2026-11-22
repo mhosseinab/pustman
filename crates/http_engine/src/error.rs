@@ -147,7 +147,7 @@ impl TransportError {
     pub fn suggested_fix(&self) -> &'static str {
         match self {
             TransportError::InvalidUrl { .. } => {
-                "Is a variable unset in the active environment? Set it in Environments, or correct the URL."
+                "Replace any unset `{{variable}}` in the URL with a value, or correct the URL."
             }
             TransportError::Dns { .. } => "Check the host name, VPN, or proxy settings.",
             TransportError::Connect { .. } => "Is the server running?",
@@ -177,3 +177,7 @@ impl TransportError {
 #[cfg(test)]
 #[path = "error_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "error_copy_tests.rs"]
+mod copy_tests;
