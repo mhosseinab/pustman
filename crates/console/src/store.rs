@@ -205,3 +205,7 @@ impl ConsoleStore {
 #[cfg(test)]
 #[path = "store_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "store_max_entries_tests.rs"]
+mod max_entries_tests;
