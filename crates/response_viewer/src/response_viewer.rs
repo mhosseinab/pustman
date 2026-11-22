@@ -29,7 +29,7 @@ mod status_line;
 mod text_selection;
 mod timeline;
 
-pub use body_view::BodyView;
+pub use body_view::{BodyEvent, BodyView};
 pub use cookies_tab::{CookiesTab, ParsedCookie};
 pub use headers_view::{HeaderRow, HeadersView};
 pub use save_body::write_body;
@@ -79,7 +79,9 @@ const TIMELINE_TAB: usize = 3;
 /// The response region: status line on top, tabs, and the selected pane below.
 pub struct ResponseView {
     focus_handle: FocusHandle,
-    /// The status line for the response on screen, precomputed when it arrived.
+    /// The status line for the response on screen, precomputed when it arrived — except
+    /// a streamed body's size, which lands with its read and is fed in through
+    /// [`BodyEvent::Measured`] (#122).
     status_line: Option<StatusLine>,
     tab_bar: Entity<TabBar>,
     selected_tab: usize,
@@ -96,6 +98,9 @@ pub struct ResponseView {
     /// (cancels) the first (AGENTS.md › Async).
     save_task: Option<Task<()>>,
     copy_task: Option<Task<()>>,
+    /// The body pane's events and the subscription carrying them — re-pointed at the
+    /// rebuilt pane in [`Self::clear`].
+    _body_subscription: Subscription,
     _tab_bar_subscription: Subscription,
 }
 
@@ -104,12 +109,14 @@ impl ResponseView {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let tab_bar = cx.new(|cx| TabBar::new(cx).section().with_tabs(tabs()));
         let _tab_bar_subscription = cx.subscribe(&tab_bar, Self::on_tab_bar_event);
+        let body = cx.new(BodyView::new);
+        let _body_subscription = cx.subscribe(&body, Self::on_body_event);
         Self {
             focus_handle: cx.focus_handle(),
             status_line: None,
             tab_bar,
             selected_tab: BODY_TAB,
-            body: cx.new(BodyView::new),
+            body,
             headers: cx.new(HeadersView::new),
             cookies: cx.new(CookiesTab::new),
             timeline: cx.new(TimelineTab::new),
@@ -117,6 +124,7 @@ impl ResponseView {
             response: None,
             save_task: None,
             copy_task: None,
+            _body_subscription,
             _tab_bar_subscription,
         }
     }
@@ -177,6 +185,7 @@ impl ResponseView {
         self.response = None;
         self.error = None;
         self.body = cx.new(BodyView::new);
+        self._body_subscription = cx.subscribe(&self.body, Self::on_body_event);
         self.headers = cx.new(HeadersView::new);
         self.cookies = cx.new(CookiesTab::new);
         self.timeline = cx.new(TimelineTab::new);
@@ -220,6 +229,24 @@ impl ResponseView {
             return;
         }
         self.selected_tab = index;
+        cx.notify();
+    }
+
+    /// The body pane's events: a streamed body's measured length (#122) is fed into the
+    /// precomputed status line, whose Size metric knew no size when the response arrived.
+    /// With no status line — a failure replaced the response — there is nothing to
+    /// update.
+    fn on_body_event(
+        &mut self,
+        _body: Entity<BodyView>,
+        event: &BodyEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let BodyEvent::Measured { len } = event;
+        let Some(status_line) = &mut self.status_line else {
+            return;
+        };
+        status_line.set_body_size(*len);
         cx.notify();
     }
 }
@@ -325,3 +352,7 @@ mod empty_state_tests;
 #[cfg(test)]
 #[path = "set_error_status_line_tests.rs"]
 mod set_error_tests;
+
+#[cfg(test)]
+#[path = "body_size_feedback_tests.rs"]
+mod body_size_feedback_tests;

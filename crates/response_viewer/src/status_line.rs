@@ -44,7 +44,7 @@ fn status_pill_selector(label: &str) -> String {
 
 /// The debug key one labelled metric renders under (see [`response_header_selector`]),
 /// derived from the rendered label and value — "Time"/"184 ms", "Size"/"244 B".
-fn status_meta_selector(label: &str, value: &str) -> String {
+pub(crate) fn status_meta_selector(label: &str, value: &str) -> String {
     format!("status-meta-{label}-{value}")
 }
 
@@ -77,6 +77,15 @@ impl StatusLine {
             time_text: format_duration(total).into(),
             size_text: format_size(body_size).into(),
         }
+    }
+
+    /// The body's measured byte count, fed back when a streamed body's read learns it
+    /// after the response arrived (#122): [`body_size`] cannot know a
+    /// [`ResponseBody::File`]'s length without touching the disk, so the Size metric
+    /// starts unmeasured and the load that measures it updates the precomputed text
+    /// here.
+    pub fn set_body_size(&mut self, body_size: u64) {
+        self.size_text = format_size(Some(body_size)).into();
     }
 }
 

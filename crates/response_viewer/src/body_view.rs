@@ -26,10 +26,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    Anchor, AnyElement, Bounds, ClipboardItem, DispatchPhase, Entity, FocusHandle, Focusable,
-    HighlightStyle, InteractiveText, KeyBinding, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels,
-    Point, ScrollStrategy, StyledText, Subscription, Task, UniformListScrollHandle, WeakEntity,
-    Window, anchored, canvas, deferred, point,
+    Anchor, AnyElement, Bounds, ClipboardItem, DispatchPhase, Entity, EventEmitter, FocusHandle,
+    Focusable, HighlightStyle, InteractiveText, KeyBinding, MouseButton, MouseMoveEvent,
+    MouseUpEvent, Pixels, Point, ScrollStrategy, StyledText, Subscription, Task,
+    UniformListScrollHandle, WeakEntity, Window, anchored, canvas, deferred, point,
 };
 use http_engine::{Header, Response, ResponseBody};
 use settings::Setting;
@@ -104,6 +104,14 @@ impl BodyMode {
             _ => None,
         }
     }
+}
+
+/// What the body pane tells its host as a body lands: [`ResponseBody::File`]'s length is
+/// known only once the read that loads it completes, and the host's status line
+/// precomputes its Size metric when the response arrives (#122).
+pub enum BodyEvent {
+    /// The body finished loading; this is its measured length in bytes.
+    Measured { len: u64 },
 }
 
 /// The body pane: the lines it draws and how they got here.
@@ -532,12 +540,13 @@ impl BodyView {
                                 // A `File` body's size is only known once it is read:
                                 // the same fallback applies here, before any formatter
                                 // is handed the huge body.
-                                view.apply_large_body_fallback(
-                                    u64::try_from(bytes.len()).ok(),
-                                    limit_mb,
-                                    file_path,
-                                    cx,
-                                );
+                                let measured = u64::try_from(bytes.len()).ok();
+                                view.apply_large_body_fallback(measured, limit_mb, file_path, cx);
+                                // The measured length feeds back to the status line,
+                                // whose Size metric precomputed as unmeasured (#122).
+                                if let Some(len) = measured {
+                                    cx.emit(BodyEvent::Measured { len });
+                                }
                                 view.bytes = bytes;
                                 view.text = text;
                                 view.lines = Arc::new(lines);
@@ -1427,6 +1436,8 @@ fn body_bytes(response: &Response) -> std::io::Result<Vec<u8>> {
 #[cfg(test)]
 #[path = "body_view_tests.rs"]
 mod tests;
+
+impl EventEmitter<BodyEvent> for BodyView {}
 
 #[cfg(test)]
 #[path = "body_tooltip_tests.rs"]
