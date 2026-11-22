@@ -20,6 +20,7 @@ use crate::typography::{StyledTypography, TextSize};
 pub struct KeyBinding {
     action: Box<dyn Action>,
     color: Color,
+    size: TextSize,
 }
 
 impl Clone for KeyBinding {
@@ -27,6 +28,7 @@ impl Clone for KeyBinding {
         Self {
             action: self.action.boxed_clone(),
             color: self.color,
+            size: self.size,
         }
     }
 }
@@ -45,7 +47,15 @@ impl KeyBinding {
         Self {
             action: action.boxed_clone(),
             color: Color::Muted,
+            size: TextSize::XSmall,
         }
+    }
+
+    /// Draw the keys this big. The default is the design system's hint size; an empty
+    /// state's chips read at body size instead, where nothing else competes with them.
+    pub fn size(mut self, size: TextSize) -> Self {
+        self.size = size;
+        self
     }
 
     /// Tint the hint (use [`Color::Disabled`] in a disabled control).
@@ -140,7 +150,7 @@ impl RenderOnce for KeyBinding {
                     .border_1()
                     .border_color(cx.theme().colors().border_variant)
                     .text_color(self.color.color(cx))
-                    .text_size(TextSize::XSmall.rems(cx))
+                    .text_size(self.size.rems(cx))
                     .child(key)
             }))
     }

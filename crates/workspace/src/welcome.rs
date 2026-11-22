@@ -11,6 +11,10 @@ use ui::prelude::*;
 
 use crate::item::Item;
 
+#[cfg(test)]
+#[path = "welcome_tests.rs"]
+mod tests;
+
 /// The welcome view's stable id and test selector.
 const WELCOME_ID: &str = "welcome";
 
@@ -36,18 +40,11 @@ impl Item for Welcome {
 
 impl Render for Welcome {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
-            .id(WELCOME_ID)
-            .debug_selector(|| WELCOME_ID.to_owned())
-            .size_full()
-            .justify_center()
-            .items_center()
-            .gap(DynamicSpacing::Base06.rems(cx))
-            .child(Headline::new("Welcome to Pustman"))
-            .child(
-                Label::new("Send, inspect and organize HTTP requests — start with a new request.")
-                    .color(Color::Muted),
-            )
+        // The pane's empty state at the design system's empty-state scale (#234): icon,
+        // title, readable copy and the call to action — no text below the pack's 14/20
+        // primary UI tier.
+        EmptyState::new(WELCOME_ID, IconName::Send, "Welcome to Pustman")
+            .description("Send, inspect and organize HTTP requests — start with a new request.")
             .child(
                 v_flex()
                     .gap(DynamicSpacing::Base04.rems(cx))
@@ -66,7 +63,7 @@ impl Render for Welcome {
                                         }),
                                 ),
                             )
-                            .child(KeyBinding::for_action(&NewTab)),
+                            .child(KeyBinding::for_action(&NewTab).size(TextSize::Default)),
                     )
                     .child(shortcut_hint("Toggle Sidebar", &ToggleSidebar, cx)),
             )
@@ -78,6 +75,10 @@ impl Render for Welcome {
 fn shortcut_hint(label: &'static str, action: &dyn Action, cx: &App) -> impl IntoElement {
     h_flex()
         .gap(DynamicSpacing::Base04.rems(cx))
-        .child(Label::new(label).color(Color::Muted))
-        .child(KeyBinding::for_action(action))
+        .child(
+            Label::new(label)
+                .size(LabelSize::Default)
+                .color(Color::Muted),
+        )
+        .child(KeyBinding::for_action(action).size(TextSize::Default))
 }
