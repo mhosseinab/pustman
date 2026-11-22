@@ -172,6 +172,13 @@ impl UrlBar {
         &self.method
     }
 
+    /// The color the method control and its dropdown draw the method in: the theme's
+    /// method token ([`ui::color::method_color`], the mapping History rows use), with
+    /// the verb's text beside it (#217).
+    pub fn method_label_color(&self, cx: &App) -> Color {
+        method_color(self.method.as_str(), cx)
+    }
+
     /// Why the last custom method was not applied, if one was rejected.
     pub fn custom_error(&self) -> Option<&SharedString> {
         self.custom_error.as_ref()
@@ -237,15 +244,21 @@ impl UrlBar {
             for standard in method::STANDARD_METHODS {
                 let picked = standard.clone();
                 let picker = picker.clone();
-                menu = menu.entry(standard.as_str(), move |_event, window, cx| {
-                    if picker
-                        .update(cx, |bar, cx| bar.apply_method(picked.clone(), window, cx))
-                        .is_err()
-                    {
-                        // The bar was dropped while the menu was open; there is no
-                        // request left to apply a method to.
-                    }
-                });
+                // Each verb draws in its theme token, the same colour History rows
+                // give it (#217).
+                menu = menu.colored_entry(
+                    standard.as_str(),
+                    method_color(standard.as_str(), cx),
+                    move |_event, window, cx| {
+                        if picker
+                            .update(cx, |bar, cx| bar.apply_method(picked.clone(), window, cx))
+                            .is_err()
+                        {
+                            // The bar was dropped while the menu was open; there is no
+                            // request left to apply a method to.
+                        }
+                    },
+                );
             }
             menu.separator().entry(
                 SharedString::new_static("Custom Method…"),
@@ -363,6 +376,8 @@ impl UrlBar {
                 SharedString::from(self.method.as_str()),
             )
             .size(ButtonSize::Large)
+            // The verb draws in its theme token, text and colour together (#217).
+            .label_color(self.method_label_color(cx))
             .end_icon(Icon::new(IconName::ChevronDown).size(IconSize::Small))
             // The tooltip hides while its own dropdown is open (#265): with the pointer
             // still on the anchor, the balloon would paint over the menu rows.
@@ -450,3 +465,7 @@ mod field_width_tests;
 #[cfg(test)]
 #[path = "url_bar_menu_tooltip_tests.rs"]
 mod menu_tooltip_tests;
+
+#[cfg(test)]
+#[path = "url_bar_method_color_tests.rs"]
+mod method_color_tests;

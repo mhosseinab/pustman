@@ -174,6 +174,7 @@ impl ButtonSize {
 pub struct Button {
     id: ElementId,
     label: SharedString,
+    label_color: Option<Color>,
     style: ButtonStyle,
     size: ButtonSize,
     start_icon: Option<Icon>,
@@ -209,6 +210,7 @@ impl Button {
         Self {
             id: id.into(),
             label: label.into(),
+            label_color: None,
             style: ButtonStyle::Subtle,
             size: ButtonSize::Default,
             start_icon: None,
@@ -229,6 +231,14 @@ impl Button {
     /// How loud the button is.
     pub fn style(mut self, style: ButtonStyle) -> Self {
         self.style = style;
+        self
+    }
+
+    /// Tint the label with an intent of the caller's choosing — a method verb, a status
+    /// — while the icons and the key hint keep their own colors. A disabled button
+    /// keeps its disabled text instead.
+    pub fn label_color(mut self, color: Color) -> Self {
+        self.label_color = Some(color);
         self
     }
 
@@ -350,7 +360,11 @@ impl RenderOnce for Button {
             .child(
                 Label::new(label.clone())
                     .size(self.size.label_size())
-                    .truncate(),
+                    .truncate()
+                    .map(|label| match self.label_color.filter(|_| !disabled) {
+                        Some(color) => label.color(color),
+                        None => label,
+                    }),
             )
             .when_some(self.end_icon, |this, icon| this.child(icon));
 

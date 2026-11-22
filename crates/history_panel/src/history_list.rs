@@ -657,25 +657,6 @@ fn entry_element_id(id: Option<i64>) -> ElementId {
     }
 }
 
-/// The theme's method token for a method label (`references/design-system.md` §1: the
-/// HTTP verbs are theme tokens). `Color::Custom` only resolves the token — the theme
-/// still owns the value — and a custom verb, which has no token, falls back to muted
-/// text.
-fn method_color(method: &str, cx: &App) -> Color {
-    let status = cx.theme().status();
-    let token = match method {
-        "GET" => status.method_get,
-        "POST" => status.method_post,
-        "PUT" => status.method_put,
-        "PATCH" => status.method_patch,
-        "DELETE" => status.method_delete,
-        "HEAD" => status.method_head,
-        "OPTIONS" => status.method_options,
-        _ => return Color::Muted,
-    };
-    Color::Custom(token)
-}
-
 /// The one meta line of an entry row: status and duration (REQ-HIST-01), never the
 /// request or response body (REQ-HIST-03).
 fn entry_summary(entry: &HistoryEntry) -> String {

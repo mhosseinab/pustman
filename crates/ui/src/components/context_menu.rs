@@ -54,6 +54,9 @@ enum MenuItem {
         /// line's position, which shifts as entries come and go.
         key: SharedString,
         label: SharedString,
+        /// A label colour of the caller's choosing (a method verb). [`None`] draws the
+        /// row's own text color.
+        color: Option<Color>,
         disabled: bool,
         on_click: Option<ClickHandler>,
     },
@@ -88,6 +91,7 @@ impl MenuItem {
             Self::Entry {
                 key,
                 label,
+                color,
                 disabled,
                 ..
             } => {
@@ -114,7 +118,14 @@ impl MenuItem {
                         colors.text
                     })
                     .when(selected, |this| this.bg(colors.element_selected))
-                    .child(Label::new(label.clone()).truncate())
+                    .child(Label::new(label.clone()).truncate().map(|label| {
+                        // The entry's color is its identity (a method verb), not its
+                        // state: the highlight still marks the selection, by fill.
+                        match color {
+                            Some(color) => label.color(*color),
+                            None => label,
+                        }
+                    }))
                     .map(|this| {
                         if disabled {
                             this.cursor_not_allowed().opacity(0.6)
@@ -176,6 +187,30 @@ impl ContextMenu {
         self.items.push(MenuItem::Entry {
             key,
             label,
+            color: None,
+            disabled: false,
+            on_click: Some(Rc::new(on_click)),
+        });
+        // The highlight starts on the first entry that can be run.
+        self.selected = self.first_enabled_entry();
+        self
+    }
+
+    /// An entry whose label draws in `color` — the label's identity, like a method verb
+    /// (the theme's method tokens), never its state: selection still marks the row by
+    /// fill. One handler for the mouse and the keyboard, like [`Self::entry`].
+    pub fn colored_entry(
+        mut self,
+        label: impl Into<SharedString>,
+        color: Color,
+        on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        let label = label.into();
+        let key = self.unique_key(&label);
+        self.items.push(MenuItem::Entry {
+            key,
+            label,
+            color: Some(color),
             disabled: false,
             on_click: Some(Rc::new(on_click)),
         });
@@ -192,6 +227,7 @@ impl ContextMenu {
         self.items.push(MenuItem::Entry {
             key,
             label,
+            color: None,
             disabled: true,
             on_click: None,
         });
