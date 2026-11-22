@@ -32,7 +32,8 @@ pub use toast_layer::{TOAST_DURATION, ToastAction, ToastHandler};
 pub use welcome::Welcome;
 
 use gpui::{
-    App, Context, Decorations, Entity, FocusHandle, Focusable, ParentElement, Render, Window,
+    App, Context, Decorations, Entity, FocusHandle, Focusable, ParentElement, Render, WeakEntity,
+    Window,
 };
 use pustman_actions::workspace::{
     CloseTab, NewRequest, NewTab, NextTab, PreviousTab, ToggleConsole, ToggleSidebar,
@@ -42,6 +43,17 @@ use ui::prelude::*;
 /// The key context the workspace answers the keyboard in; `assets/keymaps/` binds the
 /// workspace-level commands (ToggleSidebar, ToggleConsole, …) against it.
 pub const WORKSPACE_CONTEXT: &str = "Workspace";
+
+// Window-chrome commands the shell answers itself. `CloseWindow` is dispatched by the
+// title-bar Close control (`title_bar`), so every close — the platform's and the app's
+// own — lands on `Workspace::close_window` and its save-then-close flush (issue #85).
+gpui::actions!(
+    workspace,
+    [
+        /// Closes the window.
+        CloseWindow,
+    ]
+);
 
 /// The window shell (PRD §3): docks at the left and bottom edges, the center pane
 /// between them, and the status bar along the bottom.
@@ -54,6 +66,10 @@ pub struct Workspace {
     title_bar: Entity<TitleBar>,
     toasts: Entity<ui::Toasts>,
     modal_layer: ModalLayer,
+    /// The window's tab restore, once [`crate::Restore::attach`] hands it over: closing
+    /// the window — including the title-bar Close control this shell draws itself —
+    /// flushes its pending save through it before the window goes (issue #85).
+    restore: Option<WeakEntity<Restore>>,
 }
 
 impl Workspace {
@@ -74,7 +90,14 @@ impl Workspace {
             title_bar: cx.new(TitleBar::new),
             toasts: cx.new(Toasts::new),
             modal_layer: ModalLayer::default(),
+            restore: None,
         }
+    }
+
+    /// Hand this window's [`Restore`] to the shell, so [`Self::close_window`] runs its
+    /// save-then-close flush before the window goes (issue #85).
+    pub(crate) fn set_restore(&mut self, restore: WeakEntity<Restore>) {
+        self.restore = Some(restore);
     }
 
     /// The left dock: collections, environments and history (REQ-UI-01).
@@ -137,6 +160,28 @@ impl Workspace {
         self.center_pane
             .update(cx, |pane, cx| pane.activate_previous_tab(cx));
     }
+
+    /// Close the window: the title-bar Close control and any close command land here, so
+    /// the app's own close button runs the same save-then-close flush a platform close
+    /// takes (issue #85). The flush decides how the close ends — it removes the window
+    /// once its write landed, and keeps it open with its drafts when the write failed.
+    fn close_window(&mut self, _: &CloseWindow, window: &mut Window, cx: &mut Context<Self>) {
+        let restore = self.restore.clone();
+        // Deferred: the flush reads this workspace, and GPUI leases the entity for the
+        // duration of this update — a re-entrant read would panic.
+        window.defer(cx, move |window, cx| {
+            let close_now = restore
+                .map(|restore| {
+                    restore
+                        .update(cx, |restore, cx| restore.flush_on_close(window, cx))
+                        .unwrap_or(true)
+                })
+                .unwrap_or(true);
+            if close_now {
+                window.remove_window();
+            }
+        });
+    }
 }
 
 impl Focusable for Workspace {
@@ -161,6 +206,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::close_tab))
             .on_action(cx.listener(Self::next_tab))
             .on_action(cx.listener(Self::previous_tab))
+            .on_action(cx.listener(Self::close_window))
             .bg(cx.theme().colors().background)
             // Only a client-decorated window draws its own title bar; the compositor draws
             // one around a server-decorated window.

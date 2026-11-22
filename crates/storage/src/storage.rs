@@ -190,6 +190,38 @@ impl LocalStore {
         }
     }
 
+    /// Replaces one workspace's `open_tabs` set with `tabs`, in one transaction: the rows
+    /// that are gone and the rows that arrive land together, so a save interrupted
+    /// halfway leaves the previous set in place instead of half of each (PRD REQ-UI-02).
+    ///
+    /// It lives here rather than on [`OpenTabsRepo`] because the transaction needs the
+    /// connection this type owns. Every row is stored under `workspace_id` whatever its
+    /// [`OpenTab::workspace_id`] says, and a `tabs` list holding the same item twice is a
+    /// caller bug the whole call fails on: the transaction rolls back and nothing is
+    /// written.
+    pub fn replace_workspace_tabs(&mut self, workspace_id: &str, tabs: &[OpenTab]) -> Result<()> {
+        let transaction = self.connection.transaction()?;
+        transaction.execute(
+            "DELETE FROM open_tabs WHERE workspace_id = ?1",
+            params![workspace_id],
+        )?;
+        for tab in tabs {
+            transaction.execute(
+                "INSERT INTO open_tabs (workspace_id, position, item_id, pinned, draft_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    workspace_id,
+                    tab.position,
+                    tab.item_id,
+                    tab.pinned,
+                    draft_json_column(tab.draft_json.as_ref())?
+                ],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Persisted UI layout per workspace.
     pub fn layout(&self) -> LayoutRepo<'_> {
         LayoutRepo {
@@ -456,11 +488,7 @@ pub struct OpenTabsRepo<'a> {
 impl OpenTabsRepo<'_> {
     /// Inserts or replaces the tab with the same workspace and item.
     pub fn insert(&self, tab: &OpenTab) -> Result<()> {
-        let draft_json = tab
-            .draft_json
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()?;
+        let draft_json = draft_json_column(tab.draft_json.as_ref())?;
         self.connection.execute(
             "INSERT OR REPLACE INTO open_tabs (workspace_id, position, item_id, pinned, draft_json)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -706,6 +734,12 @@ const LIKE_QUERY: &str = "target LIKE ?2 ESCAPE '\\' OR method LIKE ?2 ESCAPE '\
 const MILLIS_PER_DAY: i64 = 86_400_000;
 
 const NANOS_PER_MILLI: i128 = 1_000_000;
+
+/// The `draft_json` column form of a tab draft (PRD REQ-NFR-05): the item's opaque text
+/// as a JSON string document, when the tab has one.
+fn draft_json_column(draft_json: Option<&serde_json::Value>) -> Result<Option<String>> {
+    Ok(draft_json.map(serde_json::to_string).transpose()?)
+}
 
 /// The stored form of a timestamp: unix milliseconds, UTC.
 fn to_millis(timestamp: OffsetDateTime) -> i64 {
