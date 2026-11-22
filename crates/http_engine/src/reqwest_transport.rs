@@ -600,7 +600,7 @@ async fn multipart_form(
     Ok(form)
 }
 
-/// The verb as `reqwest` sends it. A custom token is validated as RFC 7230 by
+/// The verb as `reqwest` sends it. A custom token is validated as RFC 9110 by
 /// `api_model::Method`, so this only fails on a token `http::Method` rejects.
 fn method_of(method: &api_model::Method) -> Result<reqwest::Method, TransportError> {
     reqwest::Method::from_bytes(method.as_str().as_bytes()).map_err(|error| TransportError::Io {
