@@ -13,6 +13,12 @@
 //! one measured height), so the expanded entry's raw text renders in a details region
 //! below the list instead of growing one row.
 //!
+//! `Decision:` the level filter is one segmented control — [`ui::TabBar::segmented()`],
+//! the switch `response_viewer`'s Pretty/Raw/Hex/Preview control draws — and Pause is an
+//! icon button whose tooltip is its name, not four text chips and a text button (S02/R02
+//! for the workbench control, S26/R26 for the selected state and the icon-only control's
+//! accessible name; #232). `panel_toolbar_tests.rs` pins both.
+//!
 //! `Decision:` [`ConsoleEntry`] carries no id and the store is outside this step, so a
 //! row's element id is its content fingerprint plus its occurrence among identical rows —
 //! never its row position, which an eviction from the ring buffer would shift (the
@@ -51,6 +57,21 @@ pub(crate) const ENTRIES_AREA_SELECTOR: &str = "console-entries-area";
 pub(crate) const EMPTY_STATE_SELECTOR: &str = "console-empty-state";
 pub(crate) const ENTRY_ROW_SELECTOR: &str = "console-entry-row";
 pub(crate) const DETAILS_SELECTOR: &str = "console-details";
+/// Debug selectors the toolbar tests measure the icon buttons through.
+const PAUSE_CONTROL: &str = "console-pause-control";
+const CLEAR_CONTROL: &str = "console-clear-control";
+/// The level filter's segments, in bar order: each segment's id and label, and the level
+/// it filters by — `None` is "All", which shows every level (REQ-CON-02).
+const LEVEL_FILTERS: [(&str, &str, Option<ConsoleLevel>); 4] = [
+    ("console-filter-all", "All", None),
+    ("console-filter-info", "Info", Some(ConsoleLevel::Info)),
+    (
+        "console-filter-warning",
+        "Warning",
+        Some(ConsoleLevel::Warning),
+    ),
+    ("console-filter-error", "Error", Some(ConsoleLevel::Error)),
+];
 
 /// The Console panel: the entry list, its filters and the expanded raw view.
 pub struct ConsolePanel {
@@ -58,6 +79,8 @@ pub struct ConsolePanel {
     level_filter: Option<ConsoleLevel>,
     protocol_filter: Option<SharedString>,
     text_filter: Entity<TextInput>,
+    /// The level filter: one segmented control with one selection (S02/R02).
+    level_bar: Entity<TabBar>,
     /// The buffer index of the entry whose raw text the details region shows.
     expanded: Option<usize>,
     /// One focus handle per visible row key (the `ui::Button` per-id focus shape): rows
@@ -72,18 +95,21 @@ impl ConsolePanel {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let text_filter =
             cx.new(|cx| TextInput::new(window, cx).with_placeholder("Filter console entries"));
+        let level_bar = cx.new(|cx| TabBar::new(cx).segmented().with_tabs(level_tabs()));
         let subscriptions = vec![
             cx.observe_global::<ConsoleStore>(|this, cx| this.refresh(cx)),
             cx.subscribe(&text_filter, |this, _input, _: &TextInputEvent, cx| {
                 // The rows follow the field's text, so any change re-filters.
                 this.refresh(cx);
             }),
+            cx.subscribe(&level_bar, Self::on_level_bar_event),
         ];
         let mut panel = Self {
             focus_handle: cx.focus_handle(),
             level_filter: None,
             protocol_filter: None,
             text_filter,
+            level_bar,
             expanded: None,
             row_focus: HashMap::new(),
             _subscriptions: subscriptions,
@@ -92,12 +118,49 @@ impl ConsolePanel {
         panel
     }
 
-    /// Show only entries of `level` — `None` shows every level. What the level chips
+    /// Show only entries of `level` — `None` shows every level. What the level segments
     /// call.
     pub fn set_level_filter(&mut self, level: Option<ConsoleLevel>, cx: &mut Context<Self>) {
         self.level_filter = level;
         self.expanded = None;
+        self.sync_level_bar(cx);
         self.refresh(cx);
+    }
+
+    /// The level bar's events: clicking a segment, or moving onto one with the arrows,
+    /// sets the filter. An event that no longer describes the bar's selection is a stale
+    /// echo and is dropped (`response_viewer`'s mode bar does the same).
+    fn on_level_bar_event(
+        &mut self,
+        level_bar: Entity<TabBar>,
+        event: &TabBarEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let index = match event {
+            TabBarEvent::Selected { index } | TabBarEvent::Activated { index } => *index,
+        };
+        if index != level_bar.read(cx).selected() {
+            return;
+        }
+        let Some((_, _, level)) = LEVEL_FILTERS.get(index) else {
+            return;
+        };
+        self.set_level_filter(*level, cx);
+    }
+
+    /// Keep the bar's selection on the filter, so a filter set from code never leaves
+    /// the control showing another segment. While the selection already agrees this is a
+    /// no-op, which is also what stops the bar's own echo at one hop.
+    fn sync_level_bar(&mut self, cx: &mut Context<Self>) {
+        let selected = LEVEL_FILTERS
+            .iter()
+            .position(|(_, _, level)| *level == self.level_filter)
+            .unwrap_or(0);
+        self.level_bar.update(cx, |level_bar, cx| {
+            if level_bar.selected() != selected {
+                level_bar.set_selected(selected, cx);
+            }
+        });
     }
 
     /// Show only entries of `protocol` — `None` shows every protocol. What the protocol
@@ -310,8 +373,9 @@ impl ConsolePanel {
             .into_any_element()
     }
 
-    /// The filter row: level chips, the protocol chip, the text filter, and pause and
-    /// clear on the right, with the Paused state called out while it is on.
+    /// The filter row: the level segments of one segmented control, the protocol chip,
+    /// the text filter, and pause and clear on the right, with the Paused state called
+    /// out while it is on.
     fn render_toolbar(&self, paused: bool, cx: &mut Context<Self>) -> AnyElement {
         h_flex()
             .w_full()
@@ -320,10 +384,7 @@ impl ConsolePanel {
             .py(DynamicSpacing::Base04.rems(cx))
             .border_b_1()
             .border_color(cx.theme().colors().border)
-            .child(self.level_chip("All", None, cx))
-            .child(self.level_chip("Info", Some(ConsoleLevel::Info), cx))
-            .child(self.level_chip("Warning", Some(ConsoleLevel::Warning), cx))
-            .child(self.level_chip("Error", Some(ConsoleLevel::Error), cx))
+            .child(self.level_bar.clone())
             .child(
                 Button::new("console-filter-protocol", "HTTP")
                     .style(chip_style(self.protocol_filter.is_some()))
@@ -353,41 +414,34 @@ impl ConsolePanel {
                     .color(Color::Warning)
             }))
             .child(
-                Button::new("console-pause", if paused { "Resume" } else { "Pause" })
+                div().debug_selector(|| PAUSE_CONTROL.to_owned()).child(
+                    IconButton::new(
+                        "console-pause",
+                        if paused {
+                            IconName::Play
+                        } else {
+                            IconName::Pause
+                        },
+                        Tooltip::text(if paused {
+                            "Resume console"
+                        } else {
+                            "Pause console"
+                        }),
+                    )
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_paused(cx))),
+                ),
             )
             .child(
-                IconButton::new(
-                    "console-clear",
-                    IconName::Trash,
-                    Tooltip::text("Clear console"),
-                )
-                .on_click(cx.listener(|this, _, _, cx| this.clear(cx))),
+                div().debug_selector(|| CLEAR_CONTROL.to_owned()).child(
+                    IconButton::new(
+                        "console-clear",
+                        IconName::Trash,
+                        Tooltip::text("Clear console"),
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.clear(cx))),
+                ),
             )
             .into_any_element()
-    }
-
-    /// One level chip: highlighted while its level is the filter. `level` is `None` for
-    /// "All".
-    fn level_chip(
-        &self,
-        label: &'static str,
-        level: Option<ConsoleLevel>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let active = self.level_filter == level;
-        Button::new(
-            match level {
-                None => "console-filter-all",
-                Some(ConsoleLevel::Info) => "console-filter-info",
-                Some(ConsoleLevel::Warning) => "console-filter-warning",
-                Some(ConsoleLevel::Error) => "console-filter-error",
-            },
-            label,
-        )
-        .style(chip_style(active))
-        .on_click(cx.listener(move |this, _, _, cx| this.set_level_filter(level, cx)))
-        .into_any_element()
     }
 }
 
@@ -554,6 +608,14 @@ fn chip_style(active: bool) -> ButtonStyle {
     }
 }
 
+/// The level filter's segments as the bar draws them.
+fn level_tabs() -> Vec<Tab> {
+    LEVEL_FILTERS
+        .into_iter()
+        .map(|(id, label, _level)| Tab::new(id, label))
+        .collect()
+}
+
 fn level_icon(level: ConsoleLevel) -> IconName {
     match level {
         ConsoleLevel::Info => IconName::Info,
@@ -619,3 +681,7 @@ mod layout_tests;
 #[cfg(test)]
 #[path = "panel_row_height_tests.rs"]
 mod row_height_tests;
+
+#[cfg(test)]
+#[path = "panel_toolbar_tests.rs"]
+mod toolbar_tests;

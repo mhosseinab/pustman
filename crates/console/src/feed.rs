@@ -44,7 +44,7 @@ pub fn record_outcome(outcome: &SendOutcome, cx: &mut App) {
             status: Some(outcome.response.status),
             time: outcome.response.timings.total,
             size: response_size(&outcome.response),
-            raw_request: render_request(&outcome.request, secrets),
+            raw_request: render_request(&outcome.request, outcome.response.http_version, secrets),
             raw_response: render_response(&outcome.response, secrets),
         },
     );
@@ -220,14 +220,24 @@ fn push_notice(
     );
 }
 
-/// The request exactly as it went on the wire, in HTTP/1.1 form (REQ-CON-03):
-/// `METHOD path?query HTTP/1.1`, `Host:`, the headers and the body-mode auto headers in
-/// order, a blank line and the body text. The `Host` line holds the Host header the wire
-/// carries — the user's own when it set one, the URL's authority otherwise — so it is
-/// rendered once and never duplicated in the header block. Line endings are the wire's
-/// CRLF. Redacted as one rendering per part: the URL through [`redact_url`], the headers
-/// through [`redact_headers`] and the free text through [`redact_text`].
-fn render_request(request: &ResolvedRequest, secrets: &SecretValues) -> String {
+/// The request exactly as it went on the wire (REQ-CON-03): `METHOD path?query <version>`,
+/// then `Host:`, the headers and the body-mode auto headers in order, a blank line and
+/// the body text. The `Host` line holds the Host header the wire carries — the user's own
+/// when it set one, the URL's authority otherwise — so it is rendered once and never
+/// duplicated in the header block. Line endings are the wire's CRLF. Redacted as one
+/// rendering per part: the URL through [`redact_url`], the headers through
+/// [`redact_headers`] and the free text through [`redact_text`].
+///
+/// `Decision:` the request line's version is the one the send actually used —
+/// `version`, the response's `http_version`, which the transport reads off the wire —
+/// not the request's `HttpVersion` setting, which says what the send allowed and leaves
+/// `Auto` to negotiate (S04/R04). The request keeps request-line form in every version;
+/// only the version token follows the exchange.
+fn render_request(
+    request: &ResolvedRequest,
+    version: ResponseVersion,
+    secrets: &SecretValues,
+) -> String {
     let headers: Vec<(String, String)> = request
         .headers
         .iter()
@@ -239,9 +249,10 @@ fn render_request(request: &ResolvedRequest, secrets: &SecretValues) -> String {
         .find(|(name, _)| name.eq_ignore_ascii_case("host"))
         .map_or_else(|| host_line(&request.url), |(_, value)| value.clone());
     let mut raw = format!(
-        "{} {} HTTP/1.1\r\n",
+        "{} {} {}\r\n",
         request.method,
-        redact_url(&request_target(&request.url), secrets)
+        redact_url(&request_target(&request.url), secrets),
+        version_label(version)
     );
     raw.push_str(&format!("Host: {}\r\n", redact_text(&host, secrets)));
     let rest: Vec<(String, String)> = headers
@@ -281,17 +292,24 @@ fn status_line(response: &Response, secrets: &SecretValues) -> String {
     match response.http_version {
         ResponseVersion::Http2 | ResponseVersion::Http3 => format!(":status: {}", response.status),
         ResponseVersion::Http10 | ResponseVersion::Http11 => {
-            let version = match response.http_version {
-                ResponseVersion::Http10 => "1.0",
-                _ => "1.1",
-            };
+            let version = version_label(response.http_version);
             // The wire's reason phrase may be empty; a trailing space would be noise.
             if reason.is_empty() {
-                format!("HTTP/{version} {}", response.status)
+                format!("{version} {}", response.status)
             } else {
-                format!("HTTP/{version} {} {}", response.status, reason)
+                format!("{version} {} {}", response.status, reason)
             }
         }
+    }
+}
+
+/// The version as text carries it in a request or status line (RFC 9110 §2.3).
+fn version_label(version: ResponseVersion) -> &'static str {
+    match version {
+        ResponseVersion::Http10 => "HTTP/1.0",
+        ResponseVersion::Http11 => "HTTP/1.1",
+        ResponseVersion::Http2 => "HTTP/2",
+        ResponseVersion::Http3 => "HTTP/3",
     }
 }
 
@@ -351,3 +369,11 @@ mod tests;
 #[cfg(test)]
 #[path = "feed_order_tests.rs"]
 mod feed_order_tests;
+
+#[cfg(test)]
+#[path = "feed_raw_view_tests.rs"]
+mod raw_view_tests;
+
+#[cfg(test)]
+#[path = "feed_version_tests.rs"]
+mod version_tests;
