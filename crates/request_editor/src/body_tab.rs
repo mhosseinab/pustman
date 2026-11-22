@@ -905,7 +905,7 @@ impl BodyTab {
     fn render_form_data(&self, cx: &mut Context<Self>) -> AnyElement {
         let root_id = ElementId::Name(SharedString::new_static("form-data"));
         let mut table = Table::new((root_id.clone(), SharedString::new_static("table")))
-            .column(TableColumn::new("Enabled").width(px_to_rems(NARROW_COLUMN_WIDTH_PX)))
+            .column(TableColumn::new("Use").width(px_to_rems(NARROW_COLUMN_WIDTH_PX)))
             .column(TableColumn::new("Type").width(px_to_rems(KIND_COLUMN_WIDTH_PX)))
             .column(TableColumn::new("Key"))
             .column(TableColumn::new("Value"))
@@ -963,7 +963,7 @@ impl BodyTab {
     }
 
     /// The enabled checkbox of one form-data row. Its label is the accessible name
-    /// only: the "Enabled" column header is the row's visible meaning, and painted
+    /// only: the "Use" column header is the row's visible meaning, and painted
     /// label text would run over the Key cell beside it (S33n).
     fn render_form_enabled(&self, row: &FormRow, cx: &mut Context<Self>) -> AnyElement {
         let id = row.id;

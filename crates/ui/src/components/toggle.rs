@@ -146,7 +146,7 @@ impl Toggle {
 
     /// Keep `label` as the control's accessible name only — no label text is drawn
     /// beside the control. For a checkbox whose visible meaning lives elsewhere (a
-    /// table's "Enabled" column header), where painted label text would run over the
+    /// table's "Use" column header), where painted label text would run over the
     /// cells beside it (S33n).
     pub fn label_hidden(mut self) -> Self {
         self.label_hidden = true;

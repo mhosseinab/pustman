@@ -22,9 +22,14 @@ use ui::prelude::*;
 const NARROW_COLUMN_WIDTH_PX: f32 = 48.;
 
 /// The enabled checkbox's label — its accessible name. It paints no text: the column
-/// header ("Enabled") is the row's visible meaning, and the label would run over the
+/// header ("Use") is the row's visible meaning, and the label would run over the
 /// Key cell beside it (S33n).
 pub const ENABLED_CHECKBOX_LABEL: &str = "Include this row in the request";
+
+/// The debug key the "Add row" affordance paints under — the test hook that lets a test
+/// measure the control that adds a row (`VisualTestContext::debug_bounds`, the
+/// [`crate::send`]'s selector pattern).
+pub const ADD_ROW_SELECTOR: &str = "key-value-add-row";
 
 /// Which cell of a row is being edited.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -389,24 +394,32 @@ impl KeyValueTable {
         .into_any_element()
     }
 
-    /// The "Add row" button under an editable table.
+    /// The "Add row" affordance under an editable table: a full-width framed button at
+    /// the size of a real control, not a faint text link (#220, the blueprint's add-row
+    /// band in `06_visuals/workbench_blueprint.svg`).
     fn render_add_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let weak = cx.weak_entity();
-        Button::new(
-            ElementId::Name(SharedString::new_static("add-row")),
-            SharedString::new_static("Add row"),
-        )
-        .size(ButtonSize::Default)
-        .start_icon(Icon::new(IconName::Plus))
-        .tooltip(Tooltip::text("Add a row"))
-        .on_click(move |_event, window, cx| {
-            if weak
-                .update(cx, |table, cx| table.add_row(window, cx))
-                .is_err()
-            {
-                // Handled: the table was released with its window; no table to add to.
-            }
-        })
+        div()
+            .debug_selector(|| String::from(ADD_ROW_SELECTOR))
+            .child(
+                Button::new(
+                    ElementId::Name(SharedString::new_static("add-row")),
+                    SharedString::new_static("Add row"),
+                )
+                .style(ButtonStyle::Outlined)
+                .size(ButtonSize::Medium)
+                .full_width()
+                .start_icon(Icon::new(IconName::Plus))
+                .tooltip(Tooltip::text("Add a row"))
+                .on_click(move |_event, window, cx| {
+                    if weak
+                        .update(cx, |table, cx| table.add_row(window, cx))
+                        .is_err()
+                    {
+                        // Handled: the table was released with its window; no table to add to.
+                    }
+                }),
+            )
     }
 }
 
@@ -415,8 +428,7 @@ impl Render for KeyValueTable {
         let root_id = ElementId::from(&self.focus_handle);
         let mut table = Table::new((root_id.clone(), SharedString::new_static("table")));
         if self.shape == KeyValueTableShape::Editable {
-            table =
-                table.column(TableColumn::new("Enabled").width(px_to_rems(NARROW_COLUMN_WIDTH_PX)));
+            table = table.column(TableColumn::new("Use").width(px_to_rems(NARROW_COLUMN_WIDTH_PX)));
         }
         table = table
             .column(TableColumn::new("Key"))
@@ -451,3 +463,7 @@ impl Render for KeyValueTable {
             .children((self.shape == KeyValueTableShape::Editable).then(|| self.render_add_row(cx)))
     }
 }
+
+#[cfg(test)]
+#[path = "key_value_table_style_tests.rs"]
+mod style_tests;

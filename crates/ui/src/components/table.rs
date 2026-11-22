@@ -1,4 +1,6 @@
-//! A data table: columns, a header row and rows of cells.
+//! A data table: columns, a header row and rows of cells, drawn as one boxed grid —
+//! a border around the table, a separator line under every band and between every
+//! column (the redesign pack's `KeyValueRow`, `06_visuals/workbench_blueprint.svg`).
 //!
 //! The table lays things out; it does not own them. A params table passes toggle and text
 //! cells, a response-headers table passes labels, and a long one is virtualized by putting
@@ -6,7 +8,7 @@
 //! column (the "enabled" box) never squeezes the text column next to it.
 
 use gpui::{
-    AbsoluteLength, AnyElement, App, ElementId, InteractiveElement, IntoElement, Keystroke,
+    AbsoluteLength, AnyElement, App, ElementId, Hsla, InteractiveElement, IntoElement, Keystroke,
     ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
     prelude::FluentBuilder,
 };
@@ -21,6 +23,26 @@ use crate::h_flex;
 use crate::spacing::DynamicSpacing;
 use crate::typography::StyledTypography;
 use crate::v_flex;
+
+/// The debug key the table's grid paints under — the test hook that lets a test
+/// measure the boxed grid (`VisualTestContext::debug_bounds`, the
+/// [`crate::components::toggle::toggle_label_selector`] pattern).
+pub const TABLE_GRID_SELECTOR: &str = "table-grid";
+
+/// The debug key the header band paints under — the test hook that lets a test measure
+/// the grid's inner edges.
+pub const TABLE_HEADER_SELECTOR: &str = "table-header";
+
+/// The debug key one column header's cell paints under — the test hook that lets a
+/// test read the header text a table paints and measure its size.
+pub fn table_header_selector(label: &str) -> String {
+    format!("table-header-{label}")
+}
+
+/// The debug key one row paints under, by its position in the table.
+pub fn table_row_selector(index: usize) -> String {
+    format!("table-row-{index}")
+}
 
 /// One column: what it is called and how wide it is.
 #[derive(Clone, Debug)]
@@ -142,10 +164,13 @@ impl RenderOnce for Table {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = cx.theme().colors();
         let columns = self.columns;
+        let column_count = columns.len();
+        let row_count = self.rows.len();
         let table_id = self.id.clone();
 
         let header = h_flex()
             .w_full()
+            .debug_selector(|| String::from(TABLE_HEADER_SELECTOR))
             .font_ui(cx)
             .gap(DynamicSpacing::Base04.rems(cx))
             .px(DynamicSpacing::Base04.rems(cx))
@@ -155,6 +180,7 @@ impl RenderOnce for Table {
             .children(columns.iter().enumerate().map(|(index, column)| {
                 div()
                     .id((table_id.clone(), format!("header-{index}")))
+                    .debug_selector(|| table_header_selector(&column.label))
                     // The header label truncates, so its tooltip carries the full value.
                     .tooltip(Tooltip::text(column.label.clone()).builder())
                     .min_w_0()
@@ -162,9 +188,12 @@ impl RenderOnce for Table {
                         Some(width) => this.w(width),
                         None => this.flex_1(),
                     })
+                    .map(|this| {
+                        grid_line_before_last(this, index, column_count, colors.border_variant)
+                    })
                     .child(
                         Label::new(column.label.clone())
-                            .size(LabelSize::XSmall)
+                            .size(LabelSize::Small)
                             .color(Color::Muted)
                             .truncate(),
                     )
@@ -172,17 +201,25 @@ impl RenderOnce for Table {
 
         let rows = self.rows.into_iter().enumerate().map(|(index, row)| {
             let striped = self.striped && index % 2 == 1;
+            let last_row = index + 1 == row_count;
             let disabled = row.disabled;
             let on_click = row.on_click;
             h_flex()
                 .id(row.id)
+                .debug_selector(|| table_row_selector(index))
                 .w_full()
                 .font_ui(cx)
                 .gap(DynamicSpacing::Base04.rems(cx))
                 .px(DynamicSpacing::Base04.rems(cx))
                 .py(DynamicSpacing::Base02.rems(cx))
-                .border_b_1()
-                .border_color(colors.border_variant)
+                // The last row closes on the table's own border instead of doubling it.
+                .map(|this| {
+                    if last_row {
+                        this
+                    } else {
+                        this.border_b_1().border_color(colors.border_variant)
+                    }
+                })
                 .map(|this| {
                     if striped {
                         this.bg(colors.panel_background)
@@ -237,28 +274,47 @@ impl RenderOnce for Table {
                         this
                     }
                 })
-                .children(
-                    row.cells
-                        .into_iter()
-                        .zip(columns.iter())
-                        .map(|(cell, column)| {
-                            div()
-                                .min_w_0()
-                                .map(|this| match column.width {
-                                    Some(width) => this.w(width),
-                                    None => this.flex_1(),
-                                })
-                                .child(cell)
-                        }),
-                )
+                .children(row.cells.into_iter().zip(columns.iter()).enumerate().map(
+                    |(index, (cell, column))| {
+                        div()
+                            .min_w_0()
+                            .map(|this| match column.width {
+                                Some(width) => this.w(width),
+                                None => this.flex_1(),
+                            })
+                            .map(|this| {
+                                grid_line_before_last(
+                                    this,
+                                    index,
+                                    column_count,
+                                    colors.border_variant,
+                                )
+                            })
+                            .child(cell)
+                    },
+                ))
         });
 
         v_flex()
             .id(self.id)
+            .debug_selector(|| String::from(TABLE_GRID_SELECTOR))
             .font_ui(cx)
             .w_full()
+            .border_1()
+            .border_color(colors.border_variant)
+            .rounded_sm()
             .child(header)
             .children(rows)
+    }
+}
+
+/// The vertical grid line between this cell and the next: the last cell in a row has
+/// no neighbour, and the table's own border closes that side.
+fn grid_line_before_last<T: Styled>(cell: T, index: usize, column_count: usize, color: Hsla) -> T {
+    if index + 1 < column_count {
+        cell.border_r_1().border_color(color)
+    } else {
+        cell
     }
 }
 
