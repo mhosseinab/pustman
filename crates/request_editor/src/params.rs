@@ -18,8 +18,19 @@ use ui::prelude::*;
 use variables::ScopeStack;
 
 use crate::key_value_table::{KeyValueTable, KeyValueTableEvent, KeyValueTableShape};
+use crate::section_title;
 use crate::url_bar::UrlBar;
 use crate::variable_highlight;
+
+/// The debug key the Path Variables section paints under — the test hook that lets a
+/// test see whether the section is on screen at all (`VisualTestContext::debug_bounds`,
+/// the `crate::send`'s selector pattern).
+pub(crate) const PATH_SECTION_SELECTOR: &str = "params-path-variables-section";
+
+/// The debug keys the tab's section titles paint under — the test hook that lets a test
+/// measure them against the column headers they must stand above (#222).
+pub(crate) const QUERY_SECTION_TITLE_SELECTOR: &str = "params-query-section-title";
+pub(crate) const PATH_SECTION_TITLE_SELECTOR: &str = "params-path-section-title";
 
 /// What a [`Params`] tells its owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -182,6 +193,27 @@ impl Params {
         self.refresh_highlights(cx);
         cx.emit(ParamsEvent::RowsChanged);
     }
+
+    /// The Path Variables section — shown only when the URL carries `:name` segments
+    /// (Postman's behaviour, #221): a path variable exists because the URL names one,
+    /// so an empty section would be noise. The table's rows are exactly those names
+    /// ([`Self::url_changed`] keeps it in step with them).
+    fn path_section(&self, cx: &App) -> Option<impl IntoElement> {
+        let url = self.url_bar.read(cx).url(cx);
+        if path_names(split_url(&url).0).is_empty() {
+            return None;
+        }
+        Some(
+            v_flex()
+                .id(ElementId::Name(SharedString::new_static(
+                    "path-variables-section",
+                )))
+                .debug_selector(|| String::from(PATH_SECTION_SELECTOR))
+                .gap(DynamicSpacing::Base04.rems(cx))
+                .child(section_title("Path Variables", PATH_SECTION_TITLE_SELECTOR))
+                .child(self.path_table.clone()),
+        )
+    }
 }
 
 impl Render for Params {
@@ -191,18 +223,10 @@ impl Render for Params {
             .size_full()
             .min_w_0()
             .gap(DynamicSpacing::Base04.rems(cx))
-            .child(section_label("Query Params"))
+            .child(section_title("Query Params", QUERY_SECTION_TITLE_SELECTOR))
             .child(self.query_table.clone())
-            .child(section_label("Path Variables"))
-            .child(self.path_table.clone())
+            .children(self.path_section(cx))
     }
-}
-
-/// A section label inside the tab.
-fn section_label(title: &'static str) -> impl IntoElement {
-    Label::new(SharedString::from(title))
-        .size(LabelSize::Small)
-        .color(Color::Muted)
 }
 
 /// The raw URL split into the part before `?`, the query without its `?`, and the
@@ -297,3 +321,7 @@ fn stored_path_row(name: &str, stored: &[KeyValue]) -> KeyValue {
 #[cfg(test)]
 #[path = "params_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "params_path_section_tests.rs"]
+mod path_section_tests;

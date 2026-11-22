@@ -44,7 +44,13 @@ use ui::prelude::*;
 use variables::{DynamicValues, ScopeKind, ScopeStack};
 
 use crate::key_value_table::{KeyValueTable, KeyValueTableEvent, KeyValueTableShape, RowField};
+use crate::section_title;
 use crate::variable_highlight;
+
+/// The debug keys the tab's section titles paint under — the test hook that lets a test
+/// measure them against the column headers they must stand above (#222).
+pub(crate) const HEADERS_SECTION_TITLE_SELECTOR: &str = "headers-section-title";
+pub(crate) const AUTO_HEADERS_SECTION_TITLE_SELECTOR: &str = "headers-auto-section-title";
 
 /// Header names the key cells suggest, most common first (REQ-HTTP-03). A `const`
 /// slice: the list is static, so its order never jitters and no map is rendered.
@@ -625,19 +631,15 @@ impl Render for Headers {
             .gap(DynamicSpacing::Base04.rems(cx))
             .on_key_down(cx.listener(Self::on_key_down))
             .capture_action::<text_input::input::Enter>(cx.listener(Self::handle_enter))
-            .child(section_label("Headers"))
+            .child(section_title("Headers", HEADERS_SECTION_TITLE_SELECTOR))
             .child(self.table.clone())
             .children(self.render_suggestions(cx))
-            .child(section_label("Automatic Headers"))
+            .child(section_title(
+                "Automatic Headers",
+                AUTO_HEADERS_SECTION_TITLE_SELECTOR,
+            ))
             .child(self.render_auto_rows(cx))
     }
-}
-
-/// A section label inside the tab.
-fn section_label(title: &'static str) -> impl IntoElement {
-    Label::new(SharedString::from(title))
-        .size(LabelSize::Small)
-        .color(Color::Muted)
 }
 
 /// The common header names `typed` is a proper prefix of, in list order.
