@@ -15,7 +15,7 @@
 
 use std::time::Duration;
 
-use api_model::HttpRequest;
+use api_model::{HttpRequest, ItemId};
 use gpui::{App, Entity, Window};
 use http_engine::{Header, Response, ResponseBody, Timings};
 use request_editor::RequestEditor;
@@ -51,7 +51,13 @@ pub fn open_entry(
     // so restoring it is a plain deserialize — the `{{var}}` templates travel through
     // untouched and resolve only when the user sends the tab.
     let request = match serde_json::from_value::<HttpRequest>(entry.request_json.clone()) {
-        Ok(request) => request,
+        // A fresh identity: the recorded one may already name an open tab (the request
+        // itself, or this entry opened before), and two tabs with one identity make the
+        // workspace's tab save fail.
+        Ok(request) => HttpRequest {
+            id: ItemId::new(),
+            ..request
+        },
         Err(_error) => {
             toast(workspace, OPEN_FAILURE_MESSAGE, cx);
             return;
@@ -169,3 +175,7 @@ fn stored_response(
 #[cfg(test)]
 #[path = "open_entry_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "open_entry_identity_tests.rs"]
+mod identity_tests;

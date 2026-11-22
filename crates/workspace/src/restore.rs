@@ -17,6 +17,7 @@
 //! on, and a tab draft is unsaved user content (PRD §7) — one fixed message per failure
 //! is all that is shown, through the workspace's toast stack.
 
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -35,6 +36,10 @@ mod tests;
 #[cfg(test)]
 #[path = "restore_atomic_tests.rs"]
 mod atomic_tests;
+
+#[cfg(test)]
+#[path = "restore_duplicate_tests.rs"]
+mod duplicate_tests;
 
 /// How long a change to the pane or a dock waits for the next one before the save task
 /// writes it — REQ-NFR-05's 2 s autosave cadence.
@@ -283,11 +288,17 @@ impl Restore {
         let workspace = self.workspace.upgrade()?;
         let workspace = workspace.read(cx);
         let pane = workspace.center_pane().read(cx);
+        // Two tabs can name one item (a history entry opened beside the request it
+        // recorded), but the store keys tabs by item id: the first tab speaks for it.
+        let mut saved_ids = HashSet::new();
         let tabs = pane
             .tabs
             .iter()
             .filter_map(|tab| {
                 let item_id = tab.handle.persistent_id(cx)?.to_string();
+                if !saved_ids.insert(item_id.clone()) {
+                    return None;
+                }
                 Some(TabSnapshot {
                     item_id,
                     pinned: tab.pinned,
