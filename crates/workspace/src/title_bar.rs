@@ -11,6 +11,8 @@ use gpui::{
 };
 use ui::prelude::*;
 
+use crate::CloseWindow;
+
 /// The title bar's stable element id and debug selector.
 pub(crate) const TITLE_BAR_SELECTOR: &str = "title-bar";
 /// The window control buttons: element ids and debug selectors both.
@@ -144,11 +146,11 @@ fn window_control(
     selector: &'static str,
     icon: IconName,
     label: &'static str,
-    action: fn(&mut Window),
+    action: fn(&mut Window, &mut App),
 ) -> impl IntoElement {
     div().debug_selector(|| selector.to_owned()).child(
         IconButton::new(selector, icon, Tooltip::text(label))
-            .on_click(move |_event, window, _cx| action(window)),
+            .on_click(move |_event, window, cx| action(window, cx)),
     )
 }
 
@@ -219,7 +221,7 @@ impl Render for TitleBar {
                     MINIMIZE_SELECTOR,
                     IconName::Minus,
                     "Minimize",
-                    |window| window.minimize_window(),
+                    |window, _cx| window.minimize_window(),
                 ))
             })
             .when(controls.maximize, |bar| {
@@ -227,14 +229,17 @@ impl Render for TitleBar {
                     MAXIMIZE_SELECTOR,
                     IconName::Square,
                     maximize_label,
-                    |window| window.zoom_window(),
+                    |window, _cx| window.zoom_window(),
                 ))
             })
             .child(window_control(
                 CLOSE_SELECTOR,
                 IconName::X,
                 "Close",
-                |window| window.remove_window(),
+                // The app's own close button must not tear the window down directly:
+                // dispatching the close action makes the shell run the same
+                // save-then-close flush a platform close takes (issue #85).
+                |window, cx| window.dispatch_action(Box::new(CloseWindow), cx),
             ))
     }
 }
@@ -246,3 +251,7 @@ mod tests;
 #[cfg(test)]
 #[path = "title_bar_move_tests.rs"]
 mod move_tests;
+
+#[cfg(test)]
+#[path = "title_bar_close_tests.rs"]
+mod close_tests;

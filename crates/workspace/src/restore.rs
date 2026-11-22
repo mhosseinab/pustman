@@ -84,6 +84,8 @@ impl Restore {
     /// Contract: the caller owns the returned handle for as long as the window lives;
     /// dropping it stops the watching and the saving. The items are rebuilt by `factory`
     /// — a tab whose factory returns `None` is reported in one toast and left out.
+    /// Attaching also hands the workspace its close hook, so the app's own close button
+    /// flushes through the same path a platform close takes (issue #85).
     pub fn attach(
         workspace: &Entity<Workspace>,
         store: Arc<Mutex<LocalStore>>,
@@ -94,6 +96,9 @@ impl Restore {
     ) -> Entity<Self> {
         let restore = cx.new(|cx| Self::new(workspace, store, workspace_id, factory, window, cx));
         restore.update(cx, |restore, cx| restore.restore_now(window, cx));
+        workspace.update(cx, |workspace, _cx| {
+            workspace.set_restore(restore.downgrade())
+        });
         restore
     }
 
@@ -369,12 +374,15 @@ impl Restore {
 
     /// The window is closing: write the tabs and layout now rather than after
     /// [`SAVE_DEBOUNCE`] — a change made inside the debounce window would otherwise be
-    /// lost with the window — and finish the close once that write landed. Returns
-    /// whether the close can happen right away; `false` hands the close to the write,
-    /// which has to land before the process exits behind the last closed window. A write
-    /// that fails keeps the window open with its unsaved drafts and the fixed message,
-    /// and the next close tries again — closing must never lose the drafts silently.
-    fn flush_on_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    /// lost with the window — and finish the close once that write landed. Both close
+    /// paths land here: a platform close through `on_window_should_close`, and the
+    /// title-bar Close control through [`crate::Workspace::close_window`] (issue #85).
+    /// Returns whether the close can happen right away; `false` hands the close to the
+    /// write, which has to land before the process exits behind the last closed window.
+    /// A write that fails keeps the window open with its unsaved drafts and the fixed
+    /// message, and the next close tries again — closing must never lose the drafts
+    /// silently.
+    pub(crate) fn flush_on_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if !self.restore_landed {
             // The saved set has not been read back yet — see `restore_landed`.
             return true;
