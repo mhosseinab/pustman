@@ -229,10 +229,12 @@ impl RequestEditor {
             cx.notify();
             return;
         };
-        // What the send carries is also what a failure's Console entry names.
+        // What the send carries is also what a failure's Console entry names. The
+        // pre-send check's own names, keychain secrets included (#198): the bar and the
+        // recorded warnings see the same list.
         let sent = self.draft.clone();
         let warnings = match resolve_request(&self.draft, &self.scopes, &mut DynamicValues::new()) {
-            Ok((_, warnings)) => warnings,
+            Ok((_, warnings)) => self.drop_keychain_resolved(warnings),
             Err(error) => {
                 self.fail_send(&sent, &error, &[], cx);
                 return;

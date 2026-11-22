@@ -292,7 +292,8 @@ impl VariableHover {
     }
 
     /// Store where hovered secrets live ([`SecretSources`]) and close any open hover —
-    /// its masked state was answered by the previous sources.
+    /// its masked state was answered by the previous sources. The pre-send check
+    /// re-runs too: the sources decide which secret names the send resolves (#198).
     pub fn set_secret_sources(&mut self, sources: SecretSources, cx: &mut Context<Self>) {
         self.sources = sources;
         self.close(cx);
@@ -723,13 +724,14 @@ impl RequestEditor {
         self.secret_sources = sources.clone();
         let hover = self.url_bar.read(cx).hover().clone();
         hover.update(cx, |hover, cx| hover.set_secret_sources(sources, cx));
+        self.recheck_unresolved(cx);
     }
 }
 
 /// The scope kind the winning variable of `name` lives in — the keychain key names a
 /// secret by scope. [`ScopeStack::find`] does not return the scope, so this walks the
 /// same precedence rule it does: the narrowest scope holding an enabled `name` wins.
-fn scope_kind_of(scopes: &ScopeStack, name: &str) -> Option<ScopeKind> {
+pub(crate) fn scope_kind_of(scopes: &ScopeStack, name: &str) -> Option<ScopeKind> {
     scopes
         .scopes()
         .iter()
