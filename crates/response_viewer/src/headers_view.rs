@@ -26,9 +26,8 @@ use ui::components::context_menu::ContextMenuEvent;
 use ui::prelude::*;
 
 use crate::child_id;
-use crate::text_selection::{
-    CellSelector, SelectableCells, TEXT_CONTEXT, selectable_cell, selection_handlers,
-};
+use crate::table_cells::{cell, column_heading};
+use crate::text_selection::{CellSelector, SelectableCells, TEXT_CONTEXT, selection_handlers};
 
 /// One header field as the table shows it: name and value, as they arrived.
 #[derive(Clone, Debug)]
@@ -268,15 +267,6 @@ impl Render for HeadersView {
     }
 }
 
-/// The `Name` / `Value` headings above the rows.
-fn column_heading(heading: &'static str) -> impl IntoElement {
-    div().flex_1().min_w_0().child(
-        Label::new(heading)
-            .size(LabelSize::XSmall)
-            .color(Color::Muted),
-    )
-}
-
 /// What every row of one frame renders from, moved into the list's row closure.
 struct RowTable {
     rows: Arc<Vec<HeaderRow>>,
@@ -402,23 +392,6 @@ fn open_row_menu(
         // The table went away between the click and here; there is no row left to open
         // a menu for.
     }
-}
-
-/// One header cell: selectable text in the content font, truncated with the full value
-/// behind a tooltip. `index` is its place in the flattened cells (`set_headers`).
-fn cell(
-    id: ElementId,
-    index: usize,
-    text: SharedString,
-    selection: &CellSelector,
-    view: &WeakEntity<HeadersView>,
-    cx: &App,
-) -> impl IntoElement {
-    selectable_cell(id, index, text, selection.range_on(index), view.clone(), cx)
-        .flex_1()
-        .font_buffer(cx)
-        .text_ui_sm(cx)
-        .text_color(cx.theme().colors().text)
 }
 
 /// The state where there is nothing to list: before the first response, or a response

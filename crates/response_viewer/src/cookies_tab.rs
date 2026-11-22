@@ -31,9 +31,8 @@ use ui::prelude::*;
 use gpui::WeakEntity;
 
 use crate::child_id;
-use crate::text_selection::{
-    CellSelector, SelectableCells, TEXT_CONTEXT, selectable_cell, selection_handlers,
-};
+use crate::table_cells::{cell, column_heading};
+use crate::text_selection::{CellSelector, SelectableCells, TEXT_CONTEXT, selection_handlers};
 
 /// Shown where a cookie attribute is absent.
 const ABSENT: &str = "—";
@@ -351,15 +350,6 @@ impl Render for CookiesTab {
     }
 }
 
-/// One column heading above the rows (`headers_view`'s, same shape).
-fn column_heading(heading: &str) -> impl IntoElement {
-    div().flex_1().min_w_0().child(
-        Label::new(heading)
-            .size(LabelSize::XSmall)
-            .color(Color::Muted),
-    )
-}
-
 /// One cookie row: the nine attribute cells, each truncating with its full value in a
 /// tooltip.
 fn render_row(
@@ -386,18 +376,14 @@ fn render_row(
         .children(COLUMNS.iter().zip(cells).enumerate().map(
             |(column_index, ((column, _heading), text))| {
                 let cell_index = index * COLUMNS.len() + column_index;
-                selectable_cell(
+                cell(
                     child_id(&row_id, *column),
                     cell_index,
                     text,
-                    selection.range_on(cell_index),
-                    view.clone(),
+                    selection,
+                    view,
                     cx,
                 )
-                .flex_1()
-                .font_buffer(cx)
-                .text_ui_sm(cx)
-                .text_color(cx.theme().colors().text)
             },
         ))
         .into_any_element()
