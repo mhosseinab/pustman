@@ -1,8 +1,9 @@
 //! Layout and tab restore (PRD REQ-UI-01/02, REQ-NFR-05): what a window looked like when
 //! it last closed comes back when it opens. [`Restore`] watches the pane and the two
 //! docks and keeps `storage`'s `open_tabs` and `layout` rows up to date — debounced, on a
-//! background task — and applies them back at window open through the caller's
-//! [`ItemFactory`]. A tab whose item is gone is reported in a toast, not restored.
+//! background task, and flushed once more when the window closes — and applies them back
+//! at window open through the caller's [`ItemFactory`]. A tab whose item is gone is
+//! reported in a toast, not restored.
 //!
 //! `workspace` knows nothing about the feature crates whose items fill the tabs, so the
 //! caller supplies the factory (one closure, not a plugin framework) and owns the handle
@@ -16,7 +17,6 @@
 //! on, and a tab draft is unsaved user content (PRD §7) — one fixed message per failure
 //! is all that is shown, through the workspace's toast stack.
 
-use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -31,6 +31,10 @@ use crate::item::ItemHandle;
 #[cfg(test)]
 #[path = "restore_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "restore_atomic_tests.rs"]
+mod atomic_tests;
 
 /// How long a change to the pane or a dock waits for the next one before the save task
 /// writes it — REQ-NFR-05's 2 s autosave cadence.
@@ -59,12 +63,17 @@ pub struct Restore {
     workspace_id: String,
     workspace: WeakEntity<Workspace>,
     factory: ItemFactory,
-    /// The debounced save. Each change replaces the task, and dropping the old task
-    /// cancels the write it had not started — one write per burst of changes.
+    /// The pending write — the debounced save, the autosave write or the closing flush.
+    /// Each new one replaces the task, and dropping the old task cancels the write it had
+    /// not started — one write per burst of changes.
     pending_save: Option<Task<()>>,
     /// Set while a restore is landing, so its own tab pushes and dock changes do not
     /// schedule a save of what was just read.
     is_restoring: bool,
+    /// Whether the saved set has been read back (or reported unreadable). Until then the
+    /// window's tabs are not the saved ones yet, and a close must not flush them over the
+    /// set in `storage` — what is stored is the more complete state (issue #85).
+    restore_landed: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -119,6 +128,18 @@ impl Restore {
                 restore.schedule_save(cx)
             }),
         ];
+        // Closing the window flushes the save the debounce may not have reached yet, and
+        // that write then finishes the close (the shape Zed uses for a close handled
+        // asynchronously, `crates/zed/src/zed.rs`): the write cannot be lost to the
+        // process exiting behind the last closed window.
+        window.on_window_should_close(cx, {
+            let restore = cx.entity().downgrade();
+            move |window, cx| {
+                restore
+                    .update(cx, |restore, cx| restore.flush_on_close(window, cx))
+                    .unwrap_or(true)
+            }
+        });
         Self {
             store,
             workspace_id,
@@ -126,6 +147,7 @@ impl Restore {
             factory,
             pending_save: None,
             is_restoring: false,
+            restore_landed: false,
             _subscriptions,
         }
     }
@@ -152,8 +174,11 @@ impl Restore {
                 Err(_error) => {
                     // The failure is folded into the fixed message (PRD §7); this is
                     // where it reaches the user (AGENTS.md › errors must reach the user).
+                    // Nothing was applied and nothing will be: the window's tabs are its
+                    // own from here on, and closing may save them.
                     if let Err(_released) = this.update(cx, |restore, cx| {
                         restore.report(READ_FAILURE_MESSAGE, Severity::Error, cx);
+                        restore.restore_landed = true;
                     }) {
                         // Handled: the workspace went away with its window.
                     }
@@ -235,7 +260,10 @@ impl Restore {
         // in the order they were queued, so `defer_in` runs after the pane and dock
         // observers this restore just woke. Without that, every restore would schedule a
         // save of the state it just read back.
-        cx.defer_in(window, |restore, _window, _cx| restore.is_restoring = false);
+        cx.defer_in(window, |restore, _window, _cx| {
+            restore.is_restoring = false;
+            restore.restore_landed = true;
+        });
     }
 
     /// The workspace's current layout and tabs as they should be stored. Items without a
@@ -324,17 +352,11 @@ impl Restore {
         if self.is_restoring {
             return;
         }
-        let Some(snapshot) = self.snapshot(cx) else {
+        let Some(write) = self.start_write(cx) else {
             return;
         };
-        let store = Arc::clone(&self.store);
-        let workspace_id = self.workspace_id.clone();
         self.pending_save = Some(cx.spawn(async move |this, cx| {
-            let write = cx
-                .background_executor()
-                .spawn(async move { write_snapshot(&store, &workspace_id, &snapshot) })
-                .await;
-            if let Err(_error) = write
+            if let Err(_error) = write.await
                 && let Err(_released) = this.update(cx, |restore, cx| {
                     restore.report(WRITE_FAILURE_MESSAGE, Severity::Error, cx);
                 })
@@ -343,6 +365,54 @@ impl Restore {
                 // tell that the write failed.
             }
         }));
+    }
+
+    /// The window is closing: write the tabs and layout now rather than after
+    /// [`SAVE_DEBOUNCE`] — a change made inside the debounce window would otherwise be
+    /// lost with the window — and finish the close once that write landed. Returns
+    /// whether the close can happen right away; `false` hands the close to the write,
+    /// which has to land before the process exits behind the last closed window. A write
+    /// that fails keeps the window open with its unsaved drafts and the fixed message,
+    /// and the next close tries again — closing must never lose the drafts silently.
+    fn flush_on_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.restore_landed {
+            // The saved set has not been read back yet — see `restore_landed`.
+            return true;
+        }
+        let Some(write) = self.start_write(cx) else {
+            return true;
+        };
+        self.pending_save = Some(cx.spawn_in(window, async move |this, cx| {
+            if let Err(_error) = write.await {
+                if let Err(_released) = this.update_in(cx, |restore, _window, cx| {
+                    restore.report(WRITE_FAILURE_MESSAGE, Severity::Error, cx);
+                }) {
+                    // Handled: the window is gone; no one is left to tell that the
+                    // write failed.
+                }
+                return;
+            }
+            if let Err(_released) =
+                this.update_in(cx, |_restore, window, _cx| window.remove_window())
+            {
+                // Handled: the window closed itself while the write was landing.
+            }
+        }));
+        false
+    }
+
+    /// The write itself, on the background executor: [`write_snapshot`] of the current
+    /// layout and tabs with the store handle and workspace id it needs. The debounced
+    /// save, the autosave and the closing flush all run this one path; dropping the
+    /// returned task with `pending_save` cancels the write it had not finished.
+    fn start_write(&self, cx: &App) -> Option<Task<anyhow::Result<()>>> {
+        let snapshot = self.snapshot(cx)?;
+        let store = Arc::clone(&self.store);
+        let workspace_id = self.workspace_id.clone();
+        Some(
+            cx.background_executor()
+                .spawn(async move { write_snapshot(&store, &workspace_id, &snapshot) }),
+        )
     }
 
     /// Show `message` through the workspace's toast stack — the one door
@@ -421,48 +491,35 @@ fn read_snapshot(store: &Mutex<LocalStore>, workspace_id: &str) -> anyhow::Resul
     Ok(Snapshot { layout, tabs })
 }
 
-/// Replace one workspace's saved state with `snapshot`, touching no other workspace.
-/// `open_tabs` has no clear-a-workspace call, so the set is replaced by difference: rows
-/// whose tab is gone are deleted one by one and the rest are inserted (its `insert`
-/// upserts on `(workspace_id, item_id)`). No transaction API exists either, so a task
-/// interrupted halfway can leave the rows partly replaced until the next save — the same
-/// limitation `http_engine`'s cookie persistence accepts.
+/// Replace one workspace's saved state with `snapshot`, touching no other workspace. The
+/// tab set is replaced by one transaction ([`LocalStore::replace_workspace_tabs`]): the
+/// rows that are gone and the rows that arrive land together, so a task interrupted
+/// halfway leaves the previous set in place instead of half of each (PRD REQ-UI-02).
 fn write_snapshot(
     store: &Mutex<LocalStore>,
     workspace_id: &str,
     snapshot: &Snapshot,
 ) -> anyhow::Result<()> {
-    let store_guard = lock_store(store)?;
-    let open_tabs = store_guard.open_tabs();
-    let kept: HashSet<&str> = snapshot
+    let mut store_guard = lock_store(store)?;
+    let rows = snapshot
         .tabs
         .iter()
-        .map(|tab| tab.item_id.as_str())
-        .collect();
-    for row in open_tabs
-        .list(workspace_id)
-        .map_err(|_error| write_failure())?
-    {
-        if !kept.contains(row.item_id.as_str()) {
-            open_tabs
-                .delete(workspace_id, &row.item_id)
-                .map_err(|_error| write_failure())?;
-        }
-    }
-    for (index, tab) in snapshot.tabs.iter().enumerate() {
-        let position = i64::try_from(index).map_err(|_error| write_failure())?;
-        open_tabs
-            .insert(&OpenTab {
+        .enumerate()
+        .map(|(index, tab)| {
+            Ok(OpenTab {
                 workspace_id: workspace_id.to_owned(),
-                position,
+                position: i64::try_from(index).map_err(|_error| write_failure())?,
                 item_id: tab.item_id.clone(),
                 pinned: tab.pinned,
                 // The draft is the item's own opaque text (REQ-NFR-05); the column holds
                 // it as a JSON string document.
                 draft_json: tab.draft.clone().map(serde_json::Value::String),
             })
-            .map_err(|_error| write_failure())?;
-    }
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    store_guard
+        .replace_workspace_tabs(workspace_id, &rows)
+        .map_err(|_error| write_failure())?;
     if let Some(layout) = &snapshot.layout {
         let json = serde_json::to_value(layout).map_err(|_error| write_failure())?;
         store_guard
