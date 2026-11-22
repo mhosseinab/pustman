@@ -4,7 +4,14 @@
 # One line per stage ("fmt ok" ...); last line "VERIFY OK", or "VERIFY FAIL <stage>" and exit 1.
 set -euo pipefail
 
+log="$(mktemp)"
+trap 'rm -f "$log"' EXIT
+
+# On failure, name what failed (CI has no other window into a hidden stage), then the verdict.
 stage_fail() {
+  if [ -s "$log" ]; then
+    grep -E '^test .* FAILED|panicked at|^error(\[|:)|^failures:$|^    [a-z_:]+$' "$log" | head -40 >&2 || true
+  fi
   echo "VERIFY FAIL $1" >&2
   exit 1
 }
@@ -19,10 +26,10 @@ fi
 cargo fmt --all -- --check >/dev/null 2>&1 || stage_fail fmt
 echo "fmt ok"
 
-cargo clippy --workspace --all-targets -- -D warnings >/dev/null 2>&1 || stage_fail clippy
+cargo clippy --workspace --all-targets -- -D warnings >"$log" 2>&1 || stage_fail clippy
 echo "clippy ok"
 
-cargo test --workspace >/dev/null 2>&1 || stage_fail test
+cargo test --workspace --no-fail-fast >"$log" 2>&1 || stage_fail test
 echo "test ok"
 
 scripts/pustman-v1-tripwire.sh || stage_fail tripwire
