@@ -29,10 +29,7 @@ use text_input::input::Paste;
 use ui::prelude::*;
 
 use crate::RequestEditor;
-use crate::headers::Headers;
-use crate::params::Params;
 use crate::send::InlineError;
-use crate::url_bar::UrlBar;
 
 /// Test hook: the row under the URL bar that says a cURL command was imported and
 /// offers to undo it.
@@ -142,26 +139,16 @@ impl RequestEditor {
         cx: &mut Context<Self>,
     ) {
         self.draft = request.clone();
-        let url_bar =
-            cx.new(|cx| UrlBar::new(request.method.clone(), request.url.clone(), window, cx));
-        self._url_bar_subscription = cx.subscribe_in(&url_bar, window, Self::on_url_bar_event);
-        self.url_bar = url_bar.clone();
-        let params = cx.new(|cx| Params::new(&request, url_bar, window, cx));
-        self._params_subscription = cx.subscribe_in(&params, window, Self::on_params_event);
-        self.params = params;
-        let headers = cx.new(|cx| Headers::new(&request, window, cx));
-        self._headers_subscription = cx.subscribe_in(&headers, window, Self::on_headers_event);
-        self.headers = headers;
-        let body_tab = cx.new(|cx| crate::body_tab::BodyTab::new(&request, window, cx));
-        self._body_tab_subscription = cx.subscribe_in(&body_tab, window, Self::on_body_tab_event);
-        self.body_tab = body_tab;
         // The Auth tab keeps its parent chain: an import replaces the request in
         // place, so the folder and collection above it are unchanged.
         let parents = self.auth_tab.read(cx).parents().to_vec();
-        let auth_tab = cx.new(|cx| crate::auth_tab::AuthTab::new(&request, window, cx));
-        auth_tab.update(cx, |tab, cx| tab.set_parents(parents, cx));
-        self._auth_tab_subscription = cx.subscribe_in(&auth_tab, window, Self::on_auth_tab_event);
-        self.auth_tab = auth_tab;
+        // The one construction path `RequestEditor::new` builds from (issue #159),
+        // installed over the fields of the request being replaced.
+        let fields = Self::build_request_fields(&request, window, cx);
+        fields
+            .auth_tab
+            .update(cx, |tab, cx| tab.set_parents(parents, cx));
+        fields.install(self);
         // The rebuilt fields hold empty scopes until the editor's own are pushed into
         // them again — `{{variables}}` must keep resolving against one set everywhere
         // (S33e).
@@ -181,3 +168,7 @@ mod tests;
 #[cfg(test)]
 #[path = "curl_paste_banner_tests.rs"]
 mod banner_tests;
+
+#[cfg(test)]
+#[path = "replace_request_fields_tests.rs"]
+mod replace_request_fields_tests;

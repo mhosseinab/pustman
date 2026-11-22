@@ -140,21 +140,89 @@ pub struct RequestEditor {
     _tab_bar_subscription: Subscription,
 }
 
+/// The request-derived children of a [`RequestEditor`] — the URL bar and the Params,
+/// Headers, Body and Auth tabs — with the subscriptions that wire their events back to
+/// the editor. [`RequestEditor::new`] and `curl_paste`'s `replace_request` build them
+/// through one shared path (issue #159), so a rebuild cannot drift from the original
+/// construction. The Settings tab is not among them: it mirrors the draft and re-seeds
+/// itself whenever its tab is activated (`on_tab_bar_event`).
+struct RequestFields {
+    url_bar: Entity<UrlBar>,
+    params: Entity<Params>,
+    headers: Entity<Headers>,
+    body_tab: Entity<BodyTab>,
+    auth_tab: Entity<AuthTab>,
+    _url_bar_subscription: Subscription,
+    _params_subscription: Subscription,
+    _headers_subscription: Subscription,
+    _body_tab_subscription: Subscription,
+    _auth_tab_subscription: Subscription,
+}
+
+impl RequestFields {
+    /// Put these fields in `editor`, dropping whatever was there — the old children
+    /// and their subscriptions go together.
+    fn install(self, editor: &mut RequestEditor) {
+        editor.url_bar = self.url_bar;
+        editor.params = self.params;
+        editor.headers = self.headers;
+        editor.body_tab = self.body_tab;
+        editor.auth_tab = self.auth_tab;
+        editor._url_bar_subscription = self._url_bar_subscription;
+        editor._params_subscription = self._params_subscription;
+        editor._headers_subscription = self._headers_subscription;
+        editor._body_tab_subscription = self._body_tab_subscription;
+        editor._auth_tab_subscription = self._auth_tab_subscription;
+    }
+}
+
 impl RequestEditor {
+    /// Build every request-derived field from `request`, each wired to its handler.
+    fn build_request_fields(
+        request: &HttpRequest,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> RequestFields {
+        let url_bar =
+            cx.new(|cx| UrlBar::new(request.method.clone(), request.url.clone(), window, cx));
+        let _url_bar_subscription = cx.subscribe_in(&url_bar, window, Self::on_url_bar_event);
+        let params = cx.new(|cx| Params::new(request, url_bar.clone(), window, cx));
+        let _params_subscription = cx.subscribe_in(&params, window, Self::on_params_event);
+        let headers = cx.new(|cx| Headers::new(request, window, cx));
+        let _headers_subscription = cx.subscribe_in(&headers, window, Self::on_headers_event);
+        let body_tab = cx.new(|cx| BodyTab::new(request, window, cx));
+        let _body_tab_subscription = cx.subscribe_in(&body_tab, window, Self::on_body_tab_event);
+        let auth_tab = cx.new(|cx| AuthTab::new(request, window, cx));
+        let _auth_tab_subscription = cx.subscribe_in(&auth_tab, window, Self::on_auth_tab_event);
+        RequestFields {
+            url_bar,
+            params,
+            headers,
+            body_tab,
+            auth_tab,
+            _url_bar_subscription,
+            _params_subscription,
+            _headers_subscription,
+            _body_tab_subscription,
+            _auth_tab_subscription,
+        }
+    }
+
     /// An editor for `request`, with its method and URL already in the bar. The request
     /// starts clean: it is dirty once the bar applies an edit.
     pub fn new(request: HttpRequest, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let url_bar =
-            cx.new(|cx| UrlBar::new(request.method.clone(), request.url.clone(), window, cx));
-        let url_bar_subscription = cx.subscribe_in(&url_bar, window, Self::on_url_bar_event);
-        let params = cx.new(|cx| Params::new(&request, url_bar.clone(), window, cx));
-        let params_subscription = cx.subscribe_in(&params, window, Self::on_params_event);
-        let headers = cx.new(|cx| Headers::new(&request, window, cx));
-        let headers_subscription = cx.subscribe_in(&headers, window, Self::on_headers_event);
-        let body_tab = cx.new(|cx| BodyTab::new(&request, window, cx));
-        let body_tab_subscription = cx.subscribe_in(&body_tab, window, Self::on_body_tab_event);
-        let auth_tab = cx.new(|cx| AuthTab::new(&request, window, cx));
-        let auth_tab_subscription = cx.subscribe_in(&auth_tab, window, Self::on_auth_tab_event);
+        let RequestFields {
+            url_bar,
+            params,
+            headers,
+            body_tab,
+            auth_tab,
+            _url_bar_subscription,
+            _params_subscription,
+            _headers_subscription,
+            _body_tab_subscription,
+            _auth_tab_subscription,
+        } = Self::build_request_fields(&request, window, cx);
         let settings_tab = cx.new(|cx| SettingsTab::new(&request, window, cx));
         let settings_tab_subscription =
             cx.subscribe_in(&settings_tab, window, Self::on_settings_tab_event);
@@ -211,11 +279,11 @@ impl RequestEditor {
             split_fraction: response_split::DEFAULT_SPLIT_FRACTION,
             scopes: std::sync::Arc::new(variables::ScopeStack::new()),
             secret_sources: SecretSources::default(),
-            _url_bar_subscription: url_bar_subscription,
-            _params_subscription: params_subscription,
-            _headers_subscription: headers_subscription,
-            _body_tab_subscription: body_tab_subscription,
-            _auth_tab_subscription: auth_tab_subscription,
+            _url_bar_subscription,
+            _params_subscription,
+            _headers_subscription,
+            _body_tab_subscription,
+            _auth_tab_subscription,
             _settings_tab_subscription: settings_tab_subscription,
             _tab_bar_subscription: tab_bar_subscription,
         }
