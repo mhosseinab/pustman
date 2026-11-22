@@ -21,6 +21,11 @@ use crate::key_value_table::{KeyValueTable, KeyValueTableEvent, KeyValueTableSha
 use crate::url_bar::UrlBar;
 use crate::variable_highlight;
 
+/// The debug key the Path Variables section paints under — the test hook that lets a
+/// test see whether the section is on screen at all (`VisualTestContext::debug_bounds`,
+/// the `crate::send`'s selector pattern).
+pub(crate) const PATH_SECTION_SELECTOR: &str = "params-path-variables-section";
+
 /// What a [`Params`] tells its owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParamsEvent {
@@ -182,6 +187,27 @@ impl Params {
         self.refresh_highlights(cx);
         cx.emit(ParamsEvent::RowsChanged);
     }
+
+    /// The Path Variables section — shown only when the URL carries `:name` segments
+    /// (Postman's behaviour, #221): a path variable exists because the URL names one,
+    /// so an empty section would be noise. The table's rows are exactly those names
+    /// ([`Self::url_changed`] keeps it in step with them).
+    fn path_section(&self, cx: &App) -> Option<impl IntoElement> {
+        let url = self.url_bar.read(cx).url(cx);
+        if path_names(split_url(&url).0).is_empty() {
+            return None;
+        }
+        Some(
+            v_flex()
+                .id(ElementId::Name(SharedString::new_static(
+                    "path-variables-section",
+                )))
+                .debug_selector(|| String::from(PATH_SECTION_SELECTOR))
+                .gap(DynamicSpacing::Base04.rems(cx))
+                .child(section_label("Path Variables"))
+                .child(self.path_table.clone()),
+        )
+    }
 }
 
 impl Render for Params {
@@ -193,8 +219,7 @@ impl Render for Params {
             .gap(DynamicSpacing::Base04.rems(cx))
             .child(section_label("Query Params"))
             .child(self.query_table.clone())
-            .child(section_label("Path Variables"))
-            .child(self.path_table.clone())
+            .children(self.path_section(cx))
     }
 }
 
@@ -297,3 +322,7 @@ fn stored_path_row(name: &str, stored: &[KeyValue]) -> KeyValue {
 #[cfg(test)]
 #[path = "params_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "params_path_section_tests.rs"]
+mod path_section_tests;
