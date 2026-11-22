@@ -3,9 +3,9 @@
 //!
 //! The Headers and Cookies tables each carried their own copy of both (S30e review 1
 //! finding 3); one implementation keeps their look, their truncation and their test
-//! hooks in step. The Timeline tab's cells are the same cell in the shape its table
-//! needs — laid out around itself rather than sized by a [`ColumnWidth`]
-//! ([`selectable_text_cell`], S31a review 1).
+//! hooks in step. The Timeline tab's cells ([`selectable_text_cell`], S31a review 1) and
+//! the cookie dialog's ([`plain_cell`], S36a review 1) are the same cell in their own
+//! shapes: one its table lays out around itself, one that selects nothing.
 //!
 //! `Decision:` a heading paints under `column-heading-<heading>` and a cell under the id
 //! its table passes in — the debug-selector contract [`crate::text_selection`] already
@@ -98,6 +98,27 @@ pub(crate) fn selectable_text_cell<V: SelectableCells>(
 ) -> Stateful<Div> {
     cell_text(
         selectable_cell(id, index, text, selection.range_on(index), view.clone(), cx),
+        cx,
+    )
+}
+
+/// One cell of a table that selects nothing — the cookie dialog's rows — in the same
+/// look as [`cell`]: the shared text, truncated with the full value behind a tooltip,
+/// in a column of its table's own width.
+pub(crate) fn plain_cell(
+    id: ElementId,
+    text: SharedString,
+    width: ColumnWidth,
+    cx: &App,
+) -> Stateful<Div> {
+    cell_text(
+        width.sized(
+            div()
+                .id(id.clone())
+                .debug_selector(move || id.to_string())
+                .tooltip(Tooltip::text(text.clone()).builder())
+                .child(div().w_full().min_w_0().truncate().child(text)),
+        ),
         cx,
     )
 }
