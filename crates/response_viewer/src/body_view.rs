@@ -1469,8 +1469,10 @@ fn split_lines(text: &str) -> Vec<SharedString> {
 }
 
 /// The whole body's bytes, read off the foreground: the file behind a streamed or spilled
-/// body, with the spilled prefix kept in front of the remainder.
-fn body_bytes(response: &Response) -> std::io::Result<Vec<u8>> {
+/// body, with the spilled prefix kept in front of the remainder. One extraction for every
+/// caller — the pane's loader above and `save_body`'s save/copy — each on a background
+/// task (AGENTS.md › Async) (#145).
+pub(crate) fn body_bytes(response: &Response) -> std::io::Result<Vec<u8>> {
     match &response.body {
         ResponseBody::Bytes(bytes) => Ok(bytes.clone()),
         ResponseBody::File { path, .. } => std::fs::read(path),

@@ -22,20 +22,21 @@
 //! `Decision:` the save dialog opens at the process's working directory and suggests
 //! `SUGGESTED_NAME` — this layer has no request name to derive one from.
 //!
-//! `Decision:` [`body_bytes`] repeats the three-arm extraction `body_view` keeps
-//! private: `body_view.rs` belongs to a parallel step (S29b) and cannot be edited here.
-//! A follow-up collapses the two into one.
+//! `Decision:` the body's bytes come from one extraction, `body_view::body_bytes` — it
+//! was duplicated here while `body_view.rs` belonged to a parallel step (S29b), and the
+//! two are one again (#145). Both call sites run it on a background task (AGENTS.md ›
+//! Async).
 
 use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
 use gpui::{AnyWindowHandle, ClipboardItem};
-use http_engine::{Response, ResponseBody};
 use pustman_actions::response::{CopyBody, SaveBody};
 use ui::prelude::*;
 use workspace::Workspace;
 
 use crate::ResponseView;
+use crate::body_view::body_bytes;
 
 /// The name the save dialog starts with (see the module docs).
 const SUGGESTED_NAME: &str = "response-body.txt";
@@ -137,23 +138,6 @@ impl ResponseView {
 /// part of the save a test can pin down (REQ-RESP-07).
 pub fn write_body(path: &Path, body: &[u8]) -> anyhow::Result<()> {
     std::fs::write(path, body).with_context(|| format!("could not write {}", path.display()))
-}
-
-/// The whole body's bytes: an in-memory body as it is, a streamed or spilled body read
-/// from its file with the in-memory prefix kept in front. Belongs on a background task
-/// (AGENTS.md › Async) — see the module docs for why it is not `body_view`'s.
-fn body_bytes(response: &Response) -> std::io::Result<Vec<u8>> {
-    match &response.body {
-        ResponseBody::Bytes(bytes) => Ok(bytes.clone()),
-        ResponseBody::File { path, .. } => std::fs::read(path),
-        ResponseBody::Spilled { prefix, file, .. } => {
-            let remainder = std::fs::read(file.path())?;
-            let mut bytes = Vec::with_capacity(prefix.len() + remainder.len());
-            bytes.extend_from_slice(prefix);
-            bytes.extend_from_slice(&remainder);
-            Ok(bytes)
-        }
-    }
 }
 
 /// Show `message` as a toast over the workspace shell hosting `window_handle`
