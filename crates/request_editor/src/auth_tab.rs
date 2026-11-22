@@ -22,9 +22,13 @@
 //! The label is computed with [`effective_auth`] over that chain — the model's own
 //! walk, never a second one here. With no chain set it reads "No auth inherited".
 //!
-//! `Decision:` `text_input`'s [`TextInput`] has no masked mode (adding one is outside
-//! this step's Edits), so a password or token echoes its value in its own field.
-//! Values are never logged and leave the tab only into the request draft.
+//! `Decision:` the three credential fields (Basic password, Bearer token, API key
+//! value) run `text_input`'s masked mode (#178): they show one mask per character to
+//! the line they paint and to the platform alike, never the value — S06 reads the
+//! effective auth "without exposing credentials". Masking is display-deep:
+//! [`AuthTab::auth`] still hands the draft the value. The fields a user names things
+//! in (username, API key name) stay clear; secret reveal is a separate concern (S03)
+//! and is not this mode.
 //!
 //! `Decision:` the REQ-VAR-SHARE-03 nudge is one per tab instance and non-blocking:
 //! a single inline row of the tab — not a toast per keystroke, not a persistent
@@ -132,7 +136,8 @@ enum AuthField {
 }
 
 impl AuthField {
-    /// Whether a value typed here is a credential the REQ-VAR-SHARE-03 nudge watches.
+    /// Whether a value typed here is a credential: the one list behind both the
+    /// REQ-VAR-SHARE-03 nudge and the masked fields (#178).
     fn is_secret(self) -> bool {
         matches!(
             self,
@@ -189,11 +194,11 @@ impl AuthTab {
     /// The tab for `request`: every type's state seeded from its auth, so the tab
     /// round-trips what the request already carries until the user edits it.
     pub fn new(request: &HttpRequest, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let basic_username_input = make_input("Username", window, cx);
-        let basic_password_input = make_input("Password", window, cx);
-        let bearer_token_input = make_input("Token", window, cx);
-        let api_key_name_input = make_input("Key", window, cx);
-        let api_key_value_input = make_input("Value", window, cx);
+        let basic_username_input = make_input("Username", AuthField::BasicUsername, window, cx);
+        let basic_password_input = make_input("Password", AuthField::BasicPassword, window, cx);
+        let bearer_token_input = make_input("Token", AuthField::BearerToken, window, cx);
+        let api_key_name_input = make_input("Key", AuthField::ApiKeyName, window, cx);
+        let api_key_value_input = make_input("Value", AuthField::ApiKeyValue, window, cx);
         let mut tab = Self {
             parents: Vec::new(),
             auth_type: AuthType::None,
@@ -843,14 +848,23 @@ fn form_row(
 }
 
 /// One stored, tab-reachable field: a single-line [`TextInput`] reporting edits back
-/// to the tab.
+/// to the tab. A credential field ([`AuthField::is_secret`]) runs `text_input`'s
+/// masked mode, so its value never echoes in clear (#178) — and `is_secret` stays the
+/// one list of which fields those are.
 fn make_input(
     placeholder: &'static str,
+    field: AuthField,
     window: &mut Window,
     cx: &mut Context<AuthTab>,
 ) -> Entity<TextInput> {
-    let input =
-        cx.new(|cx| TextInput::new(window, cx).with_placeholder(SharedString::from(placeholder)));
+    let input = cx.new(|cx| {
+        let input = TextInput::new(window, cx).with_placeholder(SharedString::from(placeholder));
+        if field.is_secret() {
+            input.with_masked()
+        } else {
+            input
+        }
+    });
     // `text_input`'s handle defaults to not being a tab stop; every field belongs in
     // the tab order (keyboard-first).
     input.read(cx).focus_handle(cx).tab_stop(true);
@@ -919,3 +933,7 @@ mod layout_tests;
 #[cfg(test)]
 #[path = "auth_tab_menu_tooltip_tests.rs"]
 mod menu_tooltip_tests;
+
+#[cfg(test)]
+#[path = "auth_tab_mask_tests.rs"]
+mod mask_tests;

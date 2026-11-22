@@ -33,6 +33,12 @@ pub const TEXT_INPUT_CONTEXT: &str = "TextInput";
 /// The debug selector the placeholder carries, so a test can see it come and go.
 pub const PLACEHOLDER_SELECTOR: &str = "text-input-placeholder";
 
+/// Masked mode's stand-in character ([`TextInput::with_masked`]): one stands per
+/// character of a masked field's text. It is one UTF-16 unit in the offsets the
+/// platform speaks and uniformly three UTF-8 bytes in the shaped line, so every
+/// display offset is a whole number of masks.
+const MASK_CHARACTER: char = '\u{2022}';
+
 /// Test hook: the single-line field's own box, under `VisualTestContext::debug_bounds`.
 pub const TEXT_INPUT_SELECTOR: &str = "text-input";
 
@@ -854,6 +860,28 @@ impl EditState {
         self.offset_from_utf16(range_utf16.start)..self.offset_from_utf16(range_utf16.end)
     }
 
+    /// The number of characters before `offset` — masked mode's display metric: one
+    /// [`MASK_CHARACTER`] stands per character of the text (see
+    /// [`TextInput::with_masked`]).
+    pub fn char_count_before(&self, offset: usize) -> usize {
+        let mut count = 0;
+        let mut byte_offset = 0;
+        for character in self.buffer.chars() {
+            if byte_offset >= offset {
+                break;
+            }
+            byte_offset += character.len_utf8();
+            count += 1;
+        }
+        count
+    }
+
+    /// [`Self::char_count_before`]'s inverse: the byte offset of the `index`th
+    /// character, clamped to the text.
+    pub fn offset_of_char(&self, index: usize) -> usize {
+        self.buffer.chars().take(index).map(char::len_utf8).sum()
+    }
+
     /// The text in a UTF-16 range, with the platform's view of the range that was read.
     pub fn text_for_range_utf16(
         &mut self,
@@ -1096,6 +1124,9 @@ pub(crate) fn offset_for_hit_outside_text(
 pub struct TextInput {
     state: EditState,
     placeholder: SharedString,
+    /// Masked mode: the shaped line and the platform read [`MASK_CHARACTER`]s, never
+    /// the value ([`Self::with_masked`]).
+    masked: bool,
     // The layout cache is plain interior mutability on purpose: the element learns the
     // text's geometry while painting and must record it without updating the entity
     // (never `Entity::update` from `render`/`paint`).
@@ -1110,6 +1141,7 @@ impl TextInput {
         Self {
             state: EditState::new(cx, false),
             placeholder: SharedString::default(),
+            masked: false,
             last_layout: RefCell::new(None),
             last_bounds: Cell::new(None),
             shaped_revision: Cell::new(0),
@@ -1120,6 +1152,38 @@ impl TextInput {
     pub fn with_placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.placeholder = placeholder.into();
         self
+    }
+
+    /// Mask the field: the painted line and the platform read one [`MASK_CHARACTER`]
+    /// per character of the text, never the value itself. Editing, selection and
+    /// copying keep working on the real text — copying a password copies the password.
+    ///
+    /// `Decision:` masking is display-deep and lives in exactly the two doors that
+    /// *show* text: the line the field shapes and the text it hands the platform
+    /// (S06: identify auth "without exposing credentials"). One mask per character —
+    /// not per byte — keeps the masks countable against what was typed. A masked field
+    /// paints one uniform run: highlight colours and the IME's composing underline
+    /// over masks would leak the shape of the value (S03 keeps secret reveal a
+    /// separate concern, and it is not this mode).
+    pub fn with_masked(mut self) -> Self {
+        self.masked = true;
+        self
+    }
+
+    /// Whether the field masks its value.
+    pub fn is_masked(&self) -> bool {
+        self.masked
+    }
+
+    /// The text the field shows: the value, or one [`MASK_CHARACTER`] per character of
+    /// it in masked mode — exactly what the painted line shapes.
+    pub fn display_text(&self) -> String {
+        let text = self.state.text();
+        if self.masked {
+            text.chars().map(|_| MASK_CHARACTER).collect()
+        } else {
+            text
+        }
     }
 
     /// Turn editing on or off. Motion and selection keep working either way.
@@ -1181,6 +1245,51 @@ impl TextInput {
         crate::completion::insert(&mut self.state, completion, name, window, cx);
     }
 
+    /// A buffer byte offset as an offset into [`Self::display_text`]'s bytes — the
+    /// indices [`ShapedLine`] speaks. Unmasked, the two are the same text.
+    fn display_offset(&self, buffer_offset: usize) -> usize {
+        if self.masked {
+            self.state.char_count_before(buffer_offset) * MASK_CHARACTER.len_utf8()
+        } else {
+            buffer_offset
+        }
+    }
+
+    /// [`Self::display_offset`]'s inverse: a display byte offset as the buffer byte
+    /// offset it stands over, on the character boundary that owns it.
+    fn buffer_offset(&self, display_offset: usize) -> usize {
+        if self.masked {
+            self.state
+                .offset_of_char(display_offset / MASK_CHARACTER.len_utf8())
+        } else {
+            display_offset
+        }
+    }
+
+    /// A buffer byte offset in the offsets the platform speaks: UTF-16 of the display
+    /// text, which masked mode keeps the value out of.
+    fn platform_offset(&self, buffer_offset: usize) -> usize {
+        if self.masked {
+            self.state.char_count_before(buffer_offset) * MASK_CHARACTER.len_utf16()
+        } else {
+            self.state.offset_to_utf16(buffer_offset)
+        }
+    }
+
+    /// [`Self::platform_offset`]'s inverse for a whole range: what the platform's
+    /// UTF-16 range means as buffer byte offsets.
+    fn buffer_range_for_platform(&self, range_utf16: Range<usize>) -> Range<usize> {
+        if self.masked {
+            self.state
+                .offset_of_char(range_utf16.start / MASK_CHARACTER.len_utf16())
+                ..self
+                    .state
+                    .offset_of_char(range_utf16.end / MASK_CHARACTER.len_utf16())
+        } else {
+            self.state.range_from_utf16(&range_utf16)
+        }
+    }
+
     /// The caret offset under a mouse position, through the shaped line from the last
     /// paint. Before the first paint there is no geometry to hit, so the caret goes to
     /// the text start.
@@ -1203,7 +1312,7 @@ impl TextInput {
         if let Some(offset) = offset_for_hit_outside_text(y, bounds.size.height, self.state.len()) {
             return offset;
         }
-        line.closest_index_for_x(position.x - bounds.left())
+        self.buffer_offset(line.closest_index_for_x(position.x - bounds.left()))
     }
 
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
@@ -1343,7 +1452,17 @@ impl EntityInputHandler for TextInput {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<String> {
-        Some(self.state.text_for_range_utf16(range_utf16, actual_range))
+        if self.masked {
+            // The platform reads masks, never the value (`with_masked`).
+            let range = self.buffer_range_for_platform(range_utf16);
+            actual_range
+                .replace(self.platform_offset(range.start)..self.platform_offset(range.end));
+            let masks =
+                self.state.char_count_before(range.end) - self.state.char_count_before(range.start);
+            Some(MASK_CHARACTER.to_string().repeat(masks))
+        } else {
+            Some(self.state.text_for_range_utf16(range_utf16, actual_range))
+        }
     }
 
     fn selected_text_range(
@@ -1352,7 +1471,12 @@ impl EntityInputHandler for TextInput {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
-        Some(self.state.selection_utf16())
+        let selection = self.state.selection_utf16();
+        let range = self.state.selected_range();
+        Some(UTF16Selection {
+            range: self.platform_offset(range.start)..self.platform_offset(range.end),
+            reversed: selection.reversed,
+        })
     }
 
     fn set_selected_text_range(
@@ -1361,7 +1485,9 @@ impl EntityInputHandler for TextInput {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.state.set_selection_utf16(range_utf16, window, cx);
+        let range = self.buffer_range_for_platform(range_utf16);
+        self.state
+            .set_selection_utf16(self.state.range_to_utf16(&range), window, cx);
     }
 
     fn text_length_utf16(
@@ -1369,7 +1495,7 @@ impl EntityInputHandler for TextInput {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<usize> {
-        Some(self.state.text_length_utf16())
+        Some(self.platform_offset(self.state.len()))
     }
 
     fn marked_text_range(
@@ -1377,7 +1503,8 @@ impl EntityInputHandler for TextInput {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<Range<usize>> {
-        self.state.marked_range_utf16()
+        let range = self.state.marked_range()?;
+        Some(self.platform_offset(range.start)..self.platform_offset(range.end))
     }
 
     fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1391,6 +1518,10 @@ impl EntityInputHandler for TextInput {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let range_utf16 = range_utf16.map(|range_utf16| {
+            let range = self.buffer_range_for_platform(range_utf16);
+            self.state.range_to_utf16(&range)
+        });
         self.state
             .replace_text_in_range_utf16(range_utf16, new_text, window, cx);
     }
@@ -1403,6 +1534,13 @@ impl EntityInputHandler for TextInput {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let range_utf16 = range_utf16.map(|range_utf16| {
+            let range = self.buffer_range_for_platform(range_utf16);
+            self.state.range_to_utf16(&range)
+        });
+        // `new_selected_range_utf16` is relative to `new_text` — real text however the
+        // field displays itself — so it maps through `new_text` unchanged (that mapping
+        // is `EditState`'s).
         self.state.replace_and_mark_text_in_range_utf16(
             range_utf16,
             new_text,
@@ -1424,10 +1562,16 @@ impl EntityInputHandler for TextInput {
         }
         let last_layout = self.last_layout.borrow();
         let line = last_layout.as_ref()?;
-        let range = self.state.range_from_utf16(&range_utf16);
+        let range = self.buffer_range_for_platform(range_utf16);
         Some(Bounds::from_corners(
-            point(bounds.left() + line.x_for_index(range.start), bounds.top()),
-            point(bounds.left() + line.x_for_index(range.end), bounds.bottom()),
+            point(
+                bounds.left() + line.x_for_index(self.display_offset(range.start)),
+                bounds.top(),
+            ),
+            point(
+                bounds.left() + line.x_for_index(self.display_offset(range.end)),
+                bounds.bottom(),
+            ),
         ))
     }
 
@@ -1456,10 +1600,7 @@ impl EntityInputHandler for TextInput {
         let line_point = bounds.localize(&position)?;
         let last_layout = self.last_layout.borrow();
         let line = last_layout.as_ref()?;
-        Some(
-            self.state
-                .offset_to_utf16(line.closest_index_for_x(line_point.x)),
-        )
+        Some(self.platform_offset(self.buffer_offset(line.closest_index_for_x(line_point.x))))
     }
 }
 
@@ -1519,11 +1660,10 @@ impl Element for TextElement {
     ) -> Self::PrepaintState {
         let input = self.input.read(cx);
         let state = &input.state;
-        let content = state.text();
         let style = window.text_style();
         // The placeholder is the label `TextInput::render` draws; shaping it here too
         // painted it twice.
-        let display_text = SharedString::from(content);
+        let display_text = SharedString::from(input.display_text());
         let text_color = Color::Default.color(cx);
 
         let run = TextRun {
@@ -1534,18 +1674,24 @@ impl Element for TextElement {
             underline: None,
             strikethrough: None,
         };
-        // The IME's composing text is underlined, the way every platform draws it.
-        let marked = state.marked_range().map(|range| {
-            (
-                range,
-                UnderlineStyle {
-                    color: Some(run.color),
-                    thickness: px_to_rems(1.).to_pixels(window.rem_size()),
-                    wavy: false,
-                },
-            )
-        });
-        let runs = state.runs(&run, marked);
+        // Masked mode paints one uniform run: highlight colours and the composing
+        // underline over masks would leak the shape of the value (`with_masked`).
+        let runs = if input.masked {
+            vec![run]
+        } else {
+            // The IME's composing text is underlined, the way every platform draws it.
+            let marked = state.marked_range().map(|range| {
+                (
+                    range,
+                    UnderlineStyle {
+                        color: Some(run.color),
+                        thickness: px_to_rems(1.).to_pixels(window.rem_size()),
+                        wavy: false,
+                    },
+                )
+            });
+            state.runs(&run, marked)
+        };
 
         let font_size = style.font_size.to_pixels(window.rem_size());
         let line = window
@@ -1555,7 +1701,7 @@ impl Element for TextElement {
         let cursor_width = px_to_rems(2.).to_pixels(window.rem_size());
         let selected_range = state.selected_range();
         let (selection, cursor) = if selected_range.is_empty() {
-            let cursor_x = line.x_for_index(state.cursor_offset());
+            let cursor_x = line.x_for_index(input.display_offset(state.cursor_offset()));
             (
                 None,
                 Some(fill(
@@ -1571,11 +1717,13 @@ impl Element for TextElement {
                 Some(fill(
                     Bounds::from_corners(
                         point(
-                            bounds.left() + line.x_for_index(selected_range.start),
+                            bounds.left()
+                                + line.x_for_index(input.display_offset(selected_range.start)),
                             bounds.top(),
                         ),
                         point(
-                            bounds.left() + line.x_for_index(selected_range.end),
+                            bounds.left()
+                                + line.x_for_index(input.display_offset(selected_range.end)),
                             bounds.bottom(),
                         ),
                     ),
@@ -1714,3 +1862,7 @@ mod font_size_tests;
 #[cfg(test)]
 #[path = "input_multi_click_tests.rs"]
 mod multi_click_tests;
+
+#[cfg(test)]
+#[path = "input_masked_tests.rs"]
+mod masked_tests;
