@@ -32,6 +32,7 @@ pub const STORY_SECTIONS: &[&str] = &[
     "story-key-binding",
     "story-context-menu",
     "story-list",
+    "story-empty-state",
 ];
 
 /// How many rows the story's list section shows — a page, not a page *onto* thousands
@@ -40,6 +41,10 @@ const STORY_LIST_ROWS: usize = 8;
 
 /// The height of the story's list section, so the list is bounded like a real pane.
 const STORY_LIST_HEIGHT_PX: f32 = 96.;
+
+/// The height of the story's empty-state section — the block stands where a pane's
+/// content would be, so it needs a pane of its own to center in.
+const STORY_EMPTY_STATE_HEIGHT_PX: f32 = 120.;
 
 /// One section: its root carries the selector the tests lay out under.
 fn story_section(name: &'static str, content: AnyElement, cx: &App) -> AnyElement {
@@ -113,11 +118,12 @@ impl ComponentStory {
             key_binding,
             context_menu,
             list,
+            empty_state,
         ] = STORY_SECTIONS
         else {
             return Vec::new();
         };
-        let sections: [(&'static str, AnyElement); 15] = [
+        let sections: [(&'static str, AnyElement); 16] = [
             (*button, self.button_section(cx)),
             (*icon_button, self.icon_button_section(cx)),
             (*label, self.label_section(cx)),
@@ -136,6 +142,7 @@ impl ComponentStory {
             ),
             (*context_menu, self.context_menu.clone().into_any_element()),
             (*list, self.list_section()),
+            (*empty_state, self.empty_state_section()),
         ];
         sections
             .into_iter()
@@ -287,6 +294,20 @@ impl ComponentStory {
                 |index| ElementId::from(format!("story-list-row-{index}")),
                 |index, _window, _cx| Label::new(format!("Row {index}")).into_any_element(),
             ))
+            .into_any_element()
+    }
+
+    fn empty_state_section(&self) -> AnyElement {
+        // Its own id: the section root already carries the section name, and every id
+        // in a frame is unique (`references/performance.md`).
+        div()
+            .h(px_to_rems(STORY_EMPTY_STATE_HEIGHT_PX))
+            .w_full()
+            .child(
+                EmptyState::new("story-empty-state-block", IconName::Search, "No matches")
+                    .description("Nothing matches the current search.")
+                    .child(Button::new("story-empty-state-action", "Clear search")),
+            )
             .into_any_element()
     }
 }

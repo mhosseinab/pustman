@@ -20,6 +20,7 @@ use gpui::{
     InteractiveElement, IntoElement, ParentElement, Render, Role, ScrollStrategy, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Task, UniformListScrollHandle, Window, div,
 };
+use pustman_actions::workspace::NewTab;
 use storage::{HistoryEntry, LocalStore};
 use text_input::{TextInput, TextInputEvent};
 use time::{Date, OffsetDateTime};
@@ -35,6 +36,10 @@ mod tests;
 #[cfg(test)]
 #[path = "history_list_activation_tests.rs"]
 mod activation_tests;
+
+#[cfg(test)]
+#[path = "history_list_empty_state_tests.rs"]
+mod empty_state_tests;
 
 /// The panel's stable id: its dock selector entry, its hitbox and the id
 /// [`crate::focus_history_panel`] activates it under.
@@ -64,6 +69,12 @@ const METHOD_COLUMN_PX: f32 = 48.;
 /// failed on, and rows are request content (PRD §7, REQ-HIST-03) — the failure is
 /// folded into this fixed message and the error is dropped unread.
 const LOAD_FAILURE_MESSAGE: &str = "The request history could not be loaded";
+
+/// The New Request call to action's stable id and test selector.
+const NEW_REQUEST_ID: &str = "history-new-request";
+
+/// The Clear search call to action's stable id and test selector.
+const CLEAR_SEARCH_ID: &str = "history-clear-search";
 
 /// One row of the list: a day header or one recorded send.
 #[derive(Clone, Debug, PartialEq)]
@@ -490,7 +501,9 @@ impl Render for HistoryList {
 
 impl HistoryList {
     /// What the area under the search box shows: the rows when there are any, and
-    /// otherwise the one state that explains why the list is empty.
+    /// otherwise the one state that explains why the list is empty — the design
+    /// system's icon + title + call to action block, never a caption below its scale
+    /// (#234).
     fn body(
         &self,
         list: VirtualList,
@@ -520,24 +533,63 @@ impl HistoryList {
             // under it would contradict it.
             return div().flex_1().into_any_element();
         }
-        let message = if self.is_loading {
-            "Loading history…"
-        } else if search_is_empty {
-            "No requests sent yet"
-        } else {
-            "No matches"
-        };
-        v_flex()
-            .flex_1()
-            .items_center()
-            .justify_center()
-            .child(
-                Label::new(message)
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
+        let empty_state = if self.is_loading {
+            EmptyState::new(
+                "history-empty-state",
+                IconName::LoaderCircle,
+                "Loading history…",
             )
+        } else if search_is_empty {
+            EmptyState::new(
+                "history-empty-state",
+                IconName::History,
+                "No requests sent yet",
+            )
+            .description("Requests you send are recorded here.")
+            .child(new_request_action(cx))
+        } else {
+            EmptyState::new("history-empty-state", IconName::Search, "No matches")
+                .description("Nothing matches the current search.")
+                .child(clear_search_action(&self.search))
+        };
+        div()
+            .flex_1()
+            .min_h_0()
+            .child(empty_state)
             .into_any_element()
     }
+}
+
+/// The empty history's call to action: open a request and send it. It dispatches
+/// [`NewTab`] like the Welcome page's button does — in the full app the workspace hands
+/// that to the request editor (REQ-UI-02/03).
+fn new_request_action(cx: &App) -> impl IntoElement {
+    h_flex()
+        .gap(DynamicSpacing::Base04.rems(cx))
+        .child(
+            div().debug_selector(|| NEW_REQUEST_ID.to_owned()).child(
+                Button::new(NEW_REQUEST_ID, "New Request")
+                    .style(ButtonStyle::Filled)
+                    .start_icon(Icon::new(IconName::Plus))
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(NewTab), cx)),
+            ),
+        )
+        .child(KeyBinding::for_action(&NewTab).size(TextSize::Default))
+}
+
+/// The no-matches call to action: drop the query and come back to the full list. The
+/// clearing goes through [`TextInput::set_text`], which emits the same
+/// [`TextInputEvent::Changed`] a keystroke would, so the panel re-reads exactly as it
+/// does for typing.
+fn clear_search_action(search: &Entity<TextInput>) -> impl IntoElement {
+    let search = search.clone();
+    div().debug_selector(|| CLEAR_SEARCH_ID.to_owned()).child(
+        Button::new(CLEAR_SEARCH_ID, "Clear search")
+            .style(ButtonStyle::Outlined)
+            .on_click(move |_, _window, cx| {
+                search.update(cx, |input, cx| input.set_text("", cx));
+            }),
+    )
 }
 
 /// One read of a workspace's history, off the foreground thread. The store lock guards

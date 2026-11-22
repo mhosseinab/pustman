@@ -26,6 +26,7 @@ is our own implementation. Import everything through `use ui::prelude::*;`.
 | `ButtonSize` | `Large` 32px, `Medium` 28px, `Default` 22px, `Compact` 18px, `None` | URL bar row uses Medium |
 | `Label` / `HighlightedLabel` / `LoadingLabel` | `.size(LabelSize)`, `.color(Color)`, `.truncate()`, highlight indices for fuzzy matches | Everywhere; Highlighted in pickers |
 | `Headline` | `Headline::new(text).size(HeadlineSize::Small)` | Empty states, modal titles |
+| `EmptyState` | `EmptyState::new(id, icon, title).description(text).child(action)` — icon at `IconSize::Large`, title at `HeadlineSize::Large`, copy at `LabelSize::Large` | History and Welcome empty states |
 | `Icon` | `Icon::new(IconName).size(IconSize).color(Color)` | |
 | `Checkbox` / `Switch` (`Toggle`) | `ToggleState::{Selected, Unselected, Indeterminate}` | Enable/disable header/param rows; "select all" uses Indeterminate |
 | `Tab` / `TabBar` | `Tab::new(id).position(TabPosition).close_side(..).start_slot(..).end_slot(..).toggle_state(active)`; `TabBar::new(id).start_child(..).children(tabs).end_child(..)` | Request tabs, Params/Headers/Body tabs |
@@ -34,7 +35,7 @@ is our own implementation. Import everything through `use ui::prelude::*;`.
 | `Divider` | `Divider::horizontal()`, `.vertical()`, `.color(DividerColor::BorderVariant)` | |
 | `Indicator` | dot/bar status indicator | Dirty tab, unsaved changes, connection state |
 | `Chip` | small labeled tag | Content-Type, environment name |
-| `KeyBinding` | renders the binding for an action from the active keymap | Tooltips, menus, empty states |
+| `KeyBinding` | renders the binding for an action from the active keymap (`.size(TextSize)` where hints read at body size) | Tooltips, menus, empty states |
 | `Tooltip` | `Tooltip::text("Send")`, `Tooltip::for_action("Send request", &SendRequest, cx)`, `Tooltip::with_meta(title, action, meta, cx)` | Every icon button; every truncated text |
 | `ContextMenu` | `ContextMenu::build(window, cx, \|menu, _, _\| menu.header("Request").entry("Duplicate", Some(Box::new(Duplicate)), handler).separator().toggleable_entry(..).action("Delete", Box::new(Delete)))` | Right-click on tree items, tabs, rows |
 | `PopoverMenu` | `PopoverMenu::new(id).trigger(button).menu(move \|window, cx\| Some(menu)).anchor(Corner::TopLeft).with_handle(handle)` | Method dropdown, body type dropdown |
