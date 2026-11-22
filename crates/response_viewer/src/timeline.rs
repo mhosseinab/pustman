@@ -1054,12 +1054,16 @@ fn auto_mark() -> impl IntoElement {
 }
 
 /// The label column of a label-and-value row (phase, network fact or request row).
+/// The label column of a label-and-value row (phase, network fact or request row), in
+/// the UI font: labels and metadata are UI type, not the content font the shared cell
+/// sets (`docs/postman_redesign_pack/01_specs/design_system.md` — Inter for UI, JetBrains
+/// Mono for URL/code).
 fn label_cell(cell: Stateful<Div>, cx: &App) -> impl IntoElement {
     div()
         .flex_none()
         .w(px_to_rems(LABEL_COLUMN_PX))
         .min_w_0()
-        .child(cell.text_color(cx.theme().colors().text_muted))
+        .child(cell.font_ui(cx).text_color(cx.theme().colors().text_muted))
 }
 
 /// One measured phase: its label, its bar and the time beside it. A measured phase draws

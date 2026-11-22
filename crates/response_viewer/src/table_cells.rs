@@ -60,8 +60,9 @@ pub(crate) fn column_heading(heading: &'static str, width: ColumnWidth) -> impl 
 }
 
 /// The text every response table cell shares: the content font at the tables' text size,
-/// in the theme's text colour (`01_specs/design_system.md`). A cell that mutes itself or
-/// one value says so after this.
+/// in the theme's text colour (`01_specs/design_system.md`). A label, which reads in the
+/// UI font, or a cell that mutes itself or one value, says so after this (the Timeline's
+/// label cell does).
 pub(crate) fn cell_text<E: StyledTypography>(element: E, cx: &App) -> E {
     element
         .font_buffer(cx)
