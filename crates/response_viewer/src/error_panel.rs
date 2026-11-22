@@ -25,7 +25,8 @@ pub fn error_kind_selector(kind: &str) -> String {
     format!("error-panel-kind-{kind}")
 }
 
-/// The debug key the panel's message renders under (see [`error_kind_selector`]).
+/// The debug key the panel's message renders under (see [`error_kind_selector`]),
+/// derived from the message text as rendered (#125).
 pub fn error_message_selector(message: &str) -> String {
     format!("error-panel-message-{message}")
 }
@@ -37,9 +38,27 @@ pub fn error_title_selector(title: &str) -> String {
     format!("error-panel-title-{title}")
 }
 
-/// The debug key the panel's suggested-fix line renders under (see [`error_kind_selector`]).
+/// The debug key the panel's suggested-fix line renders under (see
+/// [`error_kind_selector`]). Test-facing: it takes the error's bare suggested fix and
+/// derives the key from the label text that fix renders as (#125) — [`ErrorPanel::render`]
+/// keys the line from that same rendered string ([`fix_label_selector`]), so the key
+/// always names the wording on screen.
+#[cfg(test)]
 pub fn error_fix_selector(suggested_fix: &str) -> String {
-    format!("error-panel-fix-{suggested_fix}")
+    fix_label_selector(&suggested_fix_label(suggested_fix))
+}
+
+/// The suggested-fix line's rendered text: the one composition the label and its debug
+/// key share (#125), so the two cannot drift apart.
+fn suggested_fix_label(suggested_fix: &str) -> String {
+    format!("Suggested fix: {suggested_fix}")
+}
+
+/// The debug key for a rendered suggested-fix label — [`suggested_fix_label`]'s output
+/// (see [`error_fix_selector`]). Derived from the label text itself, so rewording the
+/// label changes the key and turns a stale test red instead of green (#125).
+fn fix_label_selector(label: &str) -> String {
+    format!("error-panel-fix-{label}")
 }
 
 /// The debug key the "Open in Console" link renders under while it is shown
@@ -89,16 +108,19 @@ impl ErrorPanel {
 impl RenderOnce for ErrorPanel {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         // Test hooks: `VisualTestContext::debug_bounds` finds the callout's texts and
-        // the link under the keys the selector functions in this module hand out.
+        // the link under the keys the selector functions in this module hand out. The
+        // text keys derive from the exact strings the labels render (#125): label and
+        // key move together, so wording drift turns a test red instead of green.
         let kind_selector = error_kind_selector(self.kind);
         let title_selector = error_title_selector(&self.title);
-        let message_selector = error_message_selector(&self.message);
-        let fix_selector = error_fix_selector(&self.suggested_fix);
+        let message_label = self.message.clone();
+        let message_selector = error_message_selector(&message_label);
+        let fix_label = suggested_fix_label(&self.suggested_fix);
+        let fix_selector = fix_label_selector(&fix_label);
         // The Console is a later step: `console::Focus` is not registered yet, so the
         // link is hidden rather than stubbed (REQ-RESP-08).
         let console_focus = cx.build_action(CONSOLE_FOCUS_ACTION, None).is_ok();
         let icon_name = self.icon_name();
-        let suggested_fix = format!("Suggested fix: {}", self.suggested_fix);
 
         v_flex()
             .size_full()
@@ -147,13 +169,13 @@ impl RenderOnce for ErrorPanel {
                         div()
                             .min_w_0()
                             .debug_selector(move || message_selector)
-                            .child(Label::new(self.message.clone())),
+                            .child(Label::new(message_label)),
                     )
                     .child(
                         div()
                             .min_w_0()
                             .debug_selector(move || fix_selector)
-                            .child(Label::new(suggested_fix).size(LabelSize::Small)),
+                            .child(Label::new(fix_label).size(LabelSize::Small)),
                     )
                     .map(|this| {
                         if console_focus {
@@ -247,3 +269,7 @@ mod tests;
 #[cfg(test)]
 #[path = "error_panel_titles_tests.rs"]
 mod title_tests;
+
+#[cfg(test)]
+#[path = "error_panel_selector_tests.rs"]
+mod selector_tests;
