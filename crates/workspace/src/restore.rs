@@ -67,6 +67,10 @@ pub struct Restore {
     /// Each new one replaces the task, and dropping the old task cancels the write it had
     /// not started — one write per burst of changes.
     pending_save: Option<Task<()>>,
+    /// The snapshot the last successful write stored — what "already saved" means for
+    /// [`Self::start_write`]'s comparison. Only a write that landed sets it, so a write
+    /// that failed or was cancelled is retried rather than skipped (issue #97).
+    last_written: Option<Snapshot>,
     /// Set while a restore is landing, so its own tab pushes and dock changes do not
     /// schedule a save of what was just read.
     is_restoring: bool,
@@ -151,6 +155,7 @@ impl Restore {
             workspace: workspace.downgrade(),
             factory,
             pending_save: None,
+            last_written: None,
             is_restoring: false,
             restore_landed: false,
             _subscriptions,
@@ -312,32 +317,23 @@ impl Restore {
     }
 
     /// Save the layout and tabs after [`SAVE_DEBOUNCE`] of quiet (REQ-NFR-05). The write
-    /// runs on the background executor; a failed one shows the fixed message and stays
-    /// user-visible, never only logged.
+    /// runs on the background executor through [`Self::start_write`]; a failed one shows
+    /// the fixed message and stays user-visible, never only logged.
     fn schedule_save(&mut self, cx: &mut Context<Self>) {
         if self.is_restoring {
             return;
         }
         self.pending_save = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(SAVE_DEBOUNCE).await;
-            let saved = this.update(cx, |restore, cx| {
-                restore.snapshot(cx).map(|snapshot| {
-                    (
-                        Arc::clone(&restore.store),
-                        restore.workspace_id.clone(),
-                        snapshot,
-                    )
-                })
-            });
-            let Ok(Some((store, workspace_id, snapshot))) = saved else {
-                // The restore entity is gone with its window; there is nothing to save.
+            // The snapshot is taken when the quiet ends, so changes made while the
+            // debounce ran are part of the same write.
+            let started = this.update(cx, |restore, cx| restore.start_write(cx));
+            let Ok(Some(write)) = started else {
+                // The restore entity is gone with its window, or nothing has changed
+                // since the last write: there is nothing to save.
                 return;
             };
-            let write = cx
-                .background_executor()
-                .spawn(async move { write_snapshot(&store, &workspace_id, &snapshot) })
-                .await;
-            if let Err(_error) = write
+            if let Err(_error) = write.await
                 && let Err(_released) = this.update(cx, |restore, cx| {
                     restore.report(WRITE_FAILURE_MESSAGE, Severity::Error, cx);
                 })
@@ -352,7 +348,8 @@ impl Restore {
     /// drives ([`crate::Autosave`], PRD REQ-NFR-05). It reuses [`Self::snapshot`] and
     /// [`write_snapshot`], so there is no second serializer and no second `open_tabs`
     /// writer. While a restore is landing it does nothing (see [`Self::schedule_save`]),
-    /// and a failed write shows the same fixed message as the debounced path.
+    /// a tick with nothing changed since the last write writes nothing (issue #97), and
+    /// a failed write shows the same fixed message as the debounced path.
     pub(crate) fn save_now(&mut self, cx: &mut Context<Self>) {
         if self.is_restoring {
             return;
@@ -413,14 +410,33 @@ impl Restore {
     /// layout and tabs with the store handle and workspace id it needs. The debounced
     /// save, the autosave and the closing flush all run this one path; dropping the
     /// returned task with `pending_save` cancels the write it had not finished.
-    fn start_write(&self, cx: &App) -> Option<Task<anyhow::Result<()>>> {
+    ///
+    /// A snapshot nothing has changed since the last landed write is not written again
+    /// (`None`): an unchanged dirty draft would otherwise be rewritten on every autosave
+    /// tick (issue #97). What a landed write stored is recorded as [`Self::last_written`],
+    /// so every caller compares against the same notion of "already saved".
+    fn start_write(&mut self, cx: &mut Context<Self>) -> Option<Task<anyhow::Result<()>>> {
         let snapshot = self.snapshot(cx)?;
+        if self.last_written.as_ref() == Some(&snapshot) {
+            return None;
+        }
+        let written = snapshot.clone();
         let store = Arc::clone(&self.store);
         let workspace_id = self.workspace_id.clone();
-        Some(
-            cx.background_executor()
-                .spawn(async move { write_snapshot(&store, &workspace_id, &snapshot) }),
-        )
+        Some(cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { write_snapshot(&store, &workspace_id, &snapshot) })
+                .await;
+            if result.is_ok()
+                && let Err(_released) =
+                    this.update(cx, |restore, _cx| restore.last_written = Some(written))
+            {
+                // Handled: the workspace went away with its window right after the write
+                // landed; what is stored is what was written.
+            }
+            result
+        }))
     }
 
     /// Show `message` through the workspace's toast stack — the one door
@@ -439,7 +455,7 @@ impl Restore {
 /// What the `layout` row holds: the docks' sizes and visibility as small typed fields —
 /// never a map, so the document has one stable shape — plus the active tab's persistent
 /// id (`open_tabs` has no column for it).
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct LayoutDocument {
     left_dock: DockLayout,
     bottom_dock: DockLayout,
@@ -448,13 +464,14 @@ struct LayoutDocument {
 }
 
 /// One dock's place in the layout document.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct DockLayout {
     is_open: bool,
     size_px: f32,
 }
 
 /// One tab on its way to or from `open_tabs`.
+#[derive(Clone, PartialEq)]
 struct TabSnapshot {
     item_id: String,
     pinned: bool,
@@ -464,6 +481,7 @@ struct TabSnapshot {
 /// One window's saved state. `layout` is `None` when no layout row was written yet (or
 /// the row is not one of ours): the docks then keep their defaults and the tabs still
 /// restore.
+#[derive(Clone, PartialEq)]
 struct Snapshot {
     layout: Option<LayoutDocument>,
     tabs: Vec<TabSnapshot>,

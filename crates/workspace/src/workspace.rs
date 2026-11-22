@@ -25,7 +25,7 @@ pub use item::{AnyViewItem, Item, ItemHandle};
 pub use modal_layer::{ModalLayer, ModalView};
 pub use pane::Pane;
 pub use panel::{Panel, PanelHandle};
-pub use restore::{ItemFactory, Restore};
+pub use restore::{ItemFactory, Restore, SAVE_DEBOUNCE};
 pub use status_bar::StatusBar;
 pub use title_bar::TitleBar;
 pub use toast_layer::{TOAST_DURATION, ToastAction, ToastHandler};
@@ -258,3 +258,7 @@ pub fn init(_cx: &mut App) {}
 #[cfg(test)]
 #[path = "workspace_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "save_debounce_tests.rs"]
+mod save_debounce_tests;
