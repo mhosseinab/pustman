@@ -720,6 +720,13 @@ impl BodyView {
         self.large_body.as_ref()
     }
 
+    /// The find bar while it is open (#162) — the keyboard tests' proof that Escape
+    /// closed the bar and did not only move focus.
+    #[cfg(test)]
+    pub(crate) fn find_bar(&self) -> Option<&Entity<FindBar>> {
+        self.find_bar.as_ref()
+    }
+
     /// The lines the pane draws in the current mode: the formatter's output in Pretty
     /// mode (the Raw lines while it is still being computed, or after it failed), the
     /// exact text in Raw mode.

@@ -436,3 +436,7 @@ mod tests;
 #[cfg(test)]
 #[path = "find_error_tests.rs"]
 mod error_tests;
+
+#[cfg(test)]
+#[path = "find_keyboard_tests.rs"]
+mod keyboard_tests;
