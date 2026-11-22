@@ -91,6 +91,8 @@ pub enum IconName {
     Minus,
     /// Toggle the left dock.
     PanelLeft,
+    /// Hold the console log.
+    Pause,
     /// Rename or edit.
     Pencil,
     /// Pin a tab or entry.
@@ -170,6 +172,7 @@ pub const ALL: &[IconName] = &[
     IconName::Menu,
     IconName::Minus,
     IconName::PanelLeft,
+    IconName::Pause,
     IconName::Pencil,
     IconName::Pin,
     IconName::Play,
@@ -232,6 +235,7 @@ impl IconName {
             Self::Menu => "icons/menu.svg",
             Self::Minus => "icons/minus.svg",
             Self::PanelLeft => "icons/panel_left.svg",
+            Self::Pause => "icons/pause.svg",
             Self::Pencil => "icons/pencil.svg",
             Self::Pin => "icons/pin.svg",
             Self::Play => "icons/play.svg",
@@ -294,6 +298,7 @@ impl IconName {
             Self::Menu => include_bytes!("../../../assets/icons/menu.svg"),
             Self::Minus => include_bytes!("../../../assets/icons/minus.svg"),
             Self::PanelLeft => include_bytes!("../../../assets/icons/panel_left.svg"),
+            Self::Pause => include_bytes!("../../../assets/icons/pause.svg"),
             Self::Pencil => include_bytes!("../../../assets/icons/pencil.svg"),
             Self::Pin => include_bytes!("../../../assets/icons/pin.svg"),
             Self::Play => include_bytes!("../../../assets/icons/play.svg"),
