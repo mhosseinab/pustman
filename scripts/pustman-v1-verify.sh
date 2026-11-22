@@ -10,7 +10,7 @@ trap 'rm -f "$log"' EXIT
 # On failure, name what failed (CI has no other window into a hidden stage), then the verdict.
 stage_fail() {
   if [ -s "$log" ]; then
-    grep -E '^test .* FAILED|panicked at|^error(\[|:)|^failures:$|^    [a-z_:]+$' "$log" | head -40 >&2 || true
+    grep -E -A2 '^test .* FAILED|panicked at|^error(\[|:)' "$log" | head -60 >&2 || true
   fi
   echo "VERIFY FAIL $1" >&2
   exit 1
