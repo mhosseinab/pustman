@@ -114,10 +114,12 @@ impl Default for SecretSources {
     }
 }
 
-/// The "a store that has nothing" default of [`SecretSources`] — the same shape as
-/// `headers`' preview store, kept local because that file is outside this step's edits.
-/// Nothing can be stored in it, so a hover through it can only ever say "unset".
-struct NoStoredSecrets;
+/// The one "a store that has nothing" store (#193): [`SecretSources`]' default and
+/// `headers`' auto-header preview both resolve against this single definition. Nothing
+/// can be stored in it and nothing can be read from it, so a hover through it can only
+/// ever say "unset" and the preview can never reach the OS keychain (a keychain read
+/// can prompt, macOS).
+pub(crate) struct NoStoredSecrets;
 
 impl SecretStore for NoStoredSecrets {
     fn get(&self, key: &SecretKey) -> Result<SecretValue, SecretError> {
@@ -126,7 +128,7 @@ impl SecretStore for NoStoredSecrets {
 
     fn set(&self, _key: &SecretKey, _value: &SecretValue) -> Result<(), SecretError> {
         Err(SecretError::BackendUnavailable {
-            reason: String::from("the variable hover stores no secrets"),
+            reason: String::from("this store is read-only and stores no secrets"),
         })
     }
 

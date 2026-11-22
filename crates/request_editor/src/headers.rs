@@ -39,13 +39,14 @@ use gpui::{
     ParentElement, Render, Role, SharedString, Subscription, WeakEntity, Window,
 };
 use http_engine::prepare;
-use secrets::{SecretError, SecretKey, SecretStore, SecretValue};
+use secrets::SecretKey;
 use ui::prelude::*;
 use variables::{DynamicValues, ScopeKind, ScopeStack};
 
 use crate::key_value_table::{KeyValueTable, KeyValueTableEvent, KeyValueTableShape, RowField};
 use crate::section_title;
 use crate::variable_highlight;
+use crate::variable_hover::NoStoredSecrets;
 
 /// The debug keys the tab's section titles paint under — the test hook that lets a test
 /// measure them against the column headers they must stand above (#222).
@@ -697,7 +698,9 @@ fn settings_for(request: &HttpRequest) -> RequestSettings {
 
 /// The request's auto headers, computed by `http_engine`'s own rules (REQ-HTTP-03).
 ///
-/// A dry [`prepare`] against an empty [`ScopeStack`] and [`NoStoredSecrets`]: nothing
+/// A dry [`prepare`] against an empty [`ScopeStack`] and the shared [`NoStoredSecrets`]
+/// (the `variable_hover` "nothing store" both call sites use, #193 — the preview must
+/// never reach the OS keychain: a keychain read can prompt the user, macOS): nothing
 /// resolves, no secret is read (no name is bound to one), and no send happens. When the
 /// draft cannot be prepared at all — its URL does not parse, typically while the user
 /// is typing it — the preview lists nothing; that is the explicit outcome here, not a
@@ -730,30 +733,6 @@ fn auto_headers_for(request: &HttpRequest) -> Vec<AutoHeader> {
             })
             .collect(),
         Err(_unpreparable) => Vec::new(),
-    }
-}
-
-/// The secret store the auto-header preview resolves against: nothing is stored and
-/// nothing can be. `secrets::MemorySecretStore` is compiled for tests only (behind the
-/// crate's `test-support` feature), and the preview must never reach the OS keychain —
-/// a keychain read can prompt the user (macOS). With the empty [`ScopeStack`] this
-/// store is passed beside, [`prepare`] binds no name to any secret and never reads it.
-struct NoStoredSecrets;
-
-impl SecretStore for NoStoredSecrets {
-    fn get(&self, key: &SecretKey) -> Result<SecretValue, SecretError> {
-        Err(SecretError::NotFound { key: key.clone() })
-    }
-
-    fn set(&self, _key: &SecretKey, _value: &SecretValue) -> Result<(), SecretError> {
-        Err(SecretError::BackendUnavailable {
-            reason: String::from("the auto-header preview is read-only and stores no secrets"),
-        })
-    }
-
-    /// Deleting a key that has no secret succeeds ([`SecretStore`]'s own contract).
-    fn delete(&self, _key: &SecretKey) -> Result<(), SecretError> {
-        Ok(())
     }
 }
 
