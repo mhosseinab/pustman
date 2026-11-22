@@ -11,9 +11,9 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, ClickEvent, Context, ElementId, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, ParentElement, Render, Role, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
+    Anchor, AnyElement, App, ClickEvent, Context, ElementId, Entity, EventEmitter, FocusHandle,
+    Focusable, InteractiveElement, IntoElement, ParentElement, Rems, Render, Role, SharedString,
+    StatefulInteractiveElement, Styled, Window, anchored, deferred, div, prelude::FluentBuilder,
 };
 use theme::ActiveTheme;
 
@@ -32,6 +32,10 @@ use crate::v_flex;
 /// The key context the menu answers the keyboard in; [`crate::init`] binds the arrows,
 /// Enter and Escape.
 pub(crate) const MENU_CONTEXT: &str = "Menu";
+
+/// Test hook: the menu container itself — what the floating layer anchors and snaps
+/// (`VisualTestContext::debug_bounds`, the entries' key hooks below).
+pub const MENU_SELECTOR: &str = "context-menu";
 
 /// The narrowest a menu grows, so a two-word entry never wraps.
 const MIN_WIDTH_PX: f32 = 160.;
@@ -371,6 +375,7 @@ impl Render for ContextMenu {
         let focus_handle = self.focus_handle.clone();
         v_flex()
             .id(ElementId::from(&focus_handle))
+            .debug_selector(|| String::from(MENU_SELECTOR))
             .key_context(MENU_CONTEXT)
             .role(Role::Menu)
             .font_ui(cx)
@@ -399,6 +404,35 @@ impl Render for ContextMenu {
     }
 }
 
+/// A picker menu floating under its trigger — the one shape every
+/// [`crate::components::button::Button`] + [`ContextMenu`] dropdown uses (`url_bar`'s
+/// method picker and the request editor's mode, language, auth-type, key-location and
+/// HTTP-version pickers): anchored just under the trigger so the editor below cannot
+/// clip it, snapped to the window edge so it never leaves the window. `trigger_height`
+/// is the trigger's height — the offset the menu drops below it.
+pub fn floating_menu(
+    menu: &Option<Entity<ContextMenu>>,
+    trigger_height: Rems,
+    cx: &App,
+) -> Option<AnyElement> {
+    menu.clone().map(|menu| {
+        div()
+            .absolute()
+            .top(trigger_height)
+            .left_0()
+            .child(
+                deferred(
+                    anchored()
+                        .anchor(Anchor::TopLeft)
+                        .snap_to_window_with_margin(DynamicSpacing::Base04.px(cx))
+                        .child(menu),
+                )
+                .with_priority(1),
+            )
+            .into_any_element()
+    })
+}
+
 #[cfg(test)]
 #[path = "context_menu_tests.rs"]
 mod tests;
@@ -406,3 +440,7 @@ mod tests;
 #[cfg(test)]
 #[path = "context_menu_occlusion_tests.rs"]
 mod occlusion_tests;
+
+#[cfg(test)]
+#[path = "context_menu_floating_tests.rs"]
+mod floating_menu_tests;

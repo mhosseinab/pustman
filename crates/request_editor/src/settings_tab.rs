@@ -30,9 +30,8 @@
 
 use api_model::{HttpRequest, HttpVersion, RequestSettings};
 use gpui::{
-    Anchor, AnyElement, App, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable,
-    IntoElement, ParentElement, Render, SharedString, Subscription, WeakEntity, Window, anchored,
-    deferred,
+    AnyElement, App, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
+    ParentElement, Render, SharedString, Subscription, WeakEntity, Window,
 };
 use http_engine::SendSettings;
 use text_input::{TextInput, TextInputEvent};
@@ -358,12 +357,20 @@ impl SettingsTab {
         }
         let text = self.numeric_input(field).read(cx).text();
         if text == field.display(self) {
+            // The fill's echo — or an edit that landed back on the value the field
+            // already shows. The value needs no change, but a note the previous
+            // unparseable edit left behind is stale and clears (#181).
+            field.set_invalid(self, false);
+            cx.notify();
             return;
         }
         match field.parse_change(&text) {
             Some(change) => {
                 field.set_invalid(self, false);
                 self.apply(change, cx);
+                // The note clears even when the parsed value is the one the tab
+                // already holds ("030000" over "30000") and `apply` is a no-op.
+                cx.notify();
             }
             None => {
                 field.set_invalid(self, true);
@@ -563,9 +570,14 @@ impl SettingsTab {
                 }),
             );
         let note = field.is_invalid(self).then(|| {
-            Label::new(SharedString::from(field.invalid_note()))
-                .size(LabelSize::XSmall)
-                .color(Color::Error)
+            let note_key = format!("{key}-note");
+            div()
+                .debug_selector(move || note_key.clone())
+                .child(
+                    Label::new(SharedString::from(field.invalid_note()))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Error),
+                )
                 .into_any_element()
         });
         settings_row(
@@ -646,7 +658,11 @@ impl SettingsTab {
                     cx.listener(|this, _event, window, cx| this.open_version_menu(window, cx)),
                 ),
             )
-            .children(floating_menu(&self.version_menu, cx))
+            .children(floating_menu(
+                &self.version_menu,
+                px_to_rems(CONTROL_HEIGHT_PX),
+                cx,
+            ))
             .into_any_element()
     }
 }
@@ -900,28 +916,10 @@ fn fill(input: &Entity<TextInput>, text: &str, cx: &mut Context<SettingsTab>) {
     input.update(cx, |input, cx| input.set_text(text, cx));
 }
 
-/// A picker menu floating under its trigger — the `auth_tab` shape (see that module's
-/// note on hoisting this helper into `ui`): anchored so it is never clipped by the
-/// rows below it, snapped to the window edge so it never leaves the window.
-fn floating_menu(menu: &Option<Entity<ContextMenu>>, cx: &App) -> Option<AnyElement> {
-    menu.clone().map(|menu| {
-        div()
-            .absolute()
-            .top(px_to_rems(CONTROL_HEIGHT_PX))
-            .left_0()
-            .child(
-                deferred(
-                    anchored()
-                        .anchor(Anchor::TopLeft)
-                        .snap_to_window_with_margin(DynamicSpacing::Base04.px(cx))
-                        .child(menu),
-                )
-                .with_priority(1),
-            )
-            .into_any_element()
-    })
-}
-
 #[cfg(test)]
 #[path = "settings_tab_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "settings_tab_numeric_note_tests.rs"]
+mod numeric_note_tests;

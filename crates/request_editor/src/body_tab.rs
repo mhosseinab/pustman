@@ -1,8 +1,8 @@
 //! The Body tab (REQ-HTTP-04/05): the body-mode picker and one editor per M1 body
 //! mode — none, form-data (text and file fields with a file dialog and a per-field
 //! content type), x-www-form-urlencoded (the reusable [`KeyValueTable`]), raw (a
-//! [`TextArea`] with a language picker) and binary (a file dialog) — with every file
-//! path stored relative to the workspace root when it lives inside it.
+//! [`TextArea`] the toolbar's language picker names) and binary (a file dialog) — with
+//! every file path stored relative to the workspace root when it lives inside it.
 //!
 //! `Decision:` the tab keeps each mode's state alive across mode switches and hands its
 //! owner only the active mode's [`Body`] ([`BodyTab::body`]): switching
@@ -31,10 +31,17 @@
 //! stored absolute.
 //!
 //! `Decision:` the mode and language pickers compose the `ui` [`Button`] and
-//! [`ContextMenu`] in a [`gpui::deferred`] floating layer — the same shape as the
+//! [`ContextMenu`] in the shared [`floating_menu`] layer — the same shape as the
 //! method dropdown (`url_bar`) and the formatter override (`response_viewer`), because
 //! `crates/ui` has no popover-menu primitive. A file-dialog failure lands inline under
 //! the body controls (AGENTS.md — errors reach the user), never only in a log.
+//!
+//! `Decision:` the mode picker, the language picker and Beautify share one toolbar row
+//! over the editor — mode and language at the left, Beautify at the right (S03/R03,
+//! `06_visuals/workbench_blueprint`) — never a row per picker. Beautify reuses the
+//! `response_viewer` Pretty formatters rather than a second formatter: a body those
+//! cannot parse, and a language with none (plain text, JavaScript), is left exactly as
+//! it is and the tab says so inline below the row.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -42,10 +49,10 @@ use std::sync::Arc;
 
 use api_model::{Body, FormField, HttpRequest, RawLanguage};
 use gpui::{
-    Anchor, AnyElement, App, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable,
-    IntoElement, ParentElement, Render, SharedString, Subscription, Task, Window, anchored,
-    deferred,
+    AnyElement, App, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
+    ParentElement, Render, SharedString, Subscription, Task, Window,
 };
+use response_viewer::pretty::Formatter;
 use text_input::{TextArea, TextInput, TextInputEvent};
 use ui::components::context_menu::ContextMenuEvent;
 use ui::prelude::*;
@@ -72,6 +79,12 @@ const KIND_COLUMN_WIDTH_PX: f32 = 64.;
 
 /// Test hook: the inline error under the body controls.
 pub const BODY_ERROR_SELECTOR: &str = "body-tab-error";
+
+/// Test hooks: the body toolbar row and the controls on it.
+pub const BODY_TOOLBAR_SELECTOR: &str = "body-toolbar";
+pub const BODY_MODE_SELECTOR: &str = "body-mode-control";
+pub const BODY_LANGUAGE_SELECTOR: &str = "body-language-control";
+pub const BODY_BEAUTIFY_SELECTOR: &str = "body-beautify";
 
 /// What a [`BodyTab`] tells its owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -198,6 +211,9 @@ pub struct BodyTab {
     /// The file-dialog task: replacing it cancels the dialog's answer before it,
     /// because dropping a `Task` cancels it (AGENTS.md › Async).
     pick_task: Option<Task<()>>,
+    /// The in-flight Beautify format, likewise: a second click cancels the format
+    /// before it.
+    beautify_task: Option<Task<()>>,
     /// The scopes the body fields highlight their `{{variables}}` against (REQ-VAR-03).
     scopes: Arc<ScopeStack>,
     _urlencoded_subscription: Subscription,
@@ -235,6 +251,7 @@ impl BodyTab {
             mode_focus_handle: cx.focus_handle().tab_stop(true),
             language_focus_handle: cx.focus_handle().tab_stop(true),
             pick_task: None,
+            beautify_task: None,
             scopes: Arc::new(ScopeStack::new()),
             _urlencoded_subscription,
             _raw_subscription,
@@ -768,10 +785,95 @@ impl BodyTab {
         cx.notify();
     }
 
+    /// Re-format the raw body (Beautify). Formatting is heavy work, so it runs on a
+    /// background task the way `response_viewer`'s Pretty view runs it — the body
+    /// stays as it is until the formatted text lands, and a second click cancels the
+    /// format before it. A body the formatters cannot parse — and a language that has
+    /// no formatter at all — is left exactly as it is while the tab says why inline
+    /// under the controls: a button that silently does nothing is not an answer
+    /// (AGENTS.md — errors reach the user).
+    fn beautify(&mut self, cx: &mut Context<Self>) {
+        let Some(formatter) = formatter_for(self.raw_language) else {
+            self.error = Some(SharedString::new_static(
+                "Beautify formats JSON, XML and HTML bodies — choose one of them as the \
+                 body's language above.",
+            ));
+            cx.notify();
+            return;
+        };
+        let text = self.raw_text.read(cx).text();
+        self.beautify_task = Some(cx.spawn(async move |this, cx| {
+            let to_format = text.clone();
+            let outcome = cx
+                .background_spawn(async move { formatter.format(to_format.as_bytes()) })
+                .await;
+            if let Err(_released) = this.update(cx, |tab, cx| {
+                // The body changed while it was formatting: the user's typing is the
+                // truth and the formatted text would clobber it.
+                if tab.raw_text.read(cx).text() != text {
+                    return;
+                }
+                match outcome {
+                    Ok(formatted) => {
+                        tab.error = None;
+                        if formatted != text {
+                            tab.raw_text
+                                .update(cx, |area, cx| area.set_text(&formatted, cx));
+                        }
+                    }
+                    Err(error) => {
+                        tab.error = Some(SharedString::from(format!(
+                            "Beautify could not format this body: {error}."
+                        )));
+                    }
+                }
+                cx.notify();
+            }) {
+                // Handled: the tab went away with its window; there is nobody left to
+                // show the formatted body to.
+            }
+        }));
+    }
+
+    /// The one toolbar row over the body editor: the mode picker at the left, and —
+    /// over a raw body — the language picker beside it with Beautify ending the row at
+    /// the right.
+    fn render_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let raw = self.mode == BodyMode::Raw;
+        h_flex()
+            .id(ElementId::Name(SharedString::new_static("body-toolbar")))
+            .debug_selector(|| BODY_TOOLBAR_SELECTOR.to_string())
+            .items_center()
+            .gap(DynamicSpacing::Base03.rems(cx))
+            .min_w_0()
+            .child(self.render_mode_control(cx))
+            .children(raw.then(|| self.render_language_control(cx)))
+            .children(raw.then(|| div().flex_1().min_w_0()))
+            .children(raw.then(|| self.render_beautify_control(cx)))
+            .into_any_element()
+    }
+
+    /// The Beautify button ending the toolbar row.
+    fn render_beautify_control(&self, cx: &mut Context<Self>) -> AnyElement {
+        h_flex()
+            .debug_selector(|| BODY_BEAUTIFY_SELECTOR.to_string())
+            .child(
+                Button::new(
+                    ElementId::Name(SharedString::new_static("beautify-body")),
+                    SharedString::new_static("Beautify"),
+                )
+                .size(ButtonSize::Medium)
+                .tooltip(Tooltip::text("Format the body with even indentation"))
+                .on_click(cx.listener(|this, _event, _window, cx| this.beautify(cx))),
+            )
+            .into_any_element()
+    }
+
     /// The mode control: the dropdown trigger. The menu floats under it.
     fn render_mode_control(&self, cx: &mut Context<Self>) -> AnyElement {
         h_flex()
             .relative()
+            .debug_selector(|| BODY_MODE_SELECTOR.to_string())
             .child(
                 Button::new(
                     ElementId::from(&self.mode_focus_handle),
@@ -783,7 +885,11 @@ impl BodyTab {
                 .focus_handle(self.mode_focus_handle.clone())
                 .on_click(cx.listener(|this, _event, window, cx| this.open_mode_menu(window, cx))),
             )
-            .children(floating_menu(&self.mode_menu, cx))
+            .children(floating_menu(
+                &self.mode_menu,
+                px_to_rems(CONTROL_HEIGHT_PX),
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -791,6 +897,7 @@ impl BodyTab {
     fn render_language_control(&self, cx: &mut Context<Self>) -> AnyElement {
         h_flex()
             .relative()
+            .debug_selector(|| BODY_LANGUAGE_SELECTOR.to_string())
             .child(
                 Button::new(
                     ElementId::from(&self.language_focus_handle),
@@ -804,7 +911,11 @@ impl BodyTab {
                     cx.listener(|this, _event, window, cx| this.open_language_menu(window, cx)),
                 ),
             )
-            .children(floating_menu(&self.language_menu, cx))
+            .children(floating_menu(
+                &self.language_menu,
+                px_to_rems(CONTROL_HEIGHT_PX),
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -845,24 +956,18 @@ impl BodyTab {
         }
     }
 
-    /// The raw body: the language picker over a [`TextArea`].
+    /// The raw body: the [`TextArea`] the toolbar's language picker and Beautify act
+    /// on.
     fn render_raw(&self, cx: &mut Context<Self>) -> AnyElement {
-        v_flex()
+        div()
             .id(ElementId::Name(SharedString::new_static("raw-body")))
             .flex_1()
-            .min_h_0()
-            .gap(DynamicSpacing::Base02.rems(cx))
-            .child(self.render_language_control(cx))
-            .child(
-                div()
-                    .flex_1()
-                    .min_h(px_to_rems(RAW_EDITOR_MIN_HEIGHT_PX))
-                    .min_w_0()
-                    .border_1()
-                    .border_color(cx.theme().colors().border)
-                    .rounded_sm()
-                    .child(self.raw_text.clone()),
-            )
+            .min_h(px_to_rems(RAW_EDITOR_MIN_HEIGHT_PX))
+            .min_w_0()
+            .border_1()
+            .border_color(cx.theme().colors().border)
+            .rounded_sm()
+            .child(self.raw_text.clone())
             .into_any_element()
     }
 
@@ -1132,7 +1237,7 @@ impl Render for BodyTab {
             .min_h_0()
             .min_w_0()
             .gap(DynamicSpacing::Base04.rems(cx))
-            .child(self.render_mode_control(cx))
+            .child(self.render_toolbar(cx))
             .child(self.render_mode_content(cx))
             .children(self.error.clone().map(|message| self.render_error(message)))
     }
@@ -1155,6 +1260,18 @@ fn language_label(language: RawLanguage) -> &'static str {
         RawLanguage::Xml => "XML",
         RawLanguage::Html => "HTML",
         RawLanguage::JavaScript => "JavaScript",
+    }
+}
+
+/// The pretty-printer a raw language maps onto: JSON, XML and HTML have one (the
+/// `response_viewer` Pretty formatters), plain text and JavaScript have nothing to
+/// format.
+fn formatter_for(language: RawLanguage) -> Option<Formatter> {
+    match language {
+        RawLanguage::Json => Some(Formatter::Json),
+        RawLanguage::Xml => Some(Formatter::Xml),
+        RawLanguage::Html => Some(Formatter::Html),
+        RawLanguage::Text | RawLanguage::JavaScript => None,
     }
 }
 
@@ -1226,28 +1343,10 @@ fn file_label(id: impl Into<ElementId>, path: &str) -> impl IntoElement {
         .tooltip(Tooltip::text(shown).builder())
 }
 
-/// A picker menu floating under its trigger — the shared shape of the mode and
-/// language pickers: anchored so it is never clipped by the editor below it, snapped
-/// to the window edge so it never leaves the window (`url_bar`).
-fn floating_menu(menu: &Option<Entity<ContextMenu>>, cx: &App) -> Option<AnyElement> {
-    menu.clone().map(|menu| {
-        div()
-            .absolute()
-            .top(px_to_rems(CONTROL_HEIGHT_PX))
-            .left_0()
-            .child(
-                deferred(
-                    anchored()
-                        .anchor(Anchor::TopLeft)
-                        .snap_to_window_with_margin(DynamicSpacing::Base04.px(cx))
-                        .child(menu),
-                )
-                .with_priority(1),
-            )
-            .into_any_element()
-    })
-}
-
 #[cfg(test)]
 #[path = "body_tab_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "body_tab_toolbar_tests.rs"]
+mod toolbar_tests;
