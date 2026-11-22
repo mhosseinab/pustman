@@ -768,3 +768,7 @@ mod value_tests;
 #[cfg(test)]
 #[path = "headers_suggestion_tests.rs"]
 mod suggestion_tests;
+
+#[cfg(test)]
+#[path = "headers_reseed_tests.rs"]
+mod reseed_tests;
