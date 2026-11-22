@@ -25,10 +25,13 @@
 //!
 //! Cookie values are secrets (PRD §7): nothing here logs or debug-prints them, and
 //! [`ParsedCookie`]'s [`Debug`](fmt::Debug) redacts the value — and, for unparseable rows,
-//! the raw header text their name holds.
+//! the raw header text their name holds. That text also stays out of the row's element
+//! id, which is derived from it instead (#154).
 
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use cookie_store::RawCookie;
@@ -221,9 +224,21 @@ impl ParsedCookie {
         }
     }
 
-    /// This row's stable name: the cookie name plus which occurrence of it it is.
+    /// This row's stable name: the cookie name plus which occurrence of it it is. An
+    /// unparseable row's name is the raw header text — the cookie value included
+    /// (PRD §7) — so its name here is a digest of that text instead: element ids surface
+    /// in debug builds and the opt-in `.debug()` overlay, and must never carry the bytes
+    /// that came over the wire (#154).
     fn key_name(&self) -> SharedString {
-        SharedString::from(format!("{}#{}", self.name, self.occurrence))
+        if self.unparseable {
+            SharedString::from(format!(
+                "unparseable-{}#{}",
+                header_digest(&self.name),
+                self.occurrence
+            ))
+        } else {
+            SharedString::from(format!("{}#{}", self.name, self.occurrence))
+        }
     }
 
     /// The name as [`Debug`](fmt::Debug) shows it: an unparseable row's name is the raw
@@ -278,6 +293,16 @@ impl fmt::Debug for ParsedCookie {
             .field("occurrence", &self.occurrence)
             .finish()
     }
+}
+
+/// A short digest of a raw `Set-Cookie` text, for the element id of a row whose name
+/// must not surface (PRD §7). The same header keeps the same digest — a row's identity
+/// survives scrolling and re-renders — while two different headers get two different
+/// ones, and neither is readable back to the text.
+fn header_digest(text: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    text.hash(&mut hasher);
+    format!("{:x}", hasher.finish())
 }
 
 /// Every `Set-Cookie` header in `headers` (name matched case-insensitively), parsed into
@@ -579,3 +604,7 @@ mod selection_tests;
 #[cfg(test)]
 #[path = "cookies_columns_tests.rs"]
 mod columns_tests;
+
+#[cfg(test)]
+#[path = "cookies_row_id_tests.rs"]
+mod row_id_tests;
