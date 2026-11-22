@@ -78,17 +78,17 @@ pub enum Method {
     Options,
     Trace,
     Connect,
-    /// A custom method, validated as an RFC 7230 `tchar` token and kept as written.
+    /// A custom method, validated as an RFC 9110 `tchar` token and kept as written.
     Custom(String),
 }
 
-/// A method token that is empty or contains a byte outside RFC 7230 `tchar`.
+/// A method token that is empty or contains a byte outside RFC 9110 `tchar`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MethodError;
 
 impl Display for MethodError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("method must be a non-empty RFC 7230 token")
+        f.write_str("method must be a non-empty RFC 9110 token")
     }
 }
 
@@ -449,6 +449,10 @@ fn read_binary(mut fields: serde_json::Map<String, serde_json::Value>) -> Option
         extra: map_to_extra(fields),
     })
 }
+
+#[cfg(test)]
+#[path = "method_error_tests.rs"]
+mod method_error_tests;
 
 #[cfg(test)]
 #[path = "request_tests.rs"]
