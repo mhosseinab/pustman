@@ -26,7 +26,7 @@ use ui::components::context_menu::ContextMenuEvent;
 use ui::prelude::*;
 
 use crate::child_id;
-use crate::table_cells::{cell, column_heading};
+use crate::table_cells::{ColumnWidth, cell, column_heading};
 use crate::text_selection::{CellSelector, SelectableCells, TEXT_CONTEXT, selection_handlers};
 
 /// One header field as the table shows it: name and value, as they arrived.
@@ -235,8 +235,8 @@ impl Render for HeadersView {
                     .py(DynamicSpacing::Base02.rems(cx))
                     .border_b_1()
                     .border_color(cx.theme().colors().border_variant)
-                    .child(column_heading("Name"))
-                    .child(column_heading("Value")),
+                    .child(column_heading("Name", COLUMN_WIDTH))
+                    .child(column_heading("Value", COLUMN_WIDTH)),
             )
             .map(|this| {
                 if rows.is_empty() {
@@ -266,6 +266,10 @@ impl Render for HeadersView {
             })
     }
 }
+
+/// The two columns share the row evenly: a header field's name and its value carry the
+/// same kind of content.
+const COLUMN_WIDTH: ColumnWidth = ColumnWidth::Share(1.);
 
 /// What every row of one frame renders from, moved into the list's row closure.
 struct RowTable {
@@ -359,6 +363,7 @@ fn render_row(table: &RowTable, index: usize, cx: &mut App) -> AnyElement {
             child_id(&row_id, "name"),
             2 * index,
             row.name.clone(),
+            COLUMN_WIDTH,
             selection,
             view,
             cx,
@@ -367,6 +372,7 @@ fn render_row(table: &RowTable, index: usize, cx: &mut App) -> AnyElement {
             child_id(&row_id, "value"),
             2 * index + 1,
             row.value.clone(),
+            COLUMN_WIDTH,
             selection,
             view,
             cx,
