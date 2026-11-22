@@ -2,9 +2,10 @@
 //! tabs and layout `workspace::Restore` saved under [`WORKSPACE_KEY`] back, and
 //! `workspace::Autosave` keeps dirty drafts saved on its 2 s tick (PRD REQ-UI-01/02,
 //! REQ-NFR-05). The snapshot and save logic lives in `workspace`; this module only wires
-//! it to the two things `workspace` cannot know: when a window opens and when the app's
-//! local store ([`AppStore`]) lands — usually after the window, because it opens on a
-//! background task (S22e). Both orders are covered: a store that is already here is
+//! it to the things `workspace` cannot know: when a window opens, when the app's local
+//! store ([`AppStore`]) lands — usually after the window, because it opens on a
+//! background task (S22e) — and which item kinds rebuild the saved tabs
+//! ([`register_item_kind`]). Both orders are covered: a store that is already here is
 //! picked up when the workspace is created, and one that arrives later by the
 //! [`AppStore`] observer. A store that never arrives ([`AppStore`] is never installed —
 //! the user was already told) means no wiring at all.
@@ -52,8 +53,10 @@ impl Global for RestoreWiring {}
 /// the first one that builds an item wins. A tab no kind claims is reported in a toast
 /// and left out — `workspace::Restore` owns that behavior.
 ///
-/// Feature crates call this from their init. The kinds are read when a tab is rebuilt,
-/// so registering after a window wired still reaches that window's restore.
+/// The kinds are read when a tab is rebuilt, so registering after a window wired still
+/// reaches that window's restore. Feature crates cannot call this themselves (they may
+/// not depend on this shell crate), so [`init`] registers the kinds the app ships and
+/// tests register their own here.
 pub fn register_item_kind(cx: &mut App, kind: ItemFactory) {
     cx.default_global::<RestoreWiring>().kinds.push(kind);
 }
@@ -67,6 +70,11 @@ pub fn init(cx: &mut App) {
         return;
     }
     cx.default_global::<RestoreWiring>().started = true;
+    // The kinds the app's feature crates rebuild tabs from (PRD REQ-UI-02): without the
+    // request editor's, every saved request tab comes back as the missing-items toast
+    // (issue #103). Registered here because `request_editor` cannot depend on this crate
+    // to call [`register_item_kind`] itself.
+    register_item_kind(cx, request_editor::restore_item_kind());
     let subscriptions = vec![
         // "Both exist" is watched from both sides, so neither order loses a window: this
         // observer fires when the store lands after the window, and
@@ -151,7 +159,8 @@ fn wire_pending_windows(cx: &mut App) {
 
 /// The factory [`Restore`] rebuilds tabs through: every registered kind is asked in
 /// turn, and a tab none of them claims comes back `None` — "the backing item is gone"
-/// (REQ-UI-02), which is all there is until feature crates register their kinds.
+/// (REQ-UI-02), which [`init`]'s registration keeps from happening to the app's own
+/// tabs.
 fn item_factory() -> ItemFactory {
     Arc::new(|item_id, draft, window, cx| {
         let kinds = cx.default_global::<RestoreWiring>().kinds.clone();
