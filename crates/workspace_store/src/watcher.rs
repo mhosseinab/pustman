@@ -112,6 +112,13 @@ pub fn watch(root: &Path) -> Result<(WorkspaceWatcher, Receiver<FsChange>), Watc
     let (notify_tx, notify_rx) = mpsc::channel::<Result<notify::Event, notify::Error>>();
     let (fs_tx, fs_rx) = mpsc::channel::<FsChange>();
 
+    // Events arrive with the platform's resolved path (macOS FSEvents reports
+    // `/private/var/...` for a root under the `/var` symlink), so paths are made relative
+    // to the canonical root or `to_relative` drops every event. A root that cannot be
+    // canonicalized is watched as given; `watcher.watch` below reports it if it is missing.
+    let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let root = canonical_root.as_path();
+
     let own_writes: OwnWrites = Arc::new(Mutex::new(BTreeMap::new()));
     let known_items: KnownItems = Arc::new(Mutex::new(BTreeMap::new()));
 

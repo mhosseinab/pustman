@@ -757,11 +757,14 @@ fn tls_error_text(error: &(dyn std::error::Error + 'static)) -> Option<String> {
 /// none of them names a host.
 fn tls_reason(text: &str) -> String {
     const NAME_MISMATCH: &str = "certificate not valid for name";
+    // macOS: rustls-platform-verifier maps `errSecHostNameMismatch` to the bare
+    // `CertificateError::NotValidForName`, which renders as its variant name.
+    const PLATFORM_NAME_MISMATCH: &str = "NotValidForName";
     const OTHER_PAYLOAD: &str = "Other(OtherError(";
     const OTHER_ERROR: &str = "other error: ";
     if text.contains(OTHER_PAYLOAD) || text.contains(OTHER_ERROR) {
         "the platform rejected the server certificate".to_string()
-    } else if text.contains(NAME_MISMATCH) {
+    } else if text.contains(NAME_MISMATCH) || text.contains(PLATFORM_NAME_MISMATCH) {
         "invalid peer certificate: certificate not valid for name".to_string()
     } else {
         text.to_string()
@@ -870,3 +873,7 @@ fn lock(
 #[cfg(test)]
 #[path = "reqwest_transport_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tls_reason_platform_tests.rs"]
+mod tls_reason_platform_tests;
