@@ -426,3 +426,7 @@ mod selection_tests;
 #[cfg(test)]
 #[path = "headers_row_menu_scroll_tests.rs"]
 mod row_menu_scroll_tests;
+
+#[cfg(test)]
+#[path = "headers_row_menu_tests.rs"]
+mod row_menu_tests;
