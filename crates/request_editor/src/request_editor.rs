@@ -27,6 +27,8 @@ pub mod variable_autocomplete;
 mod variable_highlight;
 mod variable_hover;
 
+use std::sync::Arc;
+
 use api_model::{HttpRequest, RequestSettings};
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render, SharedString,
@@ -34,7 +36,7 @@ use gpui::{
 };
 use response_viewer::ResponseView;
 use ui::prelude::*;
-use workspace::Item;
+use workspace::{Item, ItemFactory};
 
 use auth_tab::{AuthTab, AuthTabEvent};
 use body_tab::{BodyTab, BodyTabEvent};
@@ -466,6 +468,40 @@ impl Item for RequestEditor {
     fn is_dirty(&self, _cx: &App) -> bool {
         self.draft != self.saved
     }
+
+    /// The draft as its own [`serde_json`] document — the one serialization of the
+    /// request there is, so a restored tab cannot drift from the model.
+    fn serialize_draft(&self, _cx: &App) -> Option<String> {
+        serde_json::to_string(&self.draft).ok()
+    }
+
+    /// The request's id: this tab's identity across restarts, so the tab comes back
+    /// under the id its draft was saved under ([`restore_item_kind`], REQ-UI-02).
+    fn persistent_id(&self, _cx: &App) -> Option<SharedString> {
+        Some(self.draft.id.to_string().into())
+    }
+}
+
+/// The item kind [`workspace::Restore`] rebuilds request tabs from (PRD REQ-UI-02,
+/// issue #103): `pustman` registers it on the restore wire, so a request tab that was
+/// open when a launch closed comes back as a request tab — not as the missing-items
+/// toast a restore with no kind shows.
+///
+/// `Decision:` the persisted draft is the request's own [`serde_json`] document — the
+/// exact value [`Item::serialize_draft`] writes, so there is one serialization and no
+/// second draft format to keep in step. A draft that is missing, unreadable, or not the
+/// request this id names is not claimed; `Restore` reports it as a missing item.
+pub fn restore_item_kind() -> ItemFactory {
+    Arc::new(
+        |item_id: &str, draft: Option<String>, window: &mut Window, cx: &mut App| {
+            let request = draft
+                .as_deref()
+                .and_then(|draft| serde_json::from_str::<HttpRequest>(draft).ok())
+                .filter(|request| request.id.to_string() == item_id)?;
+            let editor = cx.new(|cx| RequestEditor::new(request, window, cx));
+            Some(Box::new(editor))
+        },
+    )
 }
 
 impl Render for RequestEditor {
