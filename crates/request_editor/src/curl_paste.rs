@@ -73,29 +73,26 @@ impl RequestEditor {
         cx.write_to_clipboard(ClipboardItem::new_string(to_curl(&self.draft)));
     }
 
-    /// The undo row under the URL bar, while a cURL import can be taken back.
+    /// The undo banner under the URL bar, while a cURL import can be taken back: a
+    /// compact [`Banner`] (#237) — the fact in the Info severity's tint, and one small
+    /// secondary action at the same type size as its message, instead of a tiny muted
+    /// label beside a large outlined button.
     pub(super) fn render_import_undo(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         // No import to undo renders no row at all.
         self.pre_import_request.as_ref()?;
         Some(
-            h_flex()
+            div()
                 .debug_selector(|| UNDO_IMPORT_SELECTOR.to_string())
-                .gap(DynamicSpacing::Base03.rems(cx))
                 .child(
-                    Label::new(SharedString::new_static("Imported a cURL command"))
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
-                )
-                .child(
-                    Button::new("undo-curl-import", SharedString::new_static("Undo import"))
-                        .size(ButtonSize::Medium)
-                        .style(ButtonStyle::Outlined)
-                        .tooltip(Tooltip::text(SharedString::new_static(
-                            "Restore the request as it was before the import",
-                        )))
-                        .on_click(
-                            cx.listener(|this, _event, window, cx| this.undo_import(window, cx)),
-                        ),
+                    Banner::new(
+                        ElementId::Name(SharedString::new_static("undo-curl-import")),
+                        SharedString::new_static("Imported a cURL command"),
+                    )
+                    .severity(Severity::Info)
+                    .action(
+                        SharedString::new_static("Undo import"),
+                        cx.listener(|this, _event, window, cx| this.undo_import(window, cx)),
+                    ),
                 )
                 .into_any_element(),
         )
@@ -180,3 +177,7 @@ impl RequestEditor {
 #[cfg(test)]
 #[path = "curl_paste_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "curl_paste_banner_tests.rs"]
+mod banner_tests;

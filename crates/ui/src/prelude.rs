@@ -16,8 +16,9 @@ pub use gpui::{
 pub use theme::ActiveTheme;
 
 pub use crate::actions::{Activate, Cancel, SelectNext, SelectPrevious};
-pub use crate::color::{Color, Severity};
+pub use crate::color::{Color, Severity, method_color};
 pub use crate::components::badge::Badge;
+pub use crate::components::banner::Banner;
 pub use crate::components::behavior::{
     Clickable, Disableable, FixedWidth, Toggleable, VisibleOnHover,
 };

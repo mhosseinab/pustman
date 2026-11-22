@@ -75,6 +75,26 @@ impl Color {
     }
 }
 
+/// The theme's method token for a method label (`references/design-system.md` §1: the
+/// HTTP verbs are theme tokens). [`Color::Custom`] only resolves the token — the theme
+/// still owns the value — and a verb with no token (Trace, Connect, a custom method)
+/// falls back to muted text. The verb's text always shows beside the colour: method
+/// colour alone carries no meaning.
+pub fn method_color(method: &str, cx: &App) -> Color {
+    let status = cx.theme().status();
+    let token = match method {
+        "GET" => status.method_get,
+        "POST" => status.method_post,
+        "PUT" => status.method_put,
+        "PATCH" => status.method_patch,
+        "DELETE" => status.method_delete,
+        "HEAD" => status.method_head,
+        "OPTIONS" => status.method_options,
+        _ => return Color::Muted,
+    };
+    Color::Custom(token)
+}
+
 /// How serious a message is: the tone a badge, toast or callout is drawn in.
 ///
 /// Each severity owns a text color, a tinted background and an outline in the theme

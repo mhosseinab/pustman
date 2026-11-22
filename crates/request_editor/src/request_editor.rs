@@ -277,6 +277,7 @@ impl RequestEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.clear_stale_error();
         match event {
             UrlBarEvent::UrlChanged => {
                 let url = self.url_bar.read(cx).url(cx);
@@ -329,6 +330,7 @@ impl RequestEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.clear_stale_error();
         match event {
             HeadersEvent::RowsChanged => {
                 self.draft.headers = self.headers.read(cx).rows(cx);
@@ -377,6 +379,7 @@ impl RequestEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.clear_stale_error();
         match event {
             ParamsEvent::RowsChanged => {
                 self.draft.params = self.params.read(cx).query_rows(cx);
@@ -410,6 +413,7 @@ impl RequestEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.clear_stale_error();
         match event {
             SettingsTabEvent::SettingChanged(change) => self.apply_setting_change(*change, cx),
         }
@@ -427,6 +431,7 @@ impl RequestEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.clear_stale_error();
         match event {
             BodyTabEvent::BodyChanged => self.draft.body = self.body_tab.read(cx).body(cx),
         }
@@ -445,6 +450,7 @@ impl RequestEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.clear_stale_error();
         match event {
             AuthTabEvent::AuthChanged => self.draft.auth = self.auth_tab.read(cx).auth(),
         }
@@ -587,6 +593,10 @@ mod auto_header_tests;
 #[cfg(test)]
 #[path = "request_editor_curl_reseed_tests.rs"]
 mod curl_reseed_tests;
+
+#[cfg(test)]
+#[path = "request_editor_edit_tests.rs"]
+mod edit_tests;
 
 #[cfg(test)]
 #[path = "m1_layout_fixes_tests.rs"]

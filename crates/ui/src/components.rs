@@ -8,6 +8,7 @@
 //! [`gpui::Render`] entity like [`tab_bar`].
 
 pub mod badge;
+pub mod banner;
 pub mod behavior;
 pub mod button;
 pub mod context_menu;
