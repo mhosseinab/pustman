@@ -51,6 +51,10 @@ use crate::table_cells::{ColumnWidth, plain_cell};
 #[path = "cookie_dialog_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "cookie_dialog_clear_domain_tests.rs"]
+mod clear_domain_tests;
+
 /// One row's height at the default scale. Rows are uniform because the virtualized list
 /// measures one row for all of them (the `history_list` contract).
 const ROW_HEIGHT_PX: f32 = 40.;
@@ -244,6 +248,19 @@ impl CookieDialog {
             } if entry.domain == domain && entry.path == path && entry.name == name => {
                 Some(edit_focus.clone())
             }
+            _ => None,
+        })
+    }
+
+    /// The "Clear" control of one domain's group header, as the keyboard reaches it: the
+    /// dialog hands the control its tab order through this handle.
+    pub fn clear_focus_handle(&self, domain: &str) -> Option<FocusHandle> {
+        self.rows.iter().find_map(|row| match row {
+            Row::Domain {
+                domain: row_domain,
+                clear_focus,
+                ..
+            } if row_domain == domain => Some(clear_focus.clone()),
             _ => None,
         })
     }
