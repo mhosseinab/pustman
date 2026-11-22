@@ -59,6 +59,6 @@ fn focus_history_panel(_: &Focus, cx: &mut App) {
 pub mod delete_entries;
 
 /// Opening a history entry (PRD REQ-HIST-02): [`open_entry::open_entry`] restores the
-/// stored pre-resolution request into a request tab and opens its read-only response
-/// summary beside it.
+/// stored pre-resolution request into a request tab and shows the recorded response in
+/// that tab's response region.
 pub mod open_entry;

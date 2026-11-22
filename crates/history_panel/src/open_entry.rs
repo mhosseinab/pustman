@@ -1,27 +1,28 @@
 //! Opening one history entry (PRD REQ-HIST-02): the stored, pre-resolution request —
-//! `{{var}}` templates intact — comes back as a request tab, and the stored response
-//! summary opens beside it as a read-only tab (status, total time and body size, with
-//! no editing controls).
+//! `{{var}}` templates intact — comes back as a request tab, and the recorded response
+//! shows in that tab's own response region, the way a fresh send would show it.
 //!
 //! `Decision:` the open path is a plain pub function, not a `pustman_actions` action
-//! (`pustman_actions::history` holds only `Focus` and this step may not edit that crate)
-//! and not a `HistoryList` method (its rows carry the stored entries already): the step
-//! that adds row activation wires the rows to [`open_entry`], the shape
-//! [`crate::delete_entries`] deferred its buttons under.
+//! (`pustman_actions::history` holds only `Focus`) and not a `HistoryList` method (its
+//! rows carry the stored entries already).
 //!
-//! `Decision:` the summary is its own read-only tab beside the request tab, not a
-//! region inside it: this step may not edit `request_editor` (whose tab owns the
-//! request draft), so the goal's two things are two pane items. The request tab is
-//! added last — `add_tab_item` activates what it adds — so opening an entry lands on
-//! the request.
+//! `Decision:` the response goes into the request tab's embedded response view rather
+//! than a second, read-only tab: the separate tab repeated what that region shows and
+//! doubled the tabs each open added. History stores a summary: the body is the stored
+//! prefix (at most `http_engine::HISTORY_BODY_LIMIT`), and no reason phrase is kept, so
+//! the status's standard phrase stands in. A send that failed or was cancelled stored no
+//! response, and none is shown.
+
+use std::time::Duration;
 
 use api_model::HttpRequest;
-use gpui::{App, Context, Entity, IntoElement, SharedString, Window};
+use gpui::{App, Entity, Window};
+use http_engine::{Header, Response, ResponseBody, Timings};
 use request_editor::RequestEditor;
 use serde::Deserialize;
 use storage::HistoryEntry;
 use ui::prelude::*;
-use workspace::{Item, Workspace};
+use workspace::Workspace;
 
 /// The one message a failed restore shows. The stored JSON's error text can quote the
 /// request it failed on (request content, PRD §7), so it is dropped unread and the user
@@ -29,23 +30,13 @@ use workspace::{Item, Workspace};
 /// log).
 const OPEN_FAILURE_MESSAGE: &str = "The history entry could not be opened";
 
-/// The one message shown when only the stored response summary is unreadable: the
-/// request tab still opens — the summary is secondary — but the failure is never silent.
-const SUMMARY_FAILURE_MESSAGE: &str = "The response summary could not be shown";
+/// The one message shown when only the stored response is unreadable: the request tab
+/// still opens — the response is secondary — but the failure is never silent.
+const SUMMARY_FAILURE_MESSAGE: &str = "The recorded response could not be shown";
 
-/// The summary tab's title: it holds the recorded response's facts and nothing else.
-const SUMMARY_TAB_TITLE: &str = "Response summary";
-
-/// The summary's stable element id and test hook (the `Welcome` item's pattern).
-const SUMMARY_SELECTOR: &str = "history-response-summary";
-
-/// What an unmeasured fact shows: an em dash, never a guess (ADR-0003, the shape
-/// `request_editor::send` spells its status facts under).
-const UNMEASURED: &str = "—";
-
-/// Open one recorded send in the center pane of `workspace`: a [`RequestEditor`] tab
-/// holding the entry's stored request exactly as it was recorded, plus — when the entry
-/// has one — the read-only [`ResponseSummary`] tab beside it.
+/// Open one recorded send in the center pane of `workspace`: one [`RequestEditor`] tab
+/// holding the entry's stored request exactly as it was recorded, with the recorded
+/// response — when the entry has one — in the tab's response region.
 ///
 /// Everything is synchronous: the caller holds the stored [`HistoryEntry`] (the list
 /// already read it), so there is no database work to run off the foreground and no task
@@ -66,28 +57,29 @@ pub fn open_entry(
             return;
         }
     };
-    let summary =
-        entry.response_summary_json.as_ref().and_then(
-            |document| match ResponseSummary::from_stored(document) {
-                Ok(summary) => Some(summary),
-                Err(_error) => {
-                    toast(workspace, SUMMARY_FAILURE_MESSAGE, cx);
-                    None
-                }
-            },
-        );
-
-    let summary_tab = summary.map(|summary| cx.new(|_cx| summary));
-    let editor = cx.new(|cx| RequestEditor::new(request, window, cx));
-    workspace.update(cx, |workspace, cx| {
-        workspace.center_pane().update(cx, |pane, cx| {
-            // Summary first: `add_tab_item` activates what it adds, and the request —
-            // the thing the user opened the entry for — must be the active tab.
-            if let Some(summary_tab) = summary_tab {
-                pane.add_tab_item(summary_tab, cx);
+    let response = entry
+        .response_summary_json
+        .as_ref()
+        .and_then(|document| match stored_response(document, entry) {
+            Ok(response) => response,
+            Err(_error) => {
+                toast(workspace, SUMMARY_FAILURE_MESSAGE, cx);
+                None
             }
-            pane.add_tab_item(editor, cx);
         });
+
+    let editor = cx.new(|cx| RequestEditor::new(request, window, cx));
+    if let Some(response) = response {
+        editor.update(cx, |editor, cx| {
+            editor
+                .response_view()
+                .update(cx, |view, cx| view.set_response(response, cx));
+        });
+    }
+    workspace.update(cx, |workspace, cx| {
+        workspace
+            .center_pane()
+            .update(cx, |pane, cx| pane.add_tab_item(editor, cx));
     });
 }
 
@@ -100,9 +92,8 @@ fn toast(workspace: &Entity<Workspace>, message: &'static str, cx: &mut App) {
 }
 
 /// The stored response summary as `http_engine` writes it: the status, the timings
-/// under `"timings"`, and the body's byte count. Every field is optional — a send that
-/// failed or was cancelled stores a summary with none of them — and unknown fields
-/// (the stored headers) are ignored here.
+/// under `"timings"` and the (already redacted) headers. A send that failed or was
+/// cancelled stores a summary with no status. Unknown fields are ignored.
 #[derive(Debug, Deserialize)]
 struct StoredSummary {
     #[serde(default)]
@@ -110,92 +101,69 @@ struct StoredSummary {
     #[serde(default)]
     timings: Option<StoredTimings>,
     #[serde(default)]
-    body_size: Option<u64>,
+    headers: Vec<StoredHeader>,
 }
 
-/// The timing slice of the stored summary; the summary shows the whole exchange's
-/// total, the one timing the panel's rows already quote.
-#[derive(Debug, Deserialize)]
+/// The stored timings, whole milliseconds each; `null` for a phase never measured.
+#[derive(Debug, Default, Deserialize)]
 struct StoredTimings {
     #[serde(default)]
-    total_ms: Option<i64>,
+    prepare_ms: Option<u64>,
+    #[serde(default)]
+    dns_ms: Option<u64>,
+    #[serde(default)]
+    connect_ms: Option<u64>,
+    #[serde(default)]
+    tls_ms: Option<u64>,
+    #[serde(default)]
+    first_byte_ms: Option<u64>,
+    #[serde(default)]
+    download_ms: Option<u64>,
+    #[serde(default)]
+    total_ms: Option<u64>,
 }
 
-/// The read-only response summary tab (PRD REQ-HIST-02): the status, total time and
-/// body size one recorded response left behind. Read-only by construction — it holds
-/// the facts as display text and offers no control that could edit or re-send anything.
-pub struct ResponseSummary {
-    /// The recorded status code as display text — [`None`] for a send that failed or
-    /// was cancelled.
-    status_text: Option<SharedString>,
-    /// The recorded total time in whole milliseconds (`http_engine` stores whole ms).
-    time_text: SharedString,
-    /// The recorded body size in bytes (the `console` export spells stored sizes the
-    /// same raw way — this is not a byte formatter).
-    size_text: SharedString,
+#[derive(Debug, Deserialize)]
+struct StoredHeader {
+    name: String,
+    value: String,
 }
 
-impl ResponseSummary {
-    /// The summary of the stored `response_summary_json` document. A document that does
-    /// not match the stored shape is an error for the caller to report — the facts are
-    /// never guessed at.
-    fn from_stored(document: &serde_json::Value) -> serde_json::Result<Self> {
-        let stored: StoredSummary = serde_json::from_value(document.clone())?;
-        Ok(Self {
-            status_text: stored.status.map(|status| status.to_string().into()),
-            time_text: fact_text(stored.timings.and_then(|timings| timings.total_ms), "ms"),
-            size_text: fact_text(stored.body_size, "B"),
-        })
-    }
-}
-
-impl Item for ResponseSummary {
-    fn tab_title(&self, _cx: &App) -> SharedString {
-        SharedString::new_static(SUMMARY_TAB_TITLE)
-    }
-}
-
-impl Render for ResponseSummary {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let time_text = self.time_text.clone();
-        let size_text = self.size_text.clone();
-        h_flex()
-            .id(SUMMARY_SELECTOR)
-            .debug_selector(|| SUMMARY_SELECTOR.to_owned())
-            .w_full()
-            .gap(DynamicSpacing::Base04.rems(cx))
-            .px(DynamicSpacing::Base04.rems(cx))
-            .py(DynamicSpacing::Base03.rems(cx))
-            .border_b_1()
-            .border_color(cx.theme().colors().border_variant)
-            // The status is a `Badge` — the component's own "a status" use case — and
-            // its color never carries the meaning alone: the code itself is the text.
-            .child(match &self.status_text {
-                Some(status_text) => Badge::new(status_text.clone()).into_any_element(),
-                None => Label::new(UNMEASURED)
-                    .color(Color::Muted)
-                    .into_any_element(),
-            })
-            .child(
-                Label::new(time_text)
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
-            )
-            .child(
-                Label::new(size_text)
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
-            )
-    }
-}
-
-/// One recorded fact as the summary shows it: the value with its unit, or the em dash
-/// when the send left it unmeasured (ADR-0003).
-fn fact_text(value: Option<impl std::fmt::Display>, unit: &'static str) -> SharedString {
-    match value {
-        Some(value) => format!("{value} {unit}").into(),
-        None => SharedString::new_static(UNMEASURED),
-    }
+/// The response the entry recorded, rebuilt from its summary and stored body prefix;
+/// [`None`] when the send never got one. A document that does not match the stored
+/// shape is an error for the caller to report — the facts are never guessed at.
+fn stored_response(
+    document: &serde_json::Value,
+    entry: &HistoryEntry,
+) -> serde_json::Result<Option<Response>> {
+    let stored: StoredSummary = serde_json::from_value(document.clone())?;
+    let Some(status) = stored.status else {
+        return Ok(None);
+    };
+    let body = entry.response_body_prefix.clone().unwrap_or_default();
+    // History keeps no reason phrase, so the status code's standard one stands in.
+    let reason = reqwest::StatusCode::from_u16(status)
+        .ok()
+        .and_then(|code| code.canonical_reason())
+        .unwrap_or_default();
+    let mut response = Response::new(status, reason, ResponseBody::Bytes(body));
+    response.headers = stored
+        .headers
+        .into_iter()
+        .map(|header| Header::new(header.name, header.value))
+        .collect();
+    let timings = stored.timings.unwrap_or_default();
+    let millis = |value: Option<u64>| value.map(Duration::from_millis);
+    response.timings = Timings {
+        prepare: millis(timings.prepare_ms),
+        dns: millis(timings.dns_ms),
+        connect: millis(timings.connect_ms),
+        tls: millis(timings.tls_ms),
+        first_byte: millis(timings.first_byte_ms),
+        download: millis(timings.download_ms),
+        total: millis(timings.total_ms),
+    };
+    Ok(Some(response))
 }
 
 #[cfg(test)]

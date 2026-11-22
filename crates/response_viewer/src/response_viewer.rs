@@ -145,6 +145,11 @@ impl ResponseView {
         cx.notify();
     }
 
+    /// The response on screen, if any.
+    pub fn response(&self) -> Option<&Arc<Response>> {
+        self.response.as_ref()
+    }
+
     /// Show this failed send instead of a response body (REQ-RESP-08). The panel takes
     /// the body region only: the status line and tabs keep whatever they show until the
     /// next [`Self::set_response`] replaces both.

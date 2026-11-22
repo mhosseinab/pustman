@@ -353,7 +353,7 @@ impl TextArea {
     ) {
         let offset = self.index_for_mouse_position(event.position, window.line_height());
         self.state
-            .begin_selecting(offset, event.modifiers.shift, window, cx);
+            .begin_selecting(offset, event.modifiers.shift, event.click_count, window, cx);
     }
 
     fn on_mouse_up(&mut self, _: &MouseUpEvent, _window: &mut Window, _: &mut Context<Self>) {
@@ -915,3 +915,7 @@ mod font_size_tests;
 #[cfg(test)]
 #[path = "text_area_layout_tests.rs"]
 mod layout_tests;
+
+#[cfg(test)]
+#[path = "text_area_multi_click_tests.rs"]
+mod multi_click_tests;

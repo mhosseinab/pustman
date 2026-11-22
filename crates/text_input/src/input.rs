@@ -22,7 +22,7 @@ use gpui::{
 use ui::prelude::*;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, line_range_at, word_range_at};
 use crate::editing::{Record, Selection, Transaction, UndoStack};
 use crate::highlights::{Highlight, HighlightSet};
 
@@ -104,7 +104,21 @@ pub struct EditState {
     multiline: bool,
     goal_column: Option<usize>,
     is_selecting: bool,
+    select_unit: SelectUnit,
     focus_handle: FocusHandle,
+}
+
+/// What a mouse selection grows by, from the click count that started it — Zed's
+/// editor shape: one click places the caret, two take a word, three a line, four all.
+/// A word or line unit keeps the range the click took, so a drag selects the union of
+/// it and the unit under the pointer.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+enum SelectUnit {
+    #[default]
+    Character,
+    Word(Range<usize>),
+    Line(Range<usize>),
+    All,
 }
 
 impl EditState {
@@ -122,6 +136,7 @@ impl EditState {
             multiline,
             goal_column: None,
             is_selecting: false,
+            select_unit: SelectUnit::Character,
             focus_handle: cx.focus_handle(),
         }
     }
@@ -723,11 +738,13 @@ impl EditState {
     }
 
     /// Start a mouse selection at `offset` — `extend` grows the selection the way Shift
-    /// does instead of moving the caret.
+    /// does instead of moving the caret; `click_count` picks the unit (see
+    /// [`SelectUnit`]).
     pub fn begin_selecting<E: EventEmitter<TextInputEvent>>(
         &mut self,
         offset: usize,
         extend: bool,
+        click_count: usize,
         window: &mut Window,
         cx: &mut Context<E>,
     ) {
@@ -735,27 +752,79 @@ impl EditState {
         window.request_virtual_keyboard();
         window.focus(&self.focus_handle, cx);
         if extend {
+            self.select_unit = SelectUnit::Character;
             self.select_to(offset, window, cx);
-        } else {
-            self.move_to(offset, window, cx);
+            return;
+        }
+        self.select_unit = match click_count {
+            0 | 1 => SelectUnit::Character,
+            2 => SelectUnit::Word(self.word_range_at(offset)),
+            3 => SelectUnit::Line(self.line_range_at(offset)),
+            _ => SelectUnit::All,
+        };
+        match self.select_unit.clone() {
+            SelectUnit::Character => self.move_to(offset, window, cx),
+            SelectUnit::Word(range) | SelectUnit::Line(range) => {
+                self.select_range(range, false, window, cx);
+            }
+            SelectUnit::All => self.select_range(0..self.buffer.len(), false, window, cx),
         }
     }
 
-    /// Grow the mouse selection to `offset`, if a mouse selection is under way.
+    /// Grow the mouse selection to `offset`, if a mouse selection is under way: by
+    /// characters, or by the word or line unit a multi-click started it with.
     pub fn drag_select<E: EventEmitter<TextInputEvent>>(
         &mut self,
         offset: usize,
         window: &mut Window,
         cx: &mut Context<E>,
     ) {
-        if self.is_selecting {
-            self.select_to(offset, window, cx);
+        if !self.is_selecting {
+            return;
         }
+        let (original, under) = match self.select_unit.clone() {
+            SelectUnit::Character => {
+                self.select_to(offset, window, cx);
+                return;
+            }
+            SelectUnit::All => return,
+            SelectUnit::Word(original) => (original, self.word_range_at(offset)),
+            SelectUnit::Line(original) => (original, self.line_range_at(offset)),
+        };
+        let range = original.start.min(under.start)..original.end.max(under.end);
+        self.select_range(range, under.start < original.start, window, cx);
     }
 
     /// End the mouse selection.
     pub fn stop_selecting(&mut self) {
         self.is_selecting = false;
+    }
+
+    fn word_range_at(&self, offset: usize) -> Range<usize> {
+        word_range_at(&self.buffer.text(), offset)
+    }
+
+    /// A single-line field is one line, so a triple click takes all of it.
+    fn line_range_at(&self, offset: usize) -> Range<usize> {
+        if self.multiline {
+            line_range_at(&self.buffer.text(), offset)
+        } else {
+            0..self.buffer.len()
+        }
+    }
+
+    fn select_range<E: EventEmitter<TextInputEvent>>(
+        &mut self,
+        range: Range<usize>,
+        reversed: bool,
+        window: &Window,
+        cx: &mut Context<E>,
+    ) {
+        self.set_selection(Selection { range, reversed });
+        self.goal_column = None;
+        self.undo_stack.break_coalescing();
+        window.notify_text_selection_changed(&self.focus_handle);
+        cx.notify();
     }
 
     /// A UTF-16 offset from the platform, as the buffer's UTF-8 byte offset.
@@ -1242,7 +1311,7 @@ impl TextInput {
     ) {
         let offset = self.index_for_mouse_position(event.position);
         self.state
-            .begin_selecting(offset, event.modifiers.shift, window, cx);
+            .begin_selecting(offset, event.modifiers.shift, event.click_count, window, cx);
     }
 
     fn on_mouse_up(&mut self, _: &MouseUpEvent, _window: &mut Window, _: &mut Context<Self>) {
@@ -1641,3 +1710,7 @@ mod placeholder_tests;
 #[cfg(test)]
 #[path = "input_font_size_tests.rs"]
 mod font_size_tests;
+
+#[cfg(test)]
+#[path = "input_multi_click_tests.rs"]
+mod multi_click_tests;

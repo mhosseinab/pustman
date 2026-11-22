@@ -282,3 +282,68 @@ fn segment(bytes: &[u8]) -> &str {
         Err(error) => std::str::from_utf8(&bytes[..error.valid_up_to()]).unwrap_or(""),
     }
 }
+
+/// What a double click groups: a run of one class of characters is one unit.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CharClass {
+    Word,
+    Whitespace,
+    Punctuation,
+}
+
+fn char_class(character: char) -> CharClass {
+    if character.is_alphanumeric() || character == '_' {
+        CharClass::Word
+    } else if character.is_whitespace() {
+        CharClass::Whitespace
+    } else {
+        CharClass::Punctuation
+    }
+}
+
+/// The unit a double click at `offset` selects in `text`: the run of word characters
+/// (letters, digits, `_`), whitespace or punctuation the character there belongs to —
+/// the character after `offset`, or before it at the end of the text or a line.
+pub fn word_range_at(text: &str, offset: usize) -> Range<usize> {
+    let offset = text.floor_char_boundary(offset.min(text.len()));
+    let after = text[offset..].chars().next().filter(|next| *next != '\n');
+    let (start, class) = match after {
+        Some(character) => (offset, char_class(character)),
+        None => match text[..offset].chars().next_back() {
+            Some(character) if character != '\n' => {
+                (offset - character.len_utf8(), char_class(character))
+            }
+            _ => return offset..offset,
+        },
+    };
+    let same = |character: &char| *character != '\n' && char_class(*character) == class;
+    let run_start = start
+        - text[..start]
+            .chars()
+            .rev()
+            .take_while(same)
+            .map(char::len_utf8)
+            .sum::<usize>();
+    let run_end = start
+        + text[start..]
+            .chars()
+            .take_while(same)
+            .map(char::len_utf8)
+            .sum::<usize>();
+    run_start..run_end
+}
+
+/// The unit a triple click at `offset` selects in `text`: its line, with the line
+/// break that ends it, so a drag over whole lines copies them as lines.
+pub fn line_range_at(text: &str, offset: usize) -> Range<usize> {
+    let offset = text.floor_char_boundary(offset.min(text.len()));
+    let start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
+    let end = text[offset..]
+        .find('\n')
+        .map_or(text.len(), |index| offset + index + 1);
+    start..end
+}
+
+#[cfg(test)]
+#[path = "buffer_tests.rs"]
+mod tests;

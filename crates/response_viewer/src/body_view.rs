@@ -23,15 +23,17 @@ use std::borrow::Cow;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use gpui::{
-    Anchor, AnyElement, ClipboardItem, Entity, FocusHandle, Focusable, HighlightStyle,
-    InteractiveText, KeyBinding, MouseButton, Pixels, Point, ScrollStrategy, StyledText,
-    Subscription, Task, TextLayout, UniformListScrollHandle, WeakEntity, Window, anchored,
-    deferred, point,
+    Anchor, AnyElement, Bounds, ClipboardItem, DispatchPhase, Entity, FocusHandle, Focusable,
+    HighlightStyle, InteractiveText, KeyBinding, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels,
+    Point, ScrollStrategy, StyledText, Subscription, Task, TextLayout, UniformListScrollHandle,
+    WeakEntity, Window, anchored, canvas, deferred, point,
 };
 use http_engine::{Header, Response, ResponseBody};
 use settings::Setting;
+use text_input::buffer::word_range_at;
 use text_input::input::{Copy, SelectAll};
 use ui::components::context_menu::ContextMenuEvent;
 use ui::prelude::*;
@@ -170,6 +172,12 @@ pub struct BodyView {
     /// extending it right now.
     selection: Option<BodySelection>,
     selecting: bool,
+    /// What the press that started the selection selects by, so a drag grows by it.
+    select_unit: SelectUnit,
+    /// Where a selecting drag that left the rows is, with the rows' bounds; the
+    /// autoscroll keeps stepping toward it while it stays past an edge.
+    drag_outside: Option<(Point<Pixels>, Bounds<Pixels>)>,
+    autoscroll: Option<Task<()>>,
     /// The right-click copy menu over the lines, where it opened (window coordinates),
     /// and its subscription: dropped together when it dismisses.
     body_menu: Option<(Entity<ContextMenu>, Point<Pixels>)>,
@@ -219,6 +227,9 @@ impl BodyView {
             focus_handle: cx.focus_handle(),
             selection: None,
             selecting: false,
+            select_unit: SelectUnit::Character,
+            drag_outside: None,
+            autoscroll: None,
             body_menu: None,
             body_menu_subscription: None,
             _mode_bar_subscription,
@@ -240,12 +251,19 @@ impl BodyView {
         self.active_selection().map(BodySelection::text)
     }
 
-    /// A press on a line: start a selection there, or with Shift move the end of the
-    /// current one there.
+    #[cfg(test)]
+    pub(crate) fn selection_head_line(&self) -> Option<usize> {
+        self.selection.as_ref().map(|selection| selection.head.line)
+    }
+
+    /// A press on a line, as editors take one: a single click places the start, a double
+    /// click selects the word, a triple click the line with its line break, and more
+    /// select everything. With Shift it moves the end of the current selection there.
     fn begin_selection(
         &mut self,
         at: BodyPoint,
         extend: bool,
+        click_count: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -253,12 +271,29 @@ impl BodyView {
         match self.selection.as_mut() {
             Some(selection) if extend && Arc::ptr_eq(&selection.lines, &lines) => {
                 selection.head = at;
+                self.select_unit = SelectUnit::Character;
             }
             _ => {
-                self.selection = Some(BodySelection {
-                    lines,
-                    anchor: at,
-                    head: at,
+                self.select_unit = match click_count {
+                    0 | 1 => SelectUnit::Character,
+                    2 => SelectUnit::Word(word_at(&lines, at)),
+                    3 => SelectUnit::Line(line_at(&lines, at)),
+                    _ => SelectUnit::All,
+                };
+                self.selection = Some(match &self.select_unit {
+                    SelectUnit::Character => BodySelection {
+                        lines,
+                        anchor: at,
+                        head: at,
+                    },
+                    SelectUnit::Word((start, end)) | SelectUnit::Line((start, end)) => {
+                        BodySelection {
+                            lines,
+                            anchor: *start,
+                            head: *end,
+                        }
+                    }
+                    SelectUnit::All => BodySelection::all(lines),
                 });
             }
         }
@@ -267,21 +302,137 @@ impl BodyView {
         cx.notify();
     }
 
-    /// A drag over a line: move the selection's end there.
+    /// A drag to `at`: move the selection's end there, or — after a double or triple
+    /// click — select from the pressed word or line through the one under the pointer.
     fn extend_selection(&mut self, at: BodyPoint, cx: &mut Context<Self>) {
         if !self.selecting {
             return;
         }
-        if let Some(selection) = self.selection.as_mut()
-            && selection.head != at
-        {
-            selection.head = at;
+        let Some(selection) = self.selection.as_mut() else {
+            return;
+        };
+        let (anchor, head) = match &self.select_unit {
+            SelectUnit::Character => (selection.anchor, at),
+            SelectUnit::All => return,
+            SelectUnit::Word(pressed) | SelectUnit::Line(pressed) => {
+                let (start, end) = *pressed;
+                let (under_start, under_end) = match self.select_unit {
+                    SelectUnit::Word(_) => word_at(&selection.lines, at),
+                    _ => line_at(&selection.lines, at),
+                };
+                if under_start < start {
+                    (end, under_start)
+                } else {
+                    (start, end.max(under_end))
+                }
+            }
+        };
+        if selection.anchor != anchor || selection.head != head {
+            selection.anchor = anchor;
+            selection.head = head;
             cx.notify();
         }
     }
 
     fn end_selection(&mut self) {
         self.selecting = false;
+        self.drag_outside = None;
+        self.autoscroll = None;
+    }
+
+    /// A selecting drag anywhere in the window, seen against the rows' `bounds`. Over a
+    /// row the row itself extends the selection; below the last row the selection runs
+    /// to the end of the body, and past the top or bottom edge the rows scroll toward
+    /// the pointer — and keep scrolling while it is held there.
+    fn drag_beyond_rows(
+        &mut self,
+        position: Point<Pixels>,
+        bounds: Bounds<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.selecting {
+            return;
+        }
+        if position.y < bounds.top() || position.y > bounds.bottom() {
+            let was_inside = self.drag_outside.is_none();
+            self.drag_outside = Some((position, bounds));
+            self.autoscroll_step(cx);
+            if was_inside {
+                self.autoscroll = Some(cx.spawn(async move |this, cx| {
+                    loop {
+                        cx.background_executor().timer(AUTOSCROLL_INTERVAL).await;
+                        let stepping = this
+                            .update(cx, |this, cx| this.autoscroll_step(cx))
+                            .unwrap_or(false);
+                        if !stepping {
+                            break;
+                        }
+                    }
+                }));
+            }
+            return;
+        }
+        self.drag_outside = None;
+        self.autoscroll = None;
+        let Some((row_height, scroll_top)) = self.row_geometry() else {
+            return;
+        };
+        let lines = Arc::clone(self.shown());
+        let below_rows = bounds.top() + row_height * lines.len() as f32 - scroll_top;
+        if position.y >= below_rows {
+            self.extend_selection(end_of_line(&lines, lines.len().saturating_sub(1)), cx);
+        }
+    }
+
+    /// One autoscroll step toward a pointer held past an edge: scroll by a few rows —
+    /// more the farther out it is — and move the selection to the row at that edge.
+    /// False once the drag ended or came back over the rows.
+    fn autoscroll_step(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some((position, bounds)) = self.drag_outside.filter(|_| self.selecting) else {
+            return false;
+        };
+        let Some((row_height, scroll_top)) = self.row_geometry() else {
+            return true;
+        };
+        let lines = Arc::clone(self.shown());
+        let Some(last) = lines.len().checked_sub(1) else {
+            return false;
+        };
+        let distance = if position.y < bounds.top() {
+            position.y - bounds.top()
+        } else {
+            position.y - bounds.bottom()
+        };
+        let rows = (distance.abs() / row_height)
+            .ceil()
+            .clamp(1., AUTOSCROLL_MAX_ROWS);
+        let handle = self.list_scroll_handle.0.borrow().base_handle.clone();
+        let max_scroll = handle.max_offset().y;
+        let scroll_top =
+            (scroll_top + row_height * rows * distance.signum()).clamp(px(0.), max_scroll);
+        handle.set_offset(point(handle.offset().x, -scroll_top));
+        let at = if distance < px(0.) {
+            let row = (scroll_top / row_height).floor() as usize;
+            BodyPoint {
+                line: row.min(last),
+                column: 0,
+            }
+        } else {
+            let row = ((scroll_top + bounds.size.height) / row_height).floor() as usize;
+            end_of_line(&lines, row.min(last))
+        };
+        self.extend_selection(at, cx);
+        cx.notify();
+        true
+    }
+
+    /// The rows' height and how far they are scrolled down, once the list has laid out.
+    /// The list records its whole content's size, and its rows are uniform.
+    fn row_geometry(&self) -> Option<(Pixels, Pixels)> {
+        let state = self.list_scroll_handle.0.borrow();
+        let rows = self.shown().len();
+        let row_height = state.last_item_size?.contents.height / rows.max(1) as f32;
+        (row_height > px(0.)).then(|| (row_height, -state.base_handle.offset().y))
     }
 
     fn select_all(&mut self, _: &SelectAll, _window: &mut Window, cx: &mut Context<Self>) {
@@ -888,7 +1039,7 @@ impl BodyView {
         let row_base = base.clone();
         let list_base = base.clone();
         let render_base = base.clone();
-        VirtualList::new(
+        let list = VirtualList::new(
             child_id(&list_base, "lines"),
             lines.len(),
             move |index| child_id(&row_base, format!("line-{index}")),
@@ -911,8 +1062,55 @@ impl BodyView {
                 )
             },
         )
-        .track_scroll(self.list_scroll_handle.clone())
-        .into_any_element()
+        .track_scroll(self.list_scroll_handle.clone());
+        let drag_view = cx.entity().downgrade();
+        div()
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .child(list)
+            .child(
+                // A window-wide listener for the rows' bounds: a selecting drag that
+                // leaves the rows — below the last one, or out of the pane — still
+                // reaches the view, which a row's own hover-bound handler never sees.
+                canvas(
+                    |_, _, _| {},
+                    move |bounds, _, window, _| {
+                        let move_view = drag_view.clone();
+                        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                            if phase != DispatchPhase::Bubble
+                                || event.pressed_button != Some(MouseButton::Left)
+                            {
+                                return;
+                            }
+                            let position = event.position;
+                            if move_view
+                                .update(cx, |view, cx| view.drag_beyond_rows(position, bounds, cx))
+                                .is_err()
+                            {
+                                // The pane is gone; there is nothing left to select.
+                            }
+                        });
+                        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                            if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+                                return;
+                            }
+                            if drag_view
+                                .update(cx, |view, _| view.end_selection())
+                                .is_err()
+                            {
+                                // The pane is gone; there is no drag left to end.
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full(),
+            )
+            .into_any_element()
     }
 
     /// Hex: the body's raw bytes as hexdump rows ([`crate::hex_view`]), formatted lazily
@@ -1118,8 +1316,11 @@ fn render_line_with_matches(
                     column: column_at(&press_layout, &press_line, event.position),
                 };
                 let extend = event.modifiers.shift;
+                let click_count = event.click_count;
                 if view
-                    .update(cx, |view, cx| view.begin_selection(at, extend, window, cx))
+                    .update(cx, |view, cx| {
+                        view.begin_selection(at, extend, click_count, window, cx)
+                    })
                     .is_err()
                 {
                     // The pane closed under the pointer; there is nothing left to select.
@@ -1196,6 +1397,64 @@ fn column_at(layout: &TextLayout, line: &str, position: Point<Pixels>) -> usize 
         Ok(index) | Err(index) => index,
     };
     clamp_column(line, index)
+}
+
+/// How often a drag held past the rows' edge scrolls them another step.
+const AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(30);
+/// The most rows one autoscroll step moves, however far past the edge the pointer is.
+const AUTOSCROLL_MAX_ROWS: f32 = 8.;
+
+/// What a selecting press selects by: characters, or the word or line it landed on (as
+/// the range a drag must keep), or everything.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SelectUnit {
+    Character,
+    Word((BodyPoint, BodyPoint)),
+    Line((BodyPoint, BodyPoint)),
+    All,
+}
+
+/// The word, run of punctuation or gap under `at`, as the text inputs see one.
+fn word_at(lines: &[SharedString], at: BodyPoint) -> (BodyPoint, BodyPoint) {
+    let line = lines.get(at.line).map_or("", |line| line.as_ref());
+    let range = word_range_at(line, at.column);
+    (
+        BodyPoint {
+            line: at.line,
+            column: range.start,
+        },
+        BodyPoint {
+            line: at.line,
+            column: range.end,
+        },
+    )
+}
+
+/// The line under `at` with its line break: through the start of the next line, or to
+/// the end of the last one.
+fn line_at(lines: &[SharedString], at: BodyPoint) -> (BodyPoint, BodyPoint) {
+    let start = BodyPoint {
+        line: at.line,
+        column: 0,
+    };
+    if at.line + 1 < lines.len() {
+        (
+            start,
+            BodyPoint {
+                line: at.line + 1,
+                column: 0,
+            },
+        )
+    } else {
+        (start, end_of_line(lines, at.line))
+    }
+}
+
+fn end_of_line(lines: &[SharedString], line: usize) -> BodyPoint {
+    BodyPoint {
+        line,
+        column: lines.get(line).map_or(0, |text| text.len()),
+    }
 }
 
 /// A muted note line — the empty, loading, lossy and format-fallback states.
@@ -1312,3 +1571,7 @@ mod selection_tests;
 #[cfg(test)]
 #[path = "body_menu_tests.rs"]
 mod menu_tests;
+
+#[cfg(test)]
+#[path = "body_multi_click_tests.rs"]
+mod multi_click_tests;
