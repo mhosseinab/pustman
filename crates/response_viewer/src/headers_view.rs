@@ -13,6 +13,12 @@
 //! tab stop with Up/Down/Enter/Escape (`ui::ContextMenu`). The physical context-menu key
 //! is not bound: no `pustman_actions` action opens a row menu and the keymaps belong to
 //! later steps.
+//!
+//! `Decision:` the open menu is an overlay of the table, not of the row it was opened
+//! from — [`VirtualList`] unmounts the rows the viewport cannot show, so a menu drawn in
+//! its row would be dropped (hidden, focus still live, no `Dismissed`) by one scroll
+//! (#144). Drawn at the table's root, it is dismissed only through its `Dismissed` event,
+//! which returns focus to its row (S05 · R05, `01_specs/screen_specs.md`).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -61,12 +67,11 @@ impl HeaderRow {
     }
 }
 
-/// The open "Copy" menu of one header row: the menu itself, the row it copies and where
-/// it opened (window coordinates).
+/// The open "Copy" menu of one header row: the menu itself, the row's focus handle and
+/// where the menu opened (window coordinates).
 #[derive(Clone)]
 struct RowMenu {
     menu: Entity<ContextMenu>,
-    row_key: SharedString,
     /// The row's focus handle, so the menu can hand focus back when it dismisses.
     row_focus: FocusHandle,
     position: Point<Pixels>,
@@ -184,7 +189,6 @@ impl HeadersView {
         menu.update(cx, |menu, cx| menu.focus(window, cx));
         self.row_menu = Some(RowMenu {
             menu,
-            row_key,
             row_focus,
             position,
         });
@@ -217,13 +221,14 @@ impl Render for HeadersView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let rows = Arc::clone(&self.rows);
         let row_focus = Arc::clone(&self.row_focus);
-        let open_menu = self.row_menu.clone();
+        let row_menu = self.row_menu.clone();
         let view = cx.weak_entity();
         let selection = Arc::new(self.selection.clone());
         // One base id per entity, so two viewers in one frame never share element ids.
         let base = ElementId::from(("headers-view", cx.entity_id()));
         let root = v_flex()
             .size_full()
+            .relative()
             .key_context(TEXT_CONTEXT)
             .track_focus(&self.focus_handle);
         selection_handlers(root, cx)
@@ -249,7 +254,6 @@ impl Render for HeadersView {
                         rows,
                         base: base.clone(),
                         row_focus,
-                        open_menu,
                         view,
                         selection,
                     };
@@ -264,6 +268,7 @@ impl Render for HeadersView {
                     ))
                 }
             })
+            .children(row_menu_overlay(row_menu, cx))
     }
 }
 
@@ -276,20 +281,18 @@ struct RowTable {
     rows: Arc<Vec<HeaderRow>>,
     base: ElementId,
     row_focus: Arc<Vec<FocusHandle>>,
-    open_menu: Option<RowMenu>,
     view: WeakEntity<HeadersView>,
     selection: Arc<CellSelector>,
 }
 
 /// One header row: name and value, each truncating with its full value in a tooltip. The
-/// row is a tab stop; right-click or Enter/Space on it opens its "Copy" menu, and while
-/// the menu is open it floats over the table at where the row opened it.
+/// row is a tab stop; right-click or Enter/Space on it opens its "Copy" menu, which the
+/// table draws over the list (`row_menu_overlay`).
 fn render_row(table: &RowTable, index: usize, cx: &mut App) -> AnyElement {
     let RowTable {
         rows,
         base,
         row_focus,
-        open_menu,
         view,
         selection,
     } = table;
@@ -297,27 +300,6 @@ fn render_row(table: &RowTable, index: usize, cx: &mut App) -> AnyElement {
         return div().into_any_element();
     };
     let row_id = row.key(base);
-    let menu_overlay = open_menu
-        .as_ref()
-        .filter(|open| open.row_key == row.key_name())
-        .map(|open| {
-            let menu = open.menu.clone();
-            let position = open.position;
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .child(
-                    deferred(
-                        anchored()
-                            .position(position)
-                            .snap_to_window_with_margin(DynamicSpacing::Base04.px(cx))
-                            .child(menu),
-                    )
-                    .with_priority(1),
-                )
-                .into_any_element()
-        });
 
     // Right-click opens the menu at the pointer; the keyboard's synthesized click
     // (`ClickEvent::Keyboard` — Enter or Space on the focused row) opens it at the row's
@@ -377,8 +359,31 @@ fn render_row(table: &RowTable, index: usize, cx: &mut App) -> AnyElement {
             view,
             cx,
         ))
-        .children(menu_overlay)
         .into_any_element()
+}
+
+/// The open row menu, as an overlay of the whole table rather than of the row it was
+/// opened from: [`VirtualList`] unmounts the rows the viewport cannot show, so a menu
+/// drawn inside its row is dropped the moment that row scrolls away — hidden, with no
+/// [`ContextMenuEvent::Dismissed`] and its focus still live (#144). Anchored at the
+/// window position `open_row_menu` recorded, it stays put while the rows scroll under it.
+fn row_menu_overlay(open: Option<RowMenu>, cx: &App) -> Option<AnyElement> {
+    open.map(|open| {
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .child(
+                deferred(
+                    anchored()
+                        .position(open.position)
+                        .snap_to_window_with_margin(DynamicSpacing::Base04.px(cx))
+                        .child(open.menu),
+                )
+                .with_priority(1),
+            )
+            .into_any_element()
+    })
 }
 
 /// Open the row menu for `row_key` at `position`, unless the table is already gone.
@@ -417,3 +422,11 @@ mod tests;
 #[cfg(test)]
 #[path = "headers_selection_tests.rs"]
 mod selection_tests;
+
+#[cfg(test)]
+#[path = "headers_row_menu_scroll_tests.rs"]
+mod row_menu_scroll_tests;
+
+#[cfg(test)]
+#[path = "headers_row_menu_tests.rs"]
+mod row_menu_tests;
