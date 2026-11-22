@@ -19,8 +19,10 @@ use ui::prelude::*;
 
 use crate::child_id;
 
-/// One megabyte, the unit `request.response_pretty_limit_mb` counts in.
-const MEGABYTE: u64 = 1024 * 1024;
+/// One megabyte, the unit `request.response_pretty_limit_mb` counts in. Crate-visible
+/// so this is the only declaration of the unit: `large_body_megabyte_tests.rs` pins its
+/// value for the frozen copy in `large_body_tests.rs` (#183).
+pub(crate) const MEGABYTE: u64 = 1024 * 1024;
 
 /// What the banner shows while a body is over the pretty limit: the limit that was
 /// exceeded, and where the body's bytes live on disk when they do.
