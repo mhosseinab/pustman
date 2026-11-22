@@ -68,6 +68,10 @@ impl fmt::Debug for Binding<'_> {
 /// variables, the OS keychain for secrets — and wins whenever it is set
 /// (REQ-VAR-SHARE-01). A secret's value only ever comes from that map, never from a
 /// file, so a repository can never carry one (REQ-VAR-SHARE-02).
+///
+/// A stack is [`Clone`]: a send takes its own copy while the editor keeps sharing the
+/// original, and the clone carries every scope and local value (#197).
+#[derive(Clone)]
 pub struct ScopeStack {
     /// Scopes in precedence order, narrowest first.
     scopes: Vec<Scope>,
@@ -111,6 +115,13 @@ impl ScopeStack {
     /// The local value the caller supplied for `name`, if any.
     pub fn local_value(&self, name: &str) -> Option<&str> {
         self.local_values.get(name).map(String::as_str)
+    }
+
+    /// Set the local value the caller supplies for `name` — where a secret's value
+    /// lives, since a file never records one (REQ-VAR-SHARE-02).
+    pub fn set_local_value(&mut self, name: &str, value: &str) {
+        self.local_values
+            .insert(name.to_string(), value.to_string());
     }
 
     /// The narrowest enabled variable named `name`, with the value it resolves to.
@@ -160,6 +171,10 @@ impl fmt::Debug for ScopeStack {
             .finish()
     }
 }
+
+#[cfg(test)]
+#[path = "scope_clone_tests.rs"]
+mod clone_tests;
 
 #[cfg(test)]
 #[path = "scope_tests.rs"]
