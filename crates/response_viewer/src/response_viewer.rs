@@ -151,10 +151,13 @@ impl ResponseView {
         self.response.as_ref()
     }
 
-    /// Show this failed send instead of a response body (REQ-RESP-08). The panel takes
-    /// the body region only: the status line and tabs keep whatever they show until the
-    /// next [`Self::set_response`] replaces both.
+    /// Show this failed send instead of a response (REQ-RESP-08). The panel takes the
+    /// region over whole, so the previous response's status line is cleared with it
+    /// (#126, #185): no old "200 OK" sits above the new failure. With no status line the
+    /// tabs and panes are off screen too — the same region state [`Self::clear`] leaves
+    /// for a send that produced no response.
     pub fn set_error(&mut self, error: TransportError, cx: &mut Context<Self>) {
+        self.status_line = None;
         self.error = Some(error);
         cx.notify();
     }
@@ -318,3 +321,7 @@ mod clear_tests;
 #[cfg(test)]
 #[path = "empty_state_tests.rs"]
 mod empty_state_tests;
+
+#[cfg(test)]
+#[path = "set_error_status_line_tests.rs"]
+mod set_error_tests;

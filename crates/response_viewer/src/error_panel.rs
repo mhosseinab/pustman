@@ -2,7 +2,8 @@
 //! says what kind of failure it was, what happened and what the user can do about it.
 //!
 //! The panel speaks with [`TransportError`]'s own words — [`TransportError::user_message`]
-//! and [`TransportError::suggested_fix`] — and adds only the error's type label. The
+//! and [`TransportError::suggested_fix`] — and titles the callout with the failure's
+//! human name ("Invalid URL", "TLS error"), never the enum variant the code uses. The
 //! "Open in Console" link appears only while `console::Focus` can be dispatched: the
 //! Console is a later step, so today there is no link at all — never a stub.
 
@@ -17,7 +18,9 @@ const CONSOLE_FOCUS_ACTION: &str = "console::Focus";
 
 /// The debug key the panel's type label renders under — the test hook that lets
 /// `VisualTestContext::debug_bounds` prove the panel is on screen (the `toast.rs`
-/// pattern). It is anchored to the label, so a caller and its test share one string.
+/// pattern). It is anchored to the label and keyed by the error's kind — the
+/// `TransportError` variant name, the panel's stable identity — while the label shows
+/// the human title, which is a display choice that may be reworded (#229).
 pub fn error_kind_selector(kind: &str) -> String {
     format!("error-panel-kind-{kind}")
 }
@@ -25,6 +28,13 @@ pub fn error_kind_selector(kind: &str) -> String {
 /// The debug key the panel's message renders under (see [`error_kind_selector`]).
 pub fn error_message_selector(message: &str) -> String {
     format!("error-panel-message-{message}")
+}
+
+/// The debug key the callout title renders under (see [`error_kind_selector`]), derived
+/// from the rendered title text — so finding it proves what the callout names the
+/// failure, not merely that some label is there (the [`error_message_selector`] shape).
+pub fn error_title_selector(title: &str) -> String {
+    format!("error-panel-title-{title}")
 }
 
 /// The debug key the panel's suggested-fix line renders under (see [`error_kind_selector`]).
@@ -40,7 +50,11 @@ pub const OPEN_CONSOLE_SELECTOR: &str = "error-panel-open-console";
 #[derive(Clone, Debug, IntoElement)]
 pub struct ErrorPanel {
     id: ElementId,
-    kind: SharedString,
+    /// The error's kind — the `TransportError` variant name — as the panel's stable
+    /// identity in [`error_kind_selector`]. Never rendered: the callout shows [`Self::title`].
+    kind: &'static str,
+    /// The human name for that kind, shown as the callout title (#229).
+    title: SharedString,
     message: SharedString,
     suggested_fix: SharedString,
     severity: Severity,
@@ -53,7 +67,8 @@ impl ErrorPanel {
     pub fn new(id: impl Into<ElementId>, error: &TransportError) -> Self {
         Self {
             id: id.into(),
-            kind: error_kind(error).into(),
+            kind: error_kind(error),
+            title: error_title(error).into(),
             message: error.user_message().into(),
             suggested_fix: error.suggested_fix().into(),
             severity: severity(error),
@@ -73,9 +88,10 @@ impl ErrorPanel {
 
 impl RenderOnce for ErrorPanel {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        // Test hooks: `VisualTestContext::debug_bounds` finds the three texts and the
-        // link under the keys the selector functions in this module hand out.
-        let kind_selector = error_kind_selector(&self.kind);
+        // Test hooks: `VisualTestContext::debug_bounds` finds the callout's texts and
+        // the link under the keys the selector functions in this module hand out.
+        let kind_selector = error_kind_selector(self.kind);
+        let title_selector = error_title_selector(&self.title);
         let message_selector = error_message_selector(&self.message);
         let fix_selector = error_fix_selector(&self.suggested_fix);
         // The Console is a later step: `console::Focus` is not registered yet, so the
@@ -108,12 +124,20 @@ impl RenderOnce for ErrorPanel {
                                 div()
                                     .id(child_id(&self.id, "kind"))
                                     .min_w_0()
-                                    .tooltip(Tooltip::text(self.kind.clone()).builder())
+                                    .tooltip(Tooltip::text(self.title.clone()).builder())
                                     .debug_selector(move || kind_selector)
                                     .child(
-                                        Label::new(self.kind.clone())
-                                            .size(LabelSize::Small)
-                                            .truncate(),
+                                        // The title is the rendered text its own debug
+                                        // key derives from, and the outer div keeps the
+                                        // kind key the older callers pin their tests to.
+                                        div()
+                                            .min_w_0()
+                                            .debug_selector(move || title_selector)
+                                            .child(
+                                                Label::new(self.title.clone())
+                                                    .size(LabelSize::Small)
+                                                    .truncate(),
+                                            ),
                                     ),
                             ),
                     )
@@ -175,8 +199,9 @@ fn severity(error: &TransportError) -> Severity {
     }
 }
 
-/// The error's type label: its variant name. `http_engine` exposes no kind label of its
-/// own and this step may not edit it; the match is exhaustive on purpose, so a new
+/// The error's kind key: its variant name. `http_engine` exposes no kind label of its
+/// own; this key is the panel's stable identity in test selectors (never rendered —
+/// [`error_title`] is what the user reads). The match is exhaustive on purpose, so a new
 /// variant fails to compile here instead of rendering an anonymous error.
 fn error_kind(error: &TransportError) -> &'static str {
     match error {
@@ -195,6 +220,30 @@ fn error_kind(error: &TransportError) -> &'static str {
     }
 }
 
+/// The callout's title: how the failure is named for a person (PRD §8.6), not the enum
+/// variant the code uses (#229: "Invalid URL", "TLS error"). Exhaustive on purpose, like
+/// [`error_kind`], so a new variant fails to compile instead of titling itself.
+fn error_title(error: &TransportError) -> &'static str {
+    match error {
+        TransportError::InvalidUrl { .. } => "Invalid URL",
+        TransportError::Dns { .. } => "DNS error",
+        TransportError::Connect { .. } => "Connection failed",
+        TransportError::Tls { .. } => "TLS error",
+        TransportError::Timeout { .. } => "Timeout",
+        TransportError::TooManyRedirects { .. } => "Too many redirects",
+        TransportError::Proxy { .. } => "Proxy error",
+        TransportError::Protocol { .. } => "Protocol error",
+        TransportError::Io { .. } => "I/O error",
+        TransportError::FileNotFound { .. } => "File not found",
+        TransportError::UnresolvedSecret { .. } => "Unresolved secret",
+        TransportError::Cancelled => "Cancelled",
+    }
+}
+
 #[cfg(test)]
 #[path = "error_panel_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "error_panel_titles_tests.rs"]
+mod title_tests;

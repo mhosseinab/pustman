@@ -1,10 +1,12 @@
-//! The status line above the response body: status code, reason, total time and size
-//! (REQ-RESP-01).
+//! The response header above the response body (REQ-RESP-01): the "Response" title,
+//! the status as a pill and the total time and body size as labelled meta beside it —
+//! the Response header the blueprint shows (`06_visuals/workbench_blueprint.svg`, S05).
 //!
-//! The status code is colored by its HTTP class from the theme's status tokens — one hue
-//! per class, never a literal — and the reason, time and size sit beside it. The texts
-//! are computed in [`StatusLine::new`] when the response arrives, never in `render`, and
-//! draw with tabular numbers so the row does not jitter between responses.
+//! The pill draws in the HTTP class's own hue from the theme's status tokens — one hue
+//! per class, never a literal — and the code always spells the class out, so meaning is
+//! never colour-only. The texts are computed in [`StatusLine::new`] when the response
+//! arrives, never in `render`, and draw with tabular numbers so the row does not jitter
+//! between responses.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,6 +20,33 @@ use crate::child_id;
 /// What the time and size metrics show when the transport could not measure them: an em
 /// dash, never a guess (ADR-0003).
 const UNMEASURED: &str = "—";
+
+/// The heading over the response facts — the blueprint's Response header
+/// (`06_visuals/workbench_blueprint.svg`, S05). The colour is named explicitly: a
+/// [`Headline`] with no colour of its own inherits its container's text colour, and this
+/// row sets none (`response_viewer.rs` #266).
+const RESPONSE_HEADER: &str = "Response";
+const RESPONSE_HEADER_COLOR: Color = Color::Default;
+
+/// The debug key the heading renders under — the test hook that lets
+/// `VisualTestContext::debug_bounds` prove it is on screen (the `error_panel.rs`
+/// pattern). It is derived from the rendered text, so the key and the label cannot
+/// drift apart.
+fn response_header_selector(title: &str) -> String {
+    format!("response-header-{title}")
+}
+
+/// The debug key the status pill renders under (see [`response_header_selector`]),
+/// derived from the pill's rendered label — code and reason, as the user reads them.
+fn status_pill_selector(label: &str) -> String {
+    format!("status-pill-{label}")
+}
+
+/// The debug key one labelled metric renders under (see [`response_header_selector`]),
+/// derived from the rendered label and value — "Time"/"184 ms", "Size"/"244 B".
+fn status_meta_selector(label: &str, value: &str) -> String {
+    format!("status-meta-{label}-{value}")
+}
 
 /// The status line: one response's facts, precomputed into display text.
 #[derive(Clone, Debug, IntoElement)]
@@ -53,9 +82,10 @@ impl StatusLine {
 
 impl RenderOnce for StatusLine {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let code_color = status_class_color(self.status, cx);
+        let pill_label = format!("{} {}", self.status, self.reason);
         h_flex()
             .w_full()
+            .items_center()
             .gap(DynamicSpacing::Base04.rems(cx))
             .px(DynamicSpacing::Base04.rems(cx))
             .py(DynamicSpacing::Base03.rems(cx))
@@ -63,31 +93,34 @@ impl RenderOnce for StatusLine {
             .border_color(cx.theme().colors().border_variant)
             .child(
                 div()
-                    .font_ui(cx)
-                    .text_ui(cx)
-                    .text_color(code_color)
-                    .child(self.status.to_string()),
+                    .debug_selector(|| response_header_selector(RESPONSE_HEADER))
+                    .child(
+                        Headline::new(RESPONSE_HEADER)
+                            .size(HeadlineSize::Small)
+                            .color(RESPONSE_HEADER_COLOR),
+                    ),
             )
-            .child(
-                div()
-                    .id(child_id(&self.id, "reason"))
-                    .min_w_0()
-                    .tooltip(Tooltip::text(self.reason.clone()).builder())
-                    .child(Label::new(self.reason).color(Color::Muted).truncate()),
-            )
-            .child(div().flex_1())
+            .child(status_pill(
+                child_id(&self.id, "status"),
+                pill_label,
+                self.status,
+                cx,
+            ))
             .child(metric(
                 child_id(&self.id, "time"),
+                "Time",
                 self.time_text,
                 "Total time",
                 cx,
             ))
             .child(metric(
                 child_id(&self.id, "size"),
+                "Size",
                 self.size_text,
                 "Body size",
                 cx,
             ))
+            .child(div().flex_1())
     }
 }
 
@@ -116,16 +149,87 @@ pub(crate) fn body_size(body: &ResponseBody) -> Option<u64> {
     }
 }
 
-/// One status metric — the time or the size — with the full fact in its tooltip.
-fn metric(id: ElementId, value: SharedString, what: &'static str, cx: &App) -> impl IntoElement {
+/// The severity family the pill's surface draws from. The HTTP classes are not
+/// severities — the hue stays [`status_class_color`]'s — but 2xx–5xx each mean the
+/// outcome their severity names (S05: "HTTP response versus transport failure"), and a
+/// 1xx carries no outcome yet, so its pill is neutral.
+fn status_severity(status: u16) -> Option<Severity> {
+    match status {
+        200..=299 => Some(Severity::Success),
+        300..=399 => Some(Severity::Info),
+        400..=499 => Some(Severity::Warning),
+        500..=599 => Some(Severity::Error),
+        _ => None,
+    }
+}
+
+/// The status as the blueprint's pill (`06_visuals/workbench_blueprint.svg`, "200 OK"):
+/// code and reason in the class hue on the outcome family's banner surface. It is
+/// [`ui::Badge`]'s shape at the pack's 12 px metadata size — the badge's 10 px label is
+/// its "counts and keybinding hints" size — and it truncates with the full label in its
+/// tooltip, because the reason phrase arrives from the wire (S05).
+fn status_pill(
+    id: ElementId,
+    label: impl Into<SharedString>,
+    status: u16,
+    cx: &App,
+) -> impl IntoElement {
+    let label: SharedString = label.into();
+    let selector = status_pill_selector(&label);
+    let tooltip_label = label.clone();
+    let code_color = status_class_color(status, cx);
     div()
         .id(id)
+        .min_w_0()
+        .tooltip(Tooltip::text(tooltip_label).builder())
+        .debug_selector(move || selector)
+        .child(
+            h_flex()
+                .min_w_0()
+                .items_center()
+                .px(DynamicSpacing::Base02.rems(cx))
+                .py(DynamicSpacing::Base01.rems(cx))
+                .rounded_full()
+                .border_1()
+                .text_color(code_color)
+                .map(|this| match status_severity(status) {
+                    Some(severity) => this
+                        .bg(severity.background(cx))
+                        .border_color(severity.border(cx)),
+                    None => this
+                        .bg(cx.theme().colors().element_background)
+                        .border_color(cx.theme().colors().border_variant),
+                })
+                .child(Label::new(label).size(LabelSize::Small).truncate()),
+        )
+}
+
+/// One labelled metric — "Time 184 ms" or "Size 244 B" — with the full fact in its
+/// tooltip. The label stays visible: a bare number pinned to the far right edge never
+/// says what it measured (S05, #223).
+fn metric(
+    id: ElementId,
+    label: &'static str,
+    value: SharedString,
+    what: &'static str,
+    cx: &App,
+) -> impl IntoElement {
+    let selector = status_meta_selector(label, &value);
+    h_flex()
+        .id(id)
+        .items_center()
+        .gap(DynamicSpacing::Base01.rems(cx))
         .font_ui(cx)
         .text_ui_sm(cx)
         .font_features(tabular_numbers())
-        .text_color(cx.theme().colors().text_muted)
         .tooltip(Tooltip::text(what).builder())
-        .child(value)
+        .debug_selector(move || selector)
+        .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
+        .child(
+            Label::new(value)
+                .size(LabelSize::Small)
+                .color(Color::Default),
+        )
 }
 
 /// Tabular figures for the time and size metrics, so their digits line up and the row
@@ -171,3 +275,7 @@ fn format_size(bytes: Option<u64>) -> String {
 #[cfg(test)]
 #[path = "status_line_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "response_header_tests.rs"]
+mod response_header_tests;
