@@ -13,6 +13,7 @@
 //! status and time (REQ-HIST-01) — never request or response content (REQ-HIST-03).
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use console::ConsoleStore;
 use gpui::{
@@ -32,6 +33,10 @@ use crate::open_entry::open_entry;
 #[cfg(test)]
 #[path = "history_list_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "history_summary_tests.rs"]
+mod summary_tests;
 
 #[cfg(test)]
 #[path = "history_list_activation_tests.rs"]
@@ -658,14 +663,19 @@ fn entry_element_id(id: Option<i64>) -> ElementId {
 }
 
 /// The one meta line of an entry row: status and duration (REQ-HIST-01), never the
-/// request or response body (REQ-HIST-03).
+/// request or response body (REQ-HIST-03). The duration shows in the shared `ui` form
+/// the Console rows and the response status line show one in (#134).
 fn entry_summary(entry: &HistoryEntry) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(code) = entry.status {
         parts.push(code.to_string());
     }
-    if let Some(duration_ms) = entry.duration_ms {
-        parts.push(format!("{duration_ms} ms"));
+    if let Some(duration) = entry
+        .duration_ms
+        .and_then(|millis| u64::try_from(millis).ok())
+        .map(Duration::from_millis)
+    {
+        parts.push(ui::format_duration(duration));
     }
     if parts.is_empty() {
         String::from("—")

@@ -21,6 +21,7 @@ pub mod actions;
 pub mod color;
 pub mod components;
 pub mod elevation;
+pub mod format;
 pub mod icons;
 pub mod prelude;
 pub mod spacing;
@@ -51,6 +52,7 @@ pub use components::toast::{Toast, ToastEvent, Toasts};
 pub use components::toggle::{Toggle, ToggleKind, ToggleState};
 pub use components::tooltip::{Tooltip, TooltipBuilder};
 pub use elevation::{ElevationIndex, StyledExt};
+pub use format::{format_duration, format_size};
 pub use icons::{Icon, IconAssets, IconName, IconSize};
 pub use spacing::{DynamicSpacing, UiDensity, UiDensityStore};
 pub use typography::{

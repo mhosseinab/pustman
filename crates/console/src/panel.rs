@@ -57,6 +57,11 @@ pub(crate) const ENTRIES_AREA_SELECTOR: &str = "console-entries-area";
 pub(crate) const EMPTY_STATE_SELECTOR: &str = "console-empty-state";
 pub(crate) const ENTRY_ROW_SELECTOR: &str = "console-entry-row";
 pub(crate) const DETAILS_SELECTOR: &str = "console-details";
+/// Debug selectors the notice tests measure the details sections through: one per
+/// section title, so the pane's sections can be told apart from a drawn frame.
+pub(crate) const NOTICE_SECTION_SELECTOR: &str = "console-details-notice";
+pub(crate) const REQUEST_SECTION_SELECTOR: &str = "console-details-request";
+pub(crate) const RESPONSE_SECTION_SELECTOR: &str = "console-details-response";
 /// Debug selectors the toolbar tests measure the icon buttons through.
 const PAUSE_CONTROL: &str = "console-pause-control";
 const CLEAR_CONTROL: &str = "console-clear-control";
@@ -83,6 +88,11 @@ pub struct ConsolePanel {
     level_bar: Entity<TabBar>,
     /// The buffer index of the entry whose raw text the details region shows.
     expanded: Option<usize>,
+    /// That entry's content fingerprint ([`entry_fingerprint`]). A ring-buffer eviction
+    /// shifts every buffer index, so [`Self::track_expanded_entry`] keeps the two in
+    /// step: the expansion follows its own entry and is dropped once the entry is gone
+    /// (#135).
+    expanded_fingerprint: Option<u64>,
     /// One focus handle per visible row key (the `ui::Button` per-id focus shape): rows
     /// are tab stops, and a handle follows its key, so focus survives pushes that evict
     /// the oldest entry. Kept fresh by [`Self::sync_row_focus`], never by render.
@@ -111,6 +121,7 @@ impl ConsolePanel {
             text_filter,
             level_bar,
             expanded: None,
+            expanded_fingerprint: None,
             row_focus: HashMap::new(),
             _subscriptions: subscriptions,
         };
@@ -122,7 +133,7 @@ impl ConsolePanel {
     /// call.
     pub fn set_level_filter(&mut self, level: Option<ConsoleLevel>, cx: &mut Context<Self>) {
         self.level_filter = level;
-        self.expanded = None;
+        self.clear_expansion();
         self.sync_level_bar(cx);
         self.refresh(cx);
     }
@@ -167,7 +178,7 @@ impl ConsolePanel {
     /// chip calls; v1 logs `http` only (plan D7).
     pub fn set_protocol_filter(&mut self, protocol: Option<SharedString>, cx: &mut Context<Self>) {
         self.protocol_filter = protocol;
-        self.expanded = None;
+        self.clear_expansion();
         self.refresh(cx);
     }
 
@@ -227,8 +238,40 @@ impl ConsolePanel {
     /// Re-filter and redraw. Every place that changes what the list shows funnels here,
     /// so the rows' focus handles are never stale when a frame draws them.
     fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.track_expanded_entry(cx);
         self.sync_row_focus(cx);
         cx.notify();
+    }
+
+    /// Drop the expansion entirely.
+    fn clear_expansion(&mut self) {
+        self.expanded = None;
+        self.expanded_fingerprint = None;
+    }
+
+    /// Keep the expansion on its own entry as the buffer changes (#135): a push over the
+    /// cap evicts from the front and shifts every buffer index, so the stored index is
+    /// re-pointed at the entry's new place and dropped when the entry itself is gone —
+    /// never left showing whatever now sits at the old index.
+    fn track_expanded_entry(&mut self, cx: &App) {
+        let Some(fingerprint) = self.expanded_fingerprint else {
+            return;
+        };
+        let entries = cx.global::<ConsoleStore>().entries();
+        let at_index = self
+            .expanded
+            .and_then(|entry_index| entries.get(entry_index))
+            .is_some_and(|entry| entry_fingerprint(entry) == fingerprint);
+        if at_index {
+            return;
+        }
+        match entries
+            .iter()
+            .position(|entry| entry_fingerprint(entry) == fingerprint)
+        {
+            Some(entry_index) => self.expanded = Some(entry_index),
+            None => self.clear_expansion(),
+        }
     }
 
     fn clear_entries(&mut self, _: &Clear, _window: &mut Window, cx: &mut Context<Self>) {
@@ -236,7 +279,7 @@ impl ConsolePanel {
     }
 
     fn clear(&mut self, cx: &mut Context<Self>) {
-        self.expanded = None;
+        self.clear_expansion();
         ConsoleStore::clear(cx);
         self.refresh(cx);
     }
@@ -252,11 +295,16 @@ impl ConsolePanel {
     }
 
     fn toggle_expanded(&mut self, entry_index: usize, cx: &mut Context<Self>) {
-        self.expanded = if self.expanded == Some(entry_index) {
-            None
+        if self.expanded == Some(entry_index) {
+            self.clear_expansion();
         } else {
-            Some(entry_index)
-        };
+            self.expanded = Some(entry_index);
+            self.expanded_fingerprint = cx
+                .global::<ConsoleStore>()
+                .entries()
+                .get(entry_index)
+                .map(entry_fingerprint);
+        }
         cx.notify();
     }
 
@@ -310,10 +358,10 @@ impl ConsolePanel {
                     .size(IconSize::Small)
                     .color(level_color(entry.level)),
             );
-        if is_notice(entry) {
+        if let Some(notice) = entry.notice() {
             return row
                 .child(
-                    Label::new(entry.raw_response.clone())
+                    Label::new(notice.to_owned())
                         .color(level_color(entry.level))
                         .truncate(),
                 )
@@ -345,7 +393,8 @@ impl ConsolePanel {
         .into_any_element()
     }
 
-    /// The raw text of the expanded entry (REQ-CON-03), below the list.
+    /// The raw text of the expanded entry (REQ-CON-03) below the list — or a notice's
+    /// message under its own `Notice` section, never under a response's (#115).
     fn render_details(&self, cx: &App) -> AnyElement {
         let Some(entry) = self
             .expanded
@@ -363,13 +412,25 @@ impl ConsolePanel {
             .border_t_1()
             .border_color(cx.theme().colors().border)
             .children(
-                (!entry.raw_request.is_empty())
-                    .then(|| raw_section("Request", &entry.raw_request, cx)),
+                (!entry.raw_request.is_empty()).then(|| {
+                    raw_section("Request", REQUEST_SECTION_SELECTOR, &entry.raw_request, cx)
+                }),
             )
-            .children(
-                (!entry.raw_response.is_empty())
-                    .then(|| raw_section("Response", &entry.raw_response, cx)),
-            )
+            .map(|details| match entry.notice() {
+                // A notice is a message the entry carries, not wire text: it gets its own
+                // section and is never drawn as a response the wire never sent (#115).
+                Some(notice) => {
+                    details.child(raw_section("Notice", NOTICE_SECTION_SELECTOR, notice, cx))
+                }
+                None => details.children((!entry.raw_response.is_empty()).then(|| {
+                    raw_section(
+                        "Response",
+                        RESPONSE_SECTION_SELECTOR,
+                        &entry.raw_response,
+                        cx,
+                    )
+                })),
+            })
             .into_any_element()
     }
 
@@ -562,12 +623,6 @@ fn entry_matches_text(entry: &ConsoleEntry, query: &str) -> bool {
         || entry.raw_response.to_lowercase().contains(query)
 }
 
-/// A feed notice: no request of its own, only its text (S32b). It is drawn as that text
-/// rather than as an empty request row.
-fn is_notice(entry: &ConsoleEntry) -> bool {
-    entry.raw_request.is_empty() && !entry.raw_response.is_empty()
-}
-
 /// The content fingerprint behind one row's key. Identical entries — the same request
 /// sent twice — hash the same, so [`ConsolePanel::visible_rows`] pairs the fingerprint
 /// with the entry's occurrence among identical rows to keep keys unique.
@@ -586,10 +641,12 @@ fn entry_fingerprint(entry: &ConsoleEntry) -> u64 {
     hasher.finish()
 }
 
-/// The raw request or response block of the expanded entry.
-fn raw_section(title: &'static str, raw: &str, cx: &App) -> AnyElement {
+/// The raw request or response block of the expanded entry, or a notice's message under
+/// its own section title.
+fn raw_section(title: &'static str, selector: &'static str, raw: &str, cx: &App) -> AnyElement {
     v_flex()
         .gap(DynamicSpacing::Base02.rems(cx))
+        .debug_selector(|| selector.to_owned())
         .child(Label::new(title).size(LabelSize::Small).color(Color::Muted))
         .child(
             div()
@@ -641,38 +698,25 @@ fn status_color(status: u16) -> Color {
     }
 }
 
-/// The exchange time as the summary line shows it: milliseconds under a second, one
-/// decimal above. Integer math throughout — response times are user data.
+/// The exchange time as the summary line shows it: blank when the entry carries none, in
+/// the shared `ui` form every pane shows a duration in (#134).
 fn format_time(time: Option<Duration>) -> String {
-    let Some(time) = time else {
-        return String::new();
-    };
-    let millis = time.as_millis();
-    if millis < 1000 {
-        format!("{millis} ms")
-    } else {
-        format!("{}.{} s", millis / 1000, (millis % 1000) / 100)
-    }
+    time.map_or_else(String::new, ui::format_duration)
 }
 
-/// The response size as the summary line shows it. Integer math throughout — response
-/// sizes are user data, so nothing here casts one.
+/// The response size as the summary line shows it: blank when the entry carries none, in
+/// the shared `ui` form every pane shows a size in ([`format_time`]'s size twin, #134).
 fn format_size(size: Option<u64>) -> String {
-    let Some(size) = size else {
-        return String::new();
-    };
-    const KIB: u64 = 1024;
-    const MIB: u64 = KIB * 1024;
-    match size {
-        0..KIB => format!("{size} B"),
-        KIB..MIB => format!("{}.{} KB", size / KIB, (size % KIB) * 10 / KIB),
-        _ => format!("{}.{} MB", size / MIB, (size % MIB) * 10 / MIB),
-    }
+    size.map_or_else(String::new, ui::format_size)
 }
 
 #[cfg(test)]
 #[path = "panel_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "panel_format_tests.rs"]
+mod format_tests;
 
 #[cfg(test)]
 #[path = "panel_layout_tests.rs"]
@@ -681,6 +725,14 @@ mod layout_tests;
 #[cfg(test)]
 #[path = "panel_row_height_tests.rs"]
 mod row_height_tests;
+
+#[cfg(test)]
+#[path = "panel_expanded_tests.rs"]
+mod expanded_tests;
+
+#[cfg(test)]
+#[path = "panel_notice_tests.rs"]
+mod notice_tests;
 
 #[cfg(test)]
 #[path = "panel_toolbar_tests.rs"]

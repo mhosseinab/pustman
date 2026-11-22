@@ -44,8 +44,26 @@ pub struct ConsoleEntry {
     pub size: Option<u64>,
     /// The request as it went on the wire (REQ-CON-03).
     pub raw_request: String,
-    /// The response or events as they arrived (REQ-CON-03).
+    /// The response as it arrived (REQ-CON-03) — or, for a notice entry, the message the
+    /// entry carries; read that through [`Self::notice`] so it is never treated as wire
+    /// text.
     pub raw_response: String,
+}
+
+impl ConsoleEntry {
+    /// The free-text notice this entry carries — a warning, an error message or
+    /// "Cancelled" (REQ-CON-04) — as opposed to wire text. A notice has no request of its
+    /// own and only its message, which lives in [`Self::raw_response`] (the producer's
+    /// "what came back from the send" slot). Consumers read it through here so a notice
+    /// is drawn under its own `Notice` section and never as a response the wire never
+    /// sent (#115).
+    pub fn notice(&self) -> Option<&str> {
+        if self.raw_request.is_empty() && !self.raw_response.is_empty() {
+            Some(self.raw_response.as_str())
+        } else {
+            None
+        }
+    }
 }
 
 impl fmt::Debug for ConsoleEntry {

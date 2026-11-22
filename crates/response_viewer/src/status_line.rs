@@ -248,39 +248,18 @@ fn tabular_numbers() -> FontFeatures {
 }
 
 /// A duration as the response shows it: milliseconds under a second, seconds above one,
-/// minutes and seconds for anything over a minute. The status line's times and the
-/// Timeline tab's rows show one shape, from this one helper (S31a review 1).
+/// minutes and seconds for anything over a minute. The status line's times, the Timeline
+/// tab's rows, the Console rows and the History rows show one shape — the shared `ui`
+/// pair — with this pane's "unmeasured" text standing in where nothing was measured
+/// (S31a review 1, #134).
 pub(crate) fn format_duration(total: Option<Duration>) -> String {
-    let Some(total) = total else {
-        return UNMEASURED.to_owned();
-    };
-    if total < Duration::from_secs(1) {
-        format!("{:.0} ms", total.as_secs_f64() * 1000.0)
-    } else if total < Duration::from_secs(60) {
-        format!("{:.2} s", total.as_secs_f64())
-    } else {
-        format!("{} m {:02} s", total.as_secs() / 60, total.as_secs() % 60)
-    }
+    total.map_or_else(|| UNMEASURED.to_owned(), ui::format_duration)
 }
 
 /// A byte count as the response shows it: 1024-based `B`, `KB`, `MB`, `GB` —
-/// [`format_duration`]'s size twin.
+/// [`format_duration`]'s size twin, from the same shared pair (#134).
 pub(crate) fn format_size(bytes: Option<u64>) -> String {
-    let Some(bytes) = bytes else {
-        return UNMEASURED.to_owned();
-    };
-    const UNIT: f64 = 1024.0;
-    // Display only: the loss of precision past 2^53 bytes cannot show in a size string.
-    let bytes = bytes as f64;
-    if bytes < UNIT {
-        format!("{bytes:.0} B")
-    } else if bytes < UNIT * UNIT {
-        format!("{:.2} KB", bytes / UNIT)
-    } else if bytes < UNIT * UNIT * UNIT {
-        format!("{:.2} MB", bytes / UNIT / UNIT)
-    } else {
-        format!("{:.2} GB", bytes / UNIT / UNIT / UNIT)
-    }
+    bytes.map_or_else(|| UNMEASURED.to_owned(), ui::format_size)
 }
 
 #[cfg(test)]
