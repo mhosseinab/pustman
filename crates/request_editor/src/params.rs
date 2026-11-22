@@ -5,7 +5,10 @@
 //! then `&`, then the first `=`, with every piece kept verbatim (no `url::Url` parsing,
 //! no percent-decoding: URLs hold `{{var}}` and may be relative or invalid, and
 //! `{{var}}` must round-trip). The `#fragment` tail sits after the query and is carried
-//! through untouched. Disabled rows are omitted from the URL but kept in the table.
+//! through untouched. Disabled rows are omitted from the URL but kept in the table, and
+//! so are rows that say nothing about the request — no key and no value, the empty row
+//! [`KeyValueTable::add_row`] seeds (#139): once any row is edited they must not
+//! decorate the URL with a trailing `&` or a bare `?`.
 
 use std::sync::Arc;
 
@@ -244,8 +247,10 @@ fn split_url(url: &str) -> (&str, Option<&str>, Option<&str>) {
 }
 
 /// Parse a raw query into rows: split on `&`, then each segment on its first `=`, text
-/// kept verbatim. An empty segment is a keyless row, so every prefix of a typed URL
-/// round-trips and the URL bar is never rewritten under the caret.
+/// kept verbatim. An empty segment is a keyless row, so the table shows exactly what
+/// the URL carries and nothing typed is lost on the way in — but [`build_url`] omits
+/// those rows again (they say nothing about the request), so `?a=1&` rebuilds as
+/// `?a=1` and the URL bar is rewritten only by a table edit, never under its own caret.
 fn parse_query(query: &str) -> Vec<KeyValue> {
     query
         .split('&')
@@ -275,10 +280,15 @@ fn path_names(base: &str) -> Vec<String> {
         .collect()
 }
 
-/// Join `rows` back into a raw URL over `base`: the enabled rows in order, `&`-joined
-/// verbatim, with `?` when there is at least one enabled row and `#fragment` at the end.
+/// Join `rows` back into a raw URL over `base`: the rows that say something about the
+/// request — enabled and not the untouched empty row — in order, `&`-joined verbatim,
+/// with `?` when there is at least one such row and `#fragment` at the end. A row with
+/// a key but no value (`?a`) is a payload and keeps its bare key (#139).
 fn build_url(base: &str, rows: &[KeyValue], fragment: Option<&str>) -> String {
-    let enabled: Vec<&KeyValue> = rows.iter().filter(|row| row.enabled).collect();
+    let enabled: Vec<&KeyValue> = rows
+        .iter()
+        .filter(|row| row.enabled && !(row.key.is_empty() && row.value.is_none()))
+        .collect();
     let mut url = String::from(base);
     if !enabled.is_empty() {
         url.push('?');
@@ -325,3 +335,7 @@ mod tests;
 #[cfg(test)]
 #[path = "params_path_section_tests.rs"]
 mod path_section_tests;
+
+#[cfg(test)]
+#[path = "params_url_build_tests.rs"]
+mod url_build_tests;
