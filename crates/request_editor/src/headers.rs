@@ -635,10 +635,17 @@ impl Headers {
 
 impl Render for Headers {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The tab scrolls its own rows inside the split's editor half (#207) — the
+        // shape `settings_tab` and `auth_tab` use — so the URL row and the tab strip
+        // stay pinned while long content (the Automatic Headers block) scrolls under
+        // them instead of clipping at the pane's bottom edge.
         v_flex()
             .id(ElementId::Name(SharedString::new_static("headers-tab")))
             .size_full()
+            .flex_1()
+            .min_h_0()
             .min_w_0()
+            .overflow_y_scroll()
             .gap(DynamicSpacing::Base04.rems(cx))
             .on_key_down(cx.listener(Self::on_key_down))
             .capture_action::<text_input::input::Enter>(cx.listener(Self::handle_enter))
@@ -751,3 +758,7 @@ mod suggestion_tests;
 #[cfg(test)]
 #[path = "headers_reseed_tests.rs"]
 mod reseed_tests;
+
+#[cfg(test)]
+#[path = "headers_scroll_tests.rs"]
+mod scroll_tests;
