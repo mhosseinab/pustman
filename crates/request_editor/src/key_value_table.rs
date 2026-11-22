@@ -215,9 +215,15 @@ impl KeyValueTable {
         self.focus_cell(id, RowField::Key, window, cx);
     }
 
-    /// Remove the row with `id`.
+    /// Remove the row with `id`. A row that is not there is not a change, so nothing is
+    /// announced (#140) — a phantom [`KeyValueTableEvent::RowsChanged`] would make the
+    /// owner rebuild the URL and the request draft off rows that did not move.
     pub fn remove_row(&mut self, id: u64, cx: &mut Context<Self>) {
+        let before = self.rows.len();
         self.rows.retain(|row| row.id != id);
+        if self.rows.len() == before {
+            return;
+        }
         cx.emit(KeyValueTableEvent::RowsChanged);
     }
 
@@ -467,3 +473,7 @@ impl Render for KeyValueTable {
 #[cfg(test)]
 #[path = "key_value_table_style_tests.rs"]
 mod style_tests;
+
+#[cfg(test)]
+#[path = "key_value_table_remove_tests.rs"]
+mod remove_tests;
