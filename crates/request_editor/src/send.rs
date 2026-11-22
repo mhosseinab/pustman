@@ -149,6 +149,15 @@ impl RequestEditor {
         self.inline_error.as_ref()
     }
 
+    /// The failure on display was earned by the request as it was: an edit makes it
+    /// stale (#206), so the edit clears it — and the TLS offer that belongs to that
+    /// very failure with it. The response pane keeps the failure as the record of the
+    /// last send; the next send shows whatever its own request earns.
+    pub(super) fn clear_stale_error(&mut self) {
+        self.inline_error = None;
+        self.tls_offer_error = None;
+    }
+
     /// The facts of the last response, if a send has completed.
     pub fn status_line(&self) -> Option<&StatusLine> {
         self.status_line.as_ref()
