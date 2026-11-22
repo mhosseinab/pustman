@@ -176,3 +176,7 @@ mod tests;
 #[cfg(test)]
 #[path = "response_split_divider_tests.rs"]
 mod divider_tests;
+
+#[cfg(test)]
+#[path = "response_split_keyboard_tests.rs"]
+mod keyboard_tests;
