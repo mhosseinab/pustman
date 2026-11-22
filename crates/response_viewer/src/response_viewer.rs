@@ -55,8 +55,10 @@ const RESPONSE_VIEW_CONTEXT: &str = "ResponseViewer";
 
 /// The debug key the body pane renders under — the test hook that lets
 /// `VisualTestContext::debug_bounds` prove the body is (not) on screen (the `toast.rs`
-/// pattern). The error panel replaces it, so the two never render together.
-const BODY_PANE_SELECTOR: &str = "response-body-pane";
+/// pattern). The error panel replaces it, so the two never render together. Exported
+/// beside [`STATUS_LINE_SELECTOR`] (#186) so host crates' embedded-view tests name it
+/// instead of spelling the literal; `selector_exports_tests.rs` pins the value.
+pub const BODY_PANE_SELECTOR: &str = "response-body-pane";
 
 /// The debug key the status line renders under — the test hook that proves a response's
 /// status line is on screen. It renders only while the view holds a response, so finding
@@ -360,3 +362,7 @@ mod body_size_feedback_tests;
 #[cfg(test)]
 #[path = "large_body_megabyte_tests.rs"]
 mod large_body_megabyte_tests;
+
+#[cfg(test)]
+#[path = "selector_exports_tests.rs"]
+mod selector_exports_tests;
