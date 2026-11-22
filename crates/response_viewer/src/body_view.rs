@@ -25,18 +25,22 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use gpui::{
-    Anchor, AnyElement, Entity, FocusHandle, Focusable, HighlightStyle, InteractiveText,
-    ScrollStrategy, StyledText, Subscription, Task, UniformListScrollHandle, Window, anchored,
-    deferred,
+    Anchor, AnyElement, ClipboardItem, Entity, FocusHandle, Focusable, HighlightStyle,
+    InteractiveText, KeyBinding, MouseButton, Pixels, Point, ScrollStrategy, StyledText,
+    Subscription, Task, TextLayout, UniformListScrollHandle, WeakEntity, Window, anchored,
+    deferred, point,
 };
 use http_engine::{Header, Response, ResponseBody};
 use settings::Setting;
+use text_input::input::{Copy, SelectAll};
 use ui::components::context_menu::ContextMenuEvent;
 use ui::prelude::*;
 
+use crate::body_selection::{BodyPoint, BodySelection, clamp_column};
 use crate::child_id;
 use crate::find::{FindBar, FindEvent, FindMatch};
 use crate::hex_view::{HexRows, HexView};
+use crate::json_copy::{js_string_literal, json_string_literal, json_target_at, property_path};
 use crate::json_syntax::{JsonToken, LineSpans, json_line_spans, layer_highlights};
 use crate::large_body::{self, LargeBodyBanner, LargeBodyNotice, ResponseViewerSetting};
 use crate::pretty::{FormatError, Formatter};
@@ -46,6 +50,23 @@ use crate::status_line::body_size;
 /// The height of one formatter control (a [`ButtonSize::Medium`]) in pixels at the
 /// default scale: the override menu is anchored just under it.
 const FORMATTER_CONTROL_HEIGHT_PX: f32 = 28.;
+
+/// The key context of the body pane: copy and select-all act on the hand-made selection
+/// over its lines.
+pub(crate) const BODY_CONTEXT: &str = "ResponseBody";
+
+/// Copy and select-all over the body's lines, on each platform's usual keys.
+pub(crate) fn init(cx: &mut App) {
+    let (copy, select_all) = if cfg!(target_os = "macos") {
+        ("cmd-c", "cmd-a")
+    } else {
+        ("ctrl-c", "ctrl-a")
+    };
+    cx.bind_keys([
+        KeyBinding::new(copy, Copy, Some(BODY_CONTEXT)),
+        KeyBinding::new(select_all, SelectAll, Some(BODY_CONTEXT)),
+    ]);
+}
 
 /// The ways the body pane draws a body (REQ-RESP-02).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,6 +166,14 @@ pub struct BodyView {
     list_scroll_handle: UniformListScrollHandle,
     /// The pane's own focus handle — what Escape from the find bar hands focus back to.
     focus_handle: FocusHandle,
+    /// The text selected by hand over the Pretty or Raw lines, and whether a drag is
+    /// extending it right now.
+    selection: Option<BodySelection>,
+    selecting: bool,
+    /// The right-click copy menu over the lines, where it opened (window coordinates),
+    /// and its subscription: dropped together when it dismisses.
+    body_menu: Option<(Entity<ContextMenu>, Point<Pixels>)>,
+    body_menu_subscription: Option<Subscription>,
     _mode_bar_subscription: Subscription,
 }
 
@@ -188,8 +217,165 @@ impl BodyView {
             find_subscription: None,
             list_scroll_handle: UniformListScrollHandle::default(),
             focus_handle: cx.focus_handle(),
+            selection: None,
+            selecting: false,
+            body_menu: None,
+            body_menu_subscription: None,
             _mode_bar_subscription,
         }
+    }
+
+    /// The selection, while the lines it was made on are the ones on screen: a new body,
+    /// another mode or the formatted lines landing all leave it behind.
+    fn active_selection(&self) -> Option<&BodySelection> {
+        self.selection.as_ref().filter(|selection| {
+            !selection.is_empty()
+                && matches!(self.mode, BodyMode::Pretty | BodyMode::Raw)
+                && Arc::ptr_eq(&selection.lines, self.shown())
+        })
+    }
+
+    /// The text selected by hand, if any.
+    pub(crate) fn selected_text(&self) -> Option<String> {
+        self.active_selection().map(BodySelection::text)
+    }
+
+    /// A press on a line: start a selection there, or with Shift move the end of the
+    /// current one there.
+    fn begin_selection(
+        &mut self,
+        at: BodyPoint,
+        extend: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let lines = Arc::clone(self.shown());
+        match self.selection.as_mut() {
+            Some(selection) if extend && Arc::ptr_eq(&selection.lines, &lines) => {
+                selection.head = at;
+            }
+            _ => {
+                self.selection = Some(BodySelection {
+                    lines,
+                    anchor: at,
+                    head: at,
+                });
+            }
+        }
+        self.selecting = true;
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
+    /// A drag over a line: move the selection's end there.
+    fn extend_selection(&mut self, at: BodyPoint, cx: &mut Context<Self>) {
+        if !self.selecting {
+            return;
+        }
+        if let Some(selection) = self.selection.as_mut()
+            && selection.head != at
+        {
+            selection.head = at;
+            cx.notify();
+        }
+    }
+
+    fn end_selection(&mut self) {
+        self.selecting = false;
+    }
+
+    fn select_all(&mut self, _: &SelectAll, _window: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(self.mode, BodyMode::Pretty | BodyMode::Raw) {
+            return;
+        }
+        self.selection = Some(BodySelection::all(Arc::clone(self.shown())));
+        cx.notify();
+    }
+
+    fn copy_selection(&mut self, _: &Copy, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = self.selected_text() {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        }
+    }
+
+    /// What the right-click menu offers at `at`: the selection, and on a Pretty JSON line
+    /// the clicked value, its property path and — for a key or string — the string in the
+    /// forms a developer pastes (the browser DevTools set).
+    fn body_menu_entries(&self, at: BodyPoint) -> Vec<(&'static str, String)> {
+        let mut entries = Vec::new();
+        if let Some(text) = self.selected_text() {
+            entries.push(("Copy", text));
+        }
+        let showing_json = self.mode == BodyMode::Pretty
+            && Arc::ptr_eq(self.shown(), &self.pretty_lines)
+            && !self.syntax_spans.is_empty();
+        let target = showing_json
+            .then(|| json_target_at(&self.pretty_lines, &self.syntax_spans, at))
+            .flatten();
+        if let Some(target) = target {
+            entries.push(("Copy value", target.value));
+            if !target.path.is_empty() {
+                entries.push(("Copy property path", property_path(&target.path)));
+            }
+            if let Some(string) = target.string {
+                let javascript = js_string_literal(&string);
+                let json = json_string_literal(&string);
+                entries.push(("Copy string contents", string));
+                entries.push(("Copy string as JavaScript literal", javascript));
+                entries.push(("Copy string as JSON literal", json));
+            }
+        }
+        entries
+    }
+
+    /// Open the copy menu for a right-click at `at`, drawn at `position`. A click with
+    /// nothing to copy opens nothing.
+    fn open_body_menu(
+        &mut self,
+        at: BodyPoint,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let entries = self.body_menu_entries(at);
+        if entries.is_empty() {
+            return;
+        }
+        let menu = cx.new(|cx| {
+            entries
+                .into_iter()
+                .fold(ContextMenu::new(cx), |menu, (label, text)| {
+                    menu.entry(
+                        SharedString::new_static(label),
+                        move |_event, _window, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                        },
+                    )
+                })
+        });
+        let subscription = cx.subscribe_in(&menu, window, Self::on_body_menu_event);
+        menu.update(cx, |menu, cx| menu.focus(window, cx));
+        self.body_menu = Some((menu, position));
+        self.body_menu_subscription = Some(subscription);
+        cx.notify();
+    }
+
+    /// The copy menu is done — an entry ran or Escape backed out — so it goes away and
+    /// focus returns to the pane, where the copy keystroke still works.
+    fn on_body_menu_event(
+        &mut self,
+        _menu: &Entity<ContextMenu>,
+        event: &ContextMenuEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if *event != ContextMenuEvent::Dismissed {
+            return;
+        }
+        self.body_menu = None;
+        self.body_menu_subscription = None;
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
     }
 
     /// Show this response's body. Replacing the body drops the previous load and format
@@ -697,6 +883,8 @@ impl BodyView {
             Arc::new(Vec::new())
         };
         let row_matches = self.find_matches(cx);
+        let row_selection = self.active_selection().cloned();
+        let row_view = cx.entity().downgrade();
         let row_base = base.clone();
         let list_base = base.clone();
         let render_base = base.clone();
@@ -706,7 +894,21 @@ impl BodyView {
             move |index| child_id(&row_base, format!("line-{index}")),
             move |index, _window, cx| {
                 let spans = row_spans.get(index).map(Vec::as_slice).unwrap_or_default();
-                render_line_with_matches(&row_lines, index, &render_base, spans, &row_matches, cx)
+                let selected = row_selection
+                    .as_ref()
+                    .and_then(|selection| selection.range_on(index));
+                render_line_with_matches(
+                    &row_lines,
+                    index,
+                    &render_base,
+                    LineDecorations {
+                        spans,
+                        matches: &row_matches,
+                        selected,
+                        view: Some(row_view.clone()),
+                    },
+                    cx,
+                )
             },
         )
         .track_scroll(self.list_scroll_handle.clone())
@@ -740,7 +942,18 @@ impl Render for BodyView {
         let base = ElementId::from(("body-view", cx.entity_id()));
         v_flex()
             .size_full()
+            .key_context(BODY_CONTEXT)
             .track_focus(&self.focus_handle)
+            .on_action(cx.listener(Self::copy_selection))
+            .on_action(cx.listener(Self::select_all))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, _cx| this.end_selection()),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, _cx| this.end_selection()),
+            )
             .child(self.render_toolbar(cx))
             .children(self.find_bar.clone())
             .map(|this| match &self.error {
@@ -779,6 +992,15 @@ impl Render for BodyView {
                 BodyMode::Hex => this.child(self.render_hex(&base, cx)),
                 BodyMode::Preview => this.child(self.render_preview(&base, cx)),
             })
+            .children(self.body_menu.clone().map(|(menu, position)| {
+                deferred(
+                    anchored()
+                        .position(position)
+                        .snap_to_window_with_margin(DynamicSpacing::Base04.px(cx))
+                        .child(menu),
+                )
+                .with_priority(1)
+            }))
     }
 }
 
@@ -799,7 +1021,18 @@ pub(crate) fn render_line(
     base: &ElementId,
     cx: &mut App,
 ) -> AnyElement {
-    render_line_with_matches(lines, index, base, &[], &[], cx)
+    render_line_with_matches(lines, index, base, LineDecorations::default(), cx)
+}
+
+/// What a body line draws over its plain text, and the pane its presses select in.
+#[derive(Default)]
+struct LineDecorations<'a> {
+    spans: &'a [(Range<usize>, JsonToken)],
+    matches: &'a [FindMatch],
+    /// The bytes of the line inside the hand-made selection.
+    selected: Option<Range<usize>>,
+    /// The pane that owns the selection; [`None`] where lines are not selectable.
+    view: Option<WeakEntity<BodyView>>,
 }
 
 /// One body line, coloured by its syntax spans, with the find matches on it painted as
@@ -810,10 +1043,15 @@ fn render_line_with_matches(
     lines: &[SharedString],
     index: usize,
     base: &ElementId,
-    spans: &[(Range<usize>, JsonToken)],
-    matches: &[FindMatch],
+    decorations: LineDecorations,
     cx: &App,
 ) -> AnyElement {
+    let LineDecorations {
+        spans,
+        matches,
+        selected,
+        view,
+    } = decorations;
     let Some(line) = lines.get(index).cloned() else {
         return div().into_any_element();
     };
@@ -846,15 +1084,84 @@ fn render_line_with_matches(
             (range.clone(), style)
         })
         .collect::<Vec<_>>();
-    let highlights = layer_highlights(&syntax, &found);
+    let selection = selected
+        .map(|range| {
+            let style = HighlightStyle {
+                background_color: Some(colours.element_selection_background),
+                ..HighlightStyle::default()
+            };
+            vec![(range, style)]
+        })
+        .unwrap_or_default();
+    let highlights = layer_highlights(&layer_highlights(&syntax, &selection), &found);
     let line_id = child_id(base, format!("line-{index}"));
     let text = StyledText::new(line.clone()).with_highlights(highlights);
     // The layout the text fills once the list lays it out — read at hover time to see
     // what was actually drawn.
     let laid_out = text.layout().clone();
+    let press_layout = laid_out.clone();
+    let drag_layout = laid_out.clone();
     let full_line = line;
+    let press_line = full_line.clone();
+    let drag_line = full_line.clone();
+    let menu_layout = laid_out.clone();
+    let menu_line = full_line.clone();
+    let press_view = view.clone();
+    let menu_view = view.clone();
+    let drag_view = view;
     div()
         .id(child_id(&line_id, "text"))
+        .when_some(press_view, |row, view| {
+            row.on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                let at = BodyPoint {
+                    line: index,
+                    column: column_at(&press_layout, &press_line, event.position),
+                };
+                let extend = event.modifiers.shift;
+                if view
+                    .update(cx, |view, cx| view.begin_selection(at, extend, window, cx))
+                    .is_err()
+                {
+                    // The pane closed under the pointer; there is nothing left to select.
+                }
+            })
+        })
+        .when_some(menu_view, |row, view| {
+            row.on_mouse_down(MouseButton::Right, move |event, window, cx| {
+                let at = BodyPoint {
+                    line: index,
+                    column: column_at(&menu_layout, &menu_line, event.position),
+                };
+                let position = event.position;
+                // The pane tracks focus, and GPUI refocuses a tracked element on any press
+                // that is not default-prevented — which would pull focus straight back
+                // off the menu this press opens.
+                window.prevent_default();
+                if view
+                    .update(cx, |view, cx| view.open_body_menu(at, position, window, cx))
+                    .is_err()
+                {
+                    // The pane closed under the pointer; there is nothing left to copy.
+                }
+            })
+        })
+        .when_some(drag_view, |row, view| {
+            row.on_mouse_move(move |event, _window, cx| {
+                if event.pressed_button != Some(MouseButton::Left) {
+                    return;
+                }
+                let at = BodyPoint {
+                    line: index,
+                    column: column_at(&drag_layout, &drag_line, event.position),
+                };
+                if view
+                    .update(cx, |view, cx| view.extend_selection(at, cx))
+                    .is_err()
+                {
+                    // The pane closed under the pointer; there is nothing left to select.
+                }
+            })
+        })
         .w_full()
         .min_w_0()
         .px(DynamicSpacing::Base04.rems(cx))
@@ -878,6 +1185,17 @@ fn render_line_with_matches(
             ),
         ))
         .into_any_element()
+}
+
+/// The byte column of `line` under the pointer's x. The row's text is one visual line,
+/// so the pointer's y is pinned to it: a drag that wanders above or below the text still
+/// selects by x.
+fn column_at(layout: &TextLayout, line: &str, position: Point<Pixels>) -> usize {
+    let at = point(position.x, layout.bounds().center().y);
+    let index = match layout.index_for_position(at) {
+        Ok(index) | Err(index) => index,
+    };
+    clamp_column(line, index)
 }
 
 /// A muted note line — the empty, loading, lossy and format-fallback states.
@@ -986,3 +1304,11 @@ mod json_syntax_view_tests;
 #[cfg(test)]
 #[path = "body_mode_bar_tests.rs"]
 mod body_mode_bar_tests;
+
+#[cfg(test)]
+#[path = "body_selection_tests.rs"]
+mod selection_tests;
+
+#[cfg(test)]
+#[path = "body_menu_tests.rs"]
+mod menu_tests;

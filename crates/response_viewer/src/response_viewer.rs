@@ -9,6 +9,7 @@
 //! [`ResponseView::set_error`]. The input type is [`http_engine::Response`] — there is no
 //! parallel model here.
 
+mod body_selection;
 mod body_view;
 pub mod cookie_dialog;
 mod cookie_form;
@@ -17,6 +18,7 @@ mod error_panel;
 mod find;
 mod headers_view;
 mod hex_view;
+mod json_copy;
 mod json_syntax;
 mod large_body;
 mod pretty;
@@ -257,6 +259,7 @@ impl Focusable for ResponseView {
 /// dependencies). The views are created by their hosts; the app-level actions live
 /// with their feature — [`cookie_dialog`] answers `cookies::Manage` (REQ-HTTP-08).
 pub fn init(cx: &mut App) {
+    body_view::init(cx);
     cookie_dialog::init(cx);
 }
 
