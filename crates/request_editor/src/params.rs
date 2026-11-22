@@ -18,6 +18,7 @@ use ui::prelude::*;
 use variables::ScopeStack;
 
 use crate::key_value_table::{KeyValueTable, KeyValueTableEvent, KeyValueTableShape};
+use crate::section_title;
 use crate::url_bar::UrlBar;
 use crate::variable_highlight;
 
@@ -25,6 +26,11 @@ use crate::variable_highlight;
 /// test see whether the section is on screen at all (`VisualTestContext::debug_bounds`,
 /// the `crate::send`'s selector pattern).
 pub(crate) const PATH_SECTION_SELECTOR: &str = "params-path-variables-section";
+
+/// The debug keys the tab's section titles paint under — the test hook that lets a test
+/// measure them against the column headers they must stand above (#222).
+pub(crate) const QUERY_SECTION_TITLE_SELECTOR: &str = "params-query-section-title";
+pub(crate) const PATH_SECTION_TITLE_SELECTOR: &str = "params-path-section-title";
 
 /// What a [`Params`] tells its owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -204,7 +210,7 @@ impl Params {
                 )))
                 .debug_selector(|| String::from(PATH_SECTION_SELECTOR))
                 .gap(DynamicSpacing::Base04.rems(cx))
-                .child(section_label("Path Variables"))
+                .child(section_title("Path Variables", PATH_SECTION_TITLE_SELECTOR))
                 .child(self.path_table.clone()),
         )
     }
@@ -217,17 +223,10 @@ impl Render for Params {
             .size_full()
             .min_w_0()
             .gap(DynamicSpacing::Base04.rems(cx))
-            .child(section_label("Query Params"))
+            .child(section_title("Query Params", QUERY_SECTION_TITLE_SELECTOR))
             .child(self.query_table.clone())
             .children(self.path_section(cx))
     }
-}
-
-/// A section label inside the tab.
-fn section_label(title: &'static str) -> impl IntoElement {
-    Label::new(SharedString::from(title))
-        .size(LabelSize::Small)
-        .color(Color::Muted)
 }
 
 /// The raw URL split into the part before `?`, the query without its `?`, and the

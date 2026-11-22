@@ -648,6 +648,17 @@ impl Render for RequestEditor {
     }
 }
 
+/// A section title inside a request tab ("Query Params", "Headers"): the design
+/// system's section-title style — [`LabelSize::Large`] (the pack's 16/24 section titles,
+/// `docs/postman_redesign_pack/01_specs/design_system.md`) in the primary text colour —
+/// so it stands one step above the 12 px column headers instead of looking like one
+/// (#222). One implementation for every tab (DRY).
+pub(crate) fn section_title(title: &'static str, selector: &'static str) -> impl IntoElement {
+    div()
+        .debug_selector(|| String::from(selector))
+        .child(Label::new(SharedString::new_static(title)).size(LabelSize::Large))
+}
+
 /// Wire the request editor into the app: the app-level handlers behind
 /// `workspace::NewRequest` and `request::FocusUrlBar` (`new_request`).
 pub fn init(cx: &mut App) {
@@ -673,3 +684,7 @@ mod m1_layout_fixes_tests;
 #[cfg(test)]
 #[path = "editor_layout_polish_tests.rs"]
 mod editor_layout_polish_tests;
+
+#[cfg(test)]
+#[path = "section_title_tests.rs"]
+mod section_title_tests;
