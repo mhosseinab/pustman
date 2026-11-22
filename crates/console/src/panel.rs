@@ -40,8 +40,10 @@ use workspace::{DockPosition, Panel};
 
 use crate::{ConsoleEntry, ConsoleLevel, ConsoleStore};
 
-/// The panel's dock id and the key context its actions dispatch under.
-const PANEL_ID: &str = "console";
+/// The panel's dock id and the key context its actions dispatch under. Exported the way
+/// `history_panel` exports its id, so tests outside the crate name the panel through it
+/// instead of spelling `"console"` as a literal (#166).
+pub const PANEL_ID: &str = "console";
 const CONSOLE_CONTEXT: &str = "Console";
 /// The key context `ui`'s `ACTIVATION_CONTEXT` names (a `pub(crate)` const there): the
 /// controls that activate on Enter or Space.

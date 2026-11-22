@@ -20,7 +20,7 @@ mod store;
 
 pub use export::export_text;
 pub use feed::{record_error, record_outcome, record_warnings, watch};
-pub use panel::ConsolePanel;
+pub use panel::{ConsolePanel, PANEL_ID};
 pub use store::{ConsoleEntry, ConsoleLevel, ConsoleSetting, ConsoleStore};
 
 use gpui::{App, AppContext};
