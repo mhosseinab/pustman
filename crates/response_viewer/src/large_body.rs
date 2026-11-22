@@ -3,9 +3,9 @@
 //!
 //! Pretty-printing a body far past the limit is heavy work for a view nobody asked for
 //! it from, so the pane makes the choice the setting describes: Raw shows, the banner
-//! above the lines names the limit, and — when the body spilled or streamed to disk —
-//! one button reveals that file in the system file manager. The user can still pick
-//! Pretty by hand; the banner stays, because the reveal button lives on it.
+//! above the lines names the limit — and names no view mode, because the user can still
+//! pick Pretty or open Hex/Preview with the banner up (#182) — and, when the body spilled
+//! or streamed to disk, one button reveals that file in the system file manager.
 //!
 //! A body's file path can carry a resolved secret (PRD §7): it is never rendered as
 //! text, never part of an element id and never logged.
@@ -43,13 +43,12 @@ impl LargeBodyNotice {
         }
     }
 
-    /// The banner's line: the limit, in the units the setting counts in.
+    /// The banner's line: the limit, in the units the setting counts in. Mode-neutral on
+    /// purpose (#182): the banner stays on screen when the user picks Pretty or opens
+    /// Hex/Preview — the reveal button lives on it — so the wording may name no mode
+    /// without going stale against the mode bar.
     pub(crate) fn message(&self) -> SharedString {
-        format!(
-            "Response is larger than {} MB — showing Raw.",
-            self.limit_mb
-        )
-        .into()
+        format!("Response is larger than {} MB.", self.limit_mb).into()
     }
 
     /// Where the banner's button reveals the body's bytes, when there is a file.
@@ -179,3 +178,7 @@ impl RenderOnce for LargeBodyBanner {
 #[cfg(test)]
 #[path = "large_body_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "large_body_banner_tests.rs"]
+mod banner_tests;
