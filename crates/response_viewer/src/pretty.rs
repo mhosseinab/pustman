@@ -102,10 +102,14 @@ const HTML_VOID_ELEMENTS: &[&str] = &["br", "img", "meta", "link", "input", "hr"
 /// in the depth). Levels past this share the cap's indent.
 const MAX_INDENT_DEPTH: usize = 32;
 
-/// How much bigger than the input the formatted markup may get. The budget makes the
-/// output linear in the input even where the indent cap is not enough; past it the
-/// formatter returns [`FormatError::TooLarge`] and the view shows the Raw text.
-const OUTPUT_BUDGET_FACTOR: usize = 4;
+/// How much bigger than the input the formatted markup may get. [`MAX_INDENT_DEPTH`]
+/// carries the quadratic defense — with the indent capped, the output is linear in the
+/// input at any constant factor — so this budget is only the tail backstop that refuses
+/// absurd growth with [`FormatError::TooLarge`] and lets the view fall back to Raw. 16×
+/// leaves room for documents that are simply deep: a well-formed nesting formats at
+/// about 8× its input by depth 20 (#137), while a run of unclosed tags still hits the
+/// budget at about 22× with the indent at its cap.
+const OUTPUT_BUDGET_FACTOR: usize = 16;
 
 /// Re-indent markup by tag depth: one tag or text run per line, two spaces per level.
 /// This is the spec's "simple XML/HTML indent" — no parser and no validation. `<?…?>`,
@@ -225,3 +229,7 @@ fn push_line(
 #[cfg(test)]
 #[path = "pretty_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "pretty_deep_markup_tests.rs"]
+mod deep_markup_tests;
