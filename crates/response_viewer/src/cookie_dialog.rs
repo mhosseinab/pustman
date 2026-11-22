@@ -45,10 +45,15 @@ use workspace::{ModalView, Workspace};
 
 use crate::child_id;
 use crate::cookie_form::{CookieForm, CookieFormEvent};
+use crate::table_cells::{ColumnWidth, plain_cell};
 
 #[cfg(test)]
 #[path = "cookie_dialog_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cookie_dialog_clear_domain_tests.rs"]
+mod clear_domain_tests;
 
 /// One row's height at the default scale. Rows are uniform because the virtualized list
 /// measures one row for all of them (the `history_list` contract).
@@ -56,6 +61,9 @@ const ROW_HEIGHT_PX: f32 = 40.;
 
 /// The width of a row's action column — the edit and delete buttons' box.
 const ACTION_COLUMN_PX: f32 = 68.;
+
+/// How wide each of a cookie row's four cells is: the row's free width, shared evenly.
+const CELL_WIDTH: ColumnWidth = ColumnWidth::Share(1.);
 
 /// How many rows the list shows before it scrolls inside the dialog.
 const MAX_VISIBLE_ROWS: u16 = 12;
@@ -240,6 +248,19 @@ impl CookieDialog {
             } if entry.domain == domain && entry.path == path && entry.name == name => {
                 Some(edit_focus.clone())
             }
+            _ => None,
+        })
+    }
+
+    /// The "Clear" control of one domain's group header, as the keyboard reaches it: the
+    /// dialog hands the control its tab order through this handle.
+    pub fn clear_focus_handle(&self, domain: &str) -> Option<FocusHandle> {
+        self.rows.iter().find_map(|row| match row {
+            Row::Domain {
+                domain: row_domain,
+                clear_focus,
+                ..
+            } if row_domain == domain => Some(clear_focus.clone()),
             _ => None,
         })
     }
@@ -526,22 +547,30 @@ impl CookieDialog {
             .px(DynamicSpacing::Base04.rems(cx))
             .border_b_1()
             .border_color(cx.theme().colors().border_variant)
-            .child(cell(
+            .child(plain_cell(
                 child_id(row_id, "name"),
                 entry.name.clone().into(),
+                CELL_WIDTH,
                 cx,
             ))
-            .child(cell(
+            .child(plain_cell(
                 child_id(row_id, "value"),
                 entry.value.clone().into(),
+                CELL_WIDTH,
                 cx,
             ))
-            .child(cell(
+            .child(plain_cell(
                 child_id(row_id, "path"),
                 entry.path.clone().into(),
+                CELL_WIDTH,
                 cx,
             ))
-            .child(cell(child_id(row_id, "expires"), expires_text.into(), cx))
+            .child(plain_cell(
+                child_id(row_id, "expires"),
+                expires_text.into(),
+                CELL_WIDTH,
+                cx,
+            ))
             .child(
                 h_flex()
                     .flex_none()
@@ -806,21 +835,6 @@ fn column_headings(cx: &App) -> impl IntoElement {
             )
         }))
         .child(div().flex_none().w(px_to_rems(ACTION_COLUMN_PX)))
-}
-
-/// One table cell: the content font, truncated with the full value behind a tooltip —
-/// the `cookies_tab` cell, same shape (that helper is private to a file another step
-/// owns, so this is the same shape rather than a call).
-fn cell(id: ElementId, text: SharedString, cx: &App) -> impl IntoElement {
-    div()
-        .id(id)
-        .flex_1()
-        .min_w_0()
-        .font_buffer(cx)
-        .text_ui_sm(cx)
-        .text_color(cx.theme().colors().text)
-        .tooltip(Tooltip::text(text.clone()).builder())
-        .child(div().w_full().min_w_0().truncate().child(text))
 }
 
 /// The state where there is nothing to list: a jar no response has put a cookie in yet.
