@@ -28,7 +28,12 @@ use pustman_actions::cookies::Manage;
 use time::format_description::well_known::Rfc2822;
 use ui::prelude::*;
 
+use gpui::WeakEntity;
+
 use crate::child_id;
+use crate::text_selection::{
+    CellSelector, SelectableCells, TEXT_CONTEXT, selectable_cell, selection_handlers,
+};
 
 /// Shown where a cookie attribute is absent.
 const ABSENT: &str = "—";
@@ -211,6 +216,16 @@ pub struct CookiesTab {
     /// The "Manage cookies" button's focus handle: the tab order the keyboard reaches
     /// the button with (REQ-HTTP-08's dialog opens from here).
     manage_focus: FocusHandle,
+    /// The hand-made selection over the cells, flattened row by row (nine per row).
+    selection: CellSelector,
+    /// Where focus lands when a press selects a cell, so copy has a target.
+    focus_handle: FocusHandle,
+}
+
+impl SelectableCells for CookiesTab {
+    fn cell_selector(&mut self) -> &mut CellSelector {
+        &mut self.selection
+    }
 }
 
 impl CookiesTab {
@@ -219,6 +234,8 @@ impl CookiesTab {
         Self {
             rows: Arc::new(Vec::new()),
             manage_focus: cx.focus_handle(),
+            selection: CellSelector::default(),
+            focus_handle: cx.focus_handle(),
         }
     }
 
@@ -232,6 +249,28 @@ impl CookiesTab {
     /// parsed here (never in `render`), so render stays a pure layout of this snapshot.
     pub fn set_headers(&mut self, headers: &[Header], cx: &mut Context<Self>) {
         self.rows = Arc::new(parse_set_cookies(headers));
+        // Columns tab-separated and rows on their own lines, so a copy pastes as a table.
+        let column_count = COLUMNS.len();
+        self.selection.set(
+            self.rows
+                .iter()
+                .flat_map(|row| {
+                    row.cells()
+                        .into_iter()
+                        .enumerate()
+                        .map(move |(column, text)| {
+                            (
+                                text,
+                                if column + 1 == column_count {
+                                    "\n"
+                                } else {
+                                    "\t"
+                                },
+                            )
+                        })
+                })
+                .collect(),
+        );
         cx.notify();
     }
 
@@ -245,10 +284,15 @@ impl CookiesTab {
 impl Render for CookiesTab {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let rows = Arc::clone(&self.rows);
+        let selection = Arc::new(self.selection.clone());
+        let view = cx.weak_entity();
         // One base id per entity, so two viewers in one frame never share element ids.
         let base = ElementId::from(("cookies-tab", cx.entity_id()));
-        v_flex()
+        let root = v_flex()
             .size_full()
+            .key_context(TEXT_CONTEXT)
+            .track_focus(&self.focus_handle);
+        selection_handlers(root, cx)
             .child(
                 h_flex()
                     .w_full()
@@ -298,7 +342,9 @@ impl Render for CookiesTab {
                             Some(row) => row.key(&key_base),
                             None => child_id(&key_base, format!("row-{index}")),
                         },
-                        move |index, _window, cx| render_row(&rows, index, &render_base, cx),
+                        move |index, _window, cx| {
+                            render_row(&rows, index, &render_base, &selection, &view, cx)
+                        },
                     ))
                 }
             })
@@ -316,7 +362,14 @@ fn column_heading(heading: &str) -> impl IntoElement {
 
 /// One cookie row: the nine attribute cells, each truncating with its full value in a
 /// tooltip.
-fn render_row(rows: &[ParsedCookie], index: usize, base: &ElementId, cx: &mut App) -> AnyElement {
+fn render_row(
+    rows: &[ParsedCookie],
+    index: usize,
+    base: &ElementId,
+    selection: &CellSelector,
+    view: &WeakEntity<CookiesTab>,
+    cx: &mut App,
+) -> AnyElement {
     let Some(row) = rows.get(index) else {
         return div().into_any_element();
     };
@@ -330,28 +383,24 @@ fn render_row(rows: &[ParsedCookie], index: usize, base: &ElementId, cx: &mut Ap
         .py(DynamicSpacing::Base02.rems(cx))
         .border_b_1()
         .border_color(cx.theme().colors().border_variant)
-        .children(
-            COLUMNS
-                .iter()
-                .zip(cells)
-                .map(|((column, _heading), text)| cell(child_id(&row_id, *column), text, cx)),
-        )
+        .children(COLUMNS.iter().zip(cells).enumerate().map(
+            |(column_index, ((column, _heading), text))| {
+                let cell_index = index * COLUMNS.len() + column_index;
+                selectable_cell(
+                    child_id(&row_id, *column),
+                    cell_index,
+                    text,
+                    selection.range_on(cell_index),
+                    view.clone(),
+                    cx,
+                )
+                .flex_1()
+                .font_buffer(cx)
+                .text_ui_sm(cx)
+                .text_color(cx.theme().colors().text)
+            },
+        ))
         .into_any_element()
-}
-
-/// One table cell: the content font, truncated with the full value behind a tooltip (the
-/// `headers_view` cell; that helper is private to a file another step owns, so this is
-/// the same shape rather than a call).
-fn cell(id: ElementId, text: SharedString, cx: &App) -> impl IntoElement {
-    div()
-        .id(id)
-        .flex_1()
-        .min_w_0()
-        .font_buffer(cx)
-        .text_ui_sm(cx)
-        .text_color(cx.theme().colors().text)
-        .tooltip(Tooltip::text(text.clone()).builder())
-        .child(div().w_full().min_w_0().truncate().child(text))
 }
 
 /// The state where there is nothing to list: a response that set no cookies.
@@ -384,3 +433,7 @@ fn flag(value: Option<bool>) -> SharedString {
 #[cfg(test)]
 #[path = "cookies_tab_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cookies_selection_tests.rs"]
+mod selection_tests;

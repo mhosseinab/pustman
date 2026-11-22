@@ -46,7 +46,7 @@ use std::time::Duration;
 
 use api_model::SecretValues;
 use gpui::{
-    DefiniteLength, Focusable, KeyDownEvent, Role, ScrollHandle, ScrollStrategy,
+    DefiniteLength, Focusable, KeyDownEvent, Role, ScrollHandle, ScrollStrategy, Stateful,
     UniformListScrollHandle, WeakEntity, point,
 };
 use http_engine::{
@@ -56,6 +56,9 @@ use ui::prelude::*;
 
 use crate::child_id;
 use crate::request_as_sent::{self, RequestAsSentRow};
+use crate::text_selection::{
+    CellSelector, SelectableCells, TEXT_CONTEXT, selectable_cell, selection_handlers,
+};
 
 /// Shown for a fact nobody observed: an absent `Location`, an unmeasured hop timing.
 const ABSENT: &str = "—";
@@ -179,6 +182,37 @@ pub struct TimelineTab {
     /// The scroll root's state: what the wheel, the keyboard and the hop reveals all
     /// move (`Decision:`, module docs).
     scroll: ScrollHandle,
+    /// Every label and value of the tab, flattened in render order, and the selection
+    /// over them (`text_selection`). Rebuilt with the rows, never in `render`.
+    selection: CellSelector,
+    /// Where each section's cells start in [`Self::selection`]: rows render their cell
+    /// indices from these.
+    cell_starts: CellStarts,
+}
+
+/// Where each section's cells start in the tab's flattened cell list.
+#[derive(Clone, Default)]
+struct CellStarts {
+    request: usize,
+    phases: usize,
+    network: usize,
+    /// One start per line of the redirect list, in line order.
+    redirects: Arc<Vec<usize>>,
+}
+
+/// The selection snapshot a row renders its cells from.
+struct Cells<'a> {
+    selection: &'a CellSelector,
+    view: &'a WeakEntity<TimelineTab>,
+}
+
+impl Cells<'_> {
+    /// One selectable cell of the tab: the selection painted behind it, truncated with the
+    /// full value in a tooltip. Callers add the width and colour.
+    fn cell(&self, id: ElementId, index: usize, text: SharedString, cx: &App) -> Stateful<Div> {
+        let selected = self.selection.range_on(index);
+        selectable_cell(id, index, text, selected, self.view.clone(), cx).text_ui_sm(cx)
+    }
 }
 
 impl TimelineTab {
@@ -195,7 +229,60 @@ impl TimelineTab {
             redirect_scroll: UniformListScrollHandle::new(),
             focus_handle: cx.focus_handle().tab_stop(true),
             scroll: ScrollHandle::new(),
+            selection: CellSelector::default(),
+            cell_starts: CellStarts::default(),
         }
+    }
+
+    /// Flatten every label and value into the selectable cells, in render order: a
+    /// label-and-value row copies as `label: value`, a hop as its columns separated by
+    /// tabs (so the chain pastes as a table), one row per line. Any older selection is
+    /// left behind with the cells it was made on.
+    fn rebuild_cells(&mut self) {
+        let mut cells: Vec<(SharedString, &'static str)> = Vec::new();
+        let request = cells.len();
+        for row in self.request_as_sent_rows() {
+            cells.extend([(row.label.clone(), ": "), (row.value.clone(), "\n")]);
+        }
+        let phases = cells.len();
+        for row in self.phases.iter() {
+            cells.extend([(row.label.clone(), ": "), (row.time.clone(), "\n")]);
+        }
+        let network = cells.len();
+        for row in self.network.iter() {
+            cells.extend([(row.label.clone(), ": "), (row.value.clone(), "\n")]);
+        }
+        let mut redirects = Vec::with_capacity(self.rows.len());
+        for row in self.rows.iter() {
+            redirects.push(cells.len());
+            match row {
+                RedirectRow::Hop(hop) => {
+                    if let Some(hop) = self.hops.get(*hop) {
+                        cells.extend([
+                            (hop.method.clone(), "\t"),
+                            (hop.url.clone(), "\t"),
+                            (hop.status.clone(), "\t"),
+                            (hop.location.clone(), "\t"),
+                            (hop.timing.clone(), "\n"),
+                        ]);
+                    }
+                }
+                RedirectRow::Header { hop, header } => {
+                    if let Some((name, value)) =
+                        self.hops.get(*hop).and_then(|row| row.headers.get(*header))
+                    {
+                        cells.extend([(name.clone(), ": "), (value.clone(), "\n")]);
+                    }
+                }
+            }
+        }
+        self.selection.set(cells);
+        self.cell_starts = CellStarts {
+            request,
+            phases,
+            network,
+            redirects: Arc::new(redirects),
+        };
     }
 
     /// Show what this response recorded. Every row is derived here (never in `render`):
@@ -212,6 +299,7 @@ impl TimelineTab {
                 .map(|_| cx.focus_handle().tab_stop(true))
                 .collect(),
         );
+        self.rebuild_cells();
         cx.notify();
     }
 
@@ -237,6 +325,7 @@ impl TimelineTab {
             cookie_header.as_deref(),
             response,
         )));
+        self.rebuild_cells();
         cx.notify();
     }
 
@@ -264,6 +353,7 @@ impl TimelineTab {
             self.expanded.insert(hop);
         }
         self.rows = Arc::new(redirect_rows(&self.hops, &self.expanded));
+        self.rebuild_cells();
         cx.notify();
     }
 
@@ -357,11 +447,19 @@ impl TimelineTab {
     /// phases, the network facts and the redirects tell afterwards. With no record it
     /// renders nothing at all, so the tab stays the S31a timeline until the send path
     /// calls [`Self::set_request_as_sent`].
-    fn request_as_sent_section(&self, base: &ElementId, cx: &App) -> Option<AnyElement> {
+    fn request_as_sent_section(
+        &self,
+        base: &ElementId,
+        selection: &Arc<CellSelector>,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let rows = Arc::clone(self.request_as_sent.as_ref()?);
         let key_rows = Arc::clone(&rows);
         let key_base = base.clone();
         let render_base = base.clone();
+        let selection = Arc::clone(selection);
+        let view = cx.weak_entity();
+        let start = self.cell_starts.request;
         Some(
             v_flex()
                 .w_full()
@@ -373,7 +471,13 @@ impl TimelineTab {
                     child_id(base, "request-as-sent-rows"),
                     rows.len(),
                     move |index| request_row_id(&key_rows, &key_base, index),
-                    move |index, _window, cx| render_request_row(&rows, &render_base, index, cx),
+                    move |index, _window, cx| {
+                        let cells = Cells {
+                            selection: &selection,
+                            view: &view,
+                        };
+                        render_request_row(&rows, &render_base, index, start, &cells, cx)
+                    },
                 ))
                 .into_any_element(),
         )
@@ -381,12 +485,18 @@ impl TimelineTab {
 
     /// The phases section: one row per measured phase, the bars, and the note that names
     /// the four this transport cannot measure.
-    fn phases_section(&self, cx: &App) -> AnyElement {
+    fn phases_section(&self, base: &ElementId, cells: &Cells, cx: &App) -> AnyElement {
+        let start = self.cell_starts.phases;
         v_flex()
             .w_full()
             .gap(DynamicSpacing::Base02.rems(cx))
             .child(section_heading("Phases"))
-            .children(self.phases.iter().map(|row| render_phase(row, cx)))
+            .children(
+                self.phases
+                    .iter()
+                    .enumerate()
+                    .map(|(index, row)| render_phase(row, base, start + 2 * index, cells, cx)),
+            )
             .child(
                 div()
                     .debug_selector(|| "timeline-unmeasured-note".to_owned())
@@ -401,7 +511,8 @@ impl TimelineTab {
 
     /// The network section: every fact of REQ-NET-02, "not reported" where the transport
     /// observed nothing.
-    fn network_section(&self, base: &ElementId, cx: &App) -> AnyElement {
+    fn network_section(&self, base: &ElementId, cells: &Cells, cx: &App) -> AnyElement {
+        let start = self.cell_starts.network;
         v_flex()
             .w_full()
             .gap(DynamicSpacing::Base02.rems(cx))
@@ -409,14 +520,22 @@ impl TimelineTab {
             .children(
                 self.network
                     .iter()
-                    .map(|row| render_info_row(row, base, cx)),
+                    .enumerate()
+                    .map(|(index, row)| render_info_row(row, base, start + 2 * index, cells, cx)),
             )
             .into_any_element()
     }
 
     /// The redirect section: every hop of the chain, virtualized like the headers table,
     /// with each hop's response headers behind its toggle.
-    fn redirects_section(&self, base: &ElementId, cx: &mut Context<Self>) -> AnyElement {
+    fn redirects_section(
+        &self,
+        base: &ElementId,
+        selection: &Arc<CellSelector>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selection = Arc::clone(selection);
+        let starts = Arc::clone(&self.cell_starts.redirects);
         let rows = Arc::clone(&self.rows);
         let hops = Arc::clone(&self.hops);
         let hop_focus = Arc::clone(&self.hop_focus);
@@ -447,7 +566,11 @@ impl TimelineTab {
                                     hop_focus: &hop_focus,
                                     expanded: &expanded,
                                     base: &render_base,
-                                    view: &view,
+                                    starts: &starts,
+                                    cells: Cells {
+                                        selection: &selection,
+                                        view: &view,
+                                    },
                                 };
                                 render_redirect_line(&list, index, cx)
                             },
@@ -464,21 +587,29 @@ impl Render for TimelineTab {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // One base id per entity, so two viewers in one frame never share element ids.
         let base = ElementId::from(("timeline-tab", cx.entity_id()));
-        let request_as_sent = self.request_as_sent_section(&base, cx);
-        let phases = self.phases_section(cx);
-        let network = self.network_section(&base, cx);
-        let redirects = self.redirects_section(&base, cx);
+        // A snapshot of the selection for the rows; cheap, the cells sit behind `Arc`s.
+        let selection = Arc::new(self.selection.clone());
+        let view = cx.weak_entity();
+        let cells = Cells {
+            selection: &selection,
+            view: &view,
+        };
+        let request_as_sent = self.request_as_sent_section(&base, &selection, cx);
+        let phases = self.phases_section(&base, &cells, cx);
+        let network = self.network_section(&base, &cells, cx);
+        let redirects = self.redirects_section(&base, &selection, cx);
         // The tab is one scrolling document inside its pane (`id` + `overflow_y_scroll`,
         // with `min_h_0` up the flex chain): a timeline taller than the pane scrolls
         // here and never overflows into — or scrolls — the window around it (S33o,
         // #202). The scroll container needs the stable id for its scroll state.
-        v_flex()
+        let root = v_flex()
             .id(base.clone())
             // One keyboard-reachable scrolling document (S33o fix 2): the tab's focus
             // handle and key context on the scroll root, a named scroll region for
             // screen readers, and the scroll handle the keys and hop reveals move.
             .track_focus(&self.focus_handle)
-            .key_context("TimelineTab")
+            // `ResponseText` binds copy and select-all over the cells (`text_selection`).
+            .key_context(format!("TimelineTab {TEXT_CONTEXT}").as_str())
             .role(Role::ScrollView)
             .aria_label(SharedString::new_static("Timeline"))
             .size_full()
@@ -492,7 +623,14 @@ impl Render for TimelineTab {
             .children(request_as_sent)
             .child(phases)
             .child(network)
-            .child(redirects)
+            .child(redirects);
+        selection_handlers(root, cx)
+    }
+}
+
+impl SelectableCells for TimelineTab {
+    fn cell_selector(&mut self) -> &mut CellSelector {
+        &mut self.selection
     }
 }
 
@@ -503,7 +641,9 @@ struct RedirectList<'a> {
     hop_focus: &'a [FocusHandle],
     expanded: &'a HashSet<usize>,
     base: &'a ElementId,
-    view: &'a WeakEntity<TimelineTab>,
+    /// Where each line's cells start in the tab's cell list.
+    starts: &'a [usize],
+    cells: Cells<'a>,
 }
 
 /// The phase rows of one response: only the phases the transport measured (REQ-NET-01,
@@ -706,8 +846,10 @@ fn row_id_for(rows: &[RedirectRow], base: &ElementId, index: usize) -> ElementId
 /// One line of the redirect list: a hop's summary or one expanded header.
 fn render_redirect_line(list: &RedirectList, index: usize, cx: &App) -> AnyElement {
     match list.rows.get(index) {
-        Some(RedirectRow::Hop(hop)) => render_hop_line(list, *hop, cx),
-        Some(RedirectRow::Header { hop, header }) => render_header_line(list, *hop, *header, cx),
+        Some(RedirectRow::Hop(hop)) => render_hop_line(list, index, *hop, cx),
+        Some(RedirectRow::Header { hop, header }) => {
+            render_header_line(list, index, *hop, *header, cx)
+        }
         None => div().into_any_element(),
     }
 }
@@ -715,11 +857,13 @@ fn render_redirect_line(list: &RedirectList, index: usize, cx: &App) -> AnyEleme
 /// One hop row: method, URL, status, the `Location` that was followed and the timing,
 /// each truncating with its full value in a tooltip — and the toggle that expands the
 /// hop's response headers.
-fn render_hop_line(list: &RedirectList, hop: usize, cx: &App) -> AnyElement {
+fn render_hop_line(list: &RedirectList, line: usize, hop: usize, cx: &App) -> AnyElement {
     let (Some(row), Some(focus_handle)) = (list.hops.get(hop), list.hop_focus.get(hop)) else {
         return div().into_any_element();
     };
     let row_id = child_id(list.base, format!("hop-row-{hop}"));
+    let start = list.starts.get(line).copied().unwrap_or_default();
+    let cells = &list.cells;
     h_flex()
         .id(row_id.clone())
         .w_full()
@@ -735,29 +879,43 @@ fn render_hop_line(list: &RedirectList, hop: usize, cx: &App) -> AnyElement {
             hop,
             list.expanded.contains(&hop),
             focus_handle.clone(),
-            list.view,
+            cells.view,
         ))
         .child(fixed_cell(
-            child_id(&row_id, "method"),
-            row.method.clone(),
+            cells.cell(child_id(&row_id, "method"), start, row.method.clone(), cx),
             METHOD_COLUMN_PX,
             cx,
         ))
-        .child(cell(child_id(&row_id, "url"), row.url.clone(), cx))
+        .child(value_cell(
+            cells.cell(child_id(&row_id, "url"), start + 1, row.url.clone(), cx),
+            cx,
+        ))
         .child(fixed_cell(
-            child_id(&row_id, "status"),
-            row.status.clone(),
+            cells.cell(
+                child_id(&row_id, "status"),
+                start + 2,
+                row.status.clone(),
+                cx,
+            ),
             STATUS_COLUMN_PX,
             cx,
         ))
-        .child(cell(
-            child_id(&row_id, "location"),
-            row.location.clone(),
+        .child(value_cell(
+            cells.cell(
+                child_id(&row_id, "location"),
+                start + 3,
+                row.location.clone(),
+                cx,
+            ),
             cx,
         ))
         .child(fixed_cell(
-            child_id(&row_id, "timing"),
-            row.timing.clone(),
+            cells.cell(
+                child_id(&row_id, "timing"),
+                start + 4,
+                row.timing.clone(),
+                cx,
+            ),
             TIMING_COLUMN_PX,
             cx,
         ))
@@ -765,11 +923,19 @@ fn render_hop_line(list: &RedirectList, hop: usize, cx: &App) -> AnyElement {
 }
 
 /// One header line under an expanded hop: name and value, as the hop answered.
-fn render_header_line(list: &RedirectList, hop: usize, header: usize, cx: &App) -> AnyElement {
+fn render_header_line(
+    list: &RedirectList,
+    line: usize,
+    hop: usize,
+    header: usize,
+    cx: &App,
+) -> AnyElement {
     let Some((name, value)) = list.hops.get(hop).and_then(|row| row.headers.get(header)) else {
         return div().into_any_element();
     };
     let row_id = child_id(list.base, format!("hop-{hop}-header-{header}"));
+    let start = list.starts.get(line).copied().unwrap_or_default();
+    let cells = &list.cells;
     h_flex()
         .id(row_id.clone())
         .w_full()
@@ -780,8 +946,14 @@ fn render_header_line(list: &RedirectList, hop: usize, header: usize, cx: &App) 
         .border_b_1()
         .border_color(cx.theme().colors().border_variant)
         .debug_selector(move || format!("timeline-hop-{hop}-header-{header}"))
-        .child(cell(child_id(&row_id, "name"), name.clone(), cx))
-        .child(cell(child_id(&row_id, "value"), value.clone(), cx))
+        .child(value_cell(
+            cells.cell(child_id(&row_id, "name"), start, name.clone(), cx),
+            cx,
+        ))
+        .child(value_cell(
+            cells.cell(child_id(&row_id, "value"), start + 1, value.clone(), cx),
+            cx,
+        ))
         .into_any_element()
 }
 
@@ -829,12 +1001,15 @@ fn render_request_row(
     rows: &[RequestAsSentRow],
     base: &ElementId,
     index: usize,
+    start: usize,
+    cells: &Cells,
     cx: &App,
 ) -> AnyElement {
     let Some(row) = rows.get(index) else {
         return div().into_any_element();
     };
     let row_id = request_row_id(rows, base, index);
+    let cell_index = start + 2 * index;
     h_flex()
         .w_full()
         .items_center()
@@ -843,8 +1018,24 @@ fn render_request_row(
         .py(DynamicSpacing::Base02.rems(cx))
         .border_b_1()
         .border_color(cx.theme().colors().border_variant)
-        .child(label_cell(row.label.clone()))
-        .child(cell(child_id(&row_id, "value"), row.value.clone(), cx))
+        .child(label_cell(
+            cells.cell(
+                child_id(&row_id, "label"),
+                cell_index,
+                row.label.clone(),
+                cx,
+            ),
+            cx,
+        ))
+        .child(value_cell(
+            cells.cell(
+                child_id(&row_id, "value"),
+                cell_index + 1,
+                row.value.clone(),
+                cx,
+            ),
+            cx,
+        ))
         .map(|this| {
             if row.auto {
                 this.child(auto_mark())
@@ -863,28 +1054,33 @@ fn auto_mark() -> impl IntoElement {
 }
 
 /// The label column of a label-and-value row (phase, network fact or request row).
-fn label_cell(text: SharedString) -> impl IntoElement {
+fn label_cell(cell: Stateful<Div>, cx: &App) -> impl IntoElement {
     div()
         .flex_none()
         .w(px_to_rems(LABEL_COLUMN_PX))
         .min_w_0()
-        .child(
-            Label::new(text)
-                .size(LabelSize::Small)
-                .color(Color::Muted)
-                .truncate(),
-        )
+        .child(cell.text_color(cx.theme().colors().text_muted))
 }
 
 /// One measured phase: its label, its bar and the time beside it. A measured phase draws
 /// its bar; a phase the transport did not measure has no row and draws nothing.
-fn render_phase(row: &PhaseRow, cx: &App) -> impl IntoElement {
+fn render_phase(
+    row: &PhaseRow,
+    base: &ElementId,
+    index: usize,
+    cells: &Cells,
+    cx: &App,
+) -> impl IntoElement {
     let slug = row.slug;
+    let row_id = child_id(base, format!("phase-{slug}"));
     h_flex()
         .w_full()
         .items_center()
         .gap(DynamicSpacing::Base04.rems(cx))
-        .child(label_cell(row.label.clone()))
+        .child(label_cell(
+            cells.cell(child_id(&row_id, "label"), index, row.label.clone(), cx),
+            cx,
+        ))
         .child(
             div()
                 .flex_1()
@@ -901,16 +1097,24 @@ fn render_phase(row: &PhaseRow, cx: &App) -> impl IntoElement {
                         .debug_selector(move || format!("timeline-bar-{slug}")),
                 ),
         )
-        .child(
-            Label::new(row.time.clone())
-                .size(LabelSize::Small)
-                .color(Color::Muted),
-        )
+        .child(fixed_cell(
+            cells
+                .cell(child_id(&row_id, "time"), index + 1, row.time.clone(), cx)
+                .text_color(cx.theme().colors().text_muted),
+            TIMING_COLUMN_PX,
+            cx,
+        ))
 }
 
 /// One network fact: its label and its value, an unobserved one marked [`NOT_REPORTED`]
 /// and muted so absence reads as absence.
-fn render_info_row(row: &InfoRow, base: &ElementId, cx: &App) -> impl IntoElement {
+fn render_info_row(
+    row: &InfoRow,
+    base: &ElementId,
+    index: usize,
+    cells: &Cells,
+    cx: &App,
+) -> impl IntoElement {
     let row_id = child_id(base, format!("network-{}", row.label));
     let value_color = if row.reported {
         cx.theme().colors().text
@@ -921,42 +1125,33 @@ fn render_info_row(row: &InfoRow, base: &ElementId, cx: &App) -> impl IntoElemen
         .w_full()
         .items_center()
         .gap(DynamicSpacing::Base04.rems(cx))
-        .child(label_cell(row.label.clone()))
+        .child(label_cell(
+            cells.cell(child_id(&row_id, "label"), index, row.label.clone(), cx),
+            cx,
+        ))
         .child(
-            div()
-                .id(child_id(&row_id, "value"))
-                .flex_1()
-                .min_w_0()
-                .font_buffer(cx)
-                .text_ui_sm(cx)
-                .text_color(value_color)
-                .tooltip(Tooltip::text(row.value.clone()).builder())
-                .child(div().w_full().min_w_0().truncate().child(row.value.clone())),
+            value_cell(
+                cells.cell(child_id(&row_id, "value"), index + 1, row.value.clone(), cx),
+                cx,
+            )
+            .text_color(value_color),
         )
 }
 
 /// A fixed-width cell beside the flexible ones, so the columns line up row over row.
-fn fixed_cell(id: ElementId, text: SharedString, width: f32, cx: &App) -> impl IntoElement {
+fn fixed_cell(cell: Stateful<Div>, width: f32, cx: &App) -> impl IntoElement {
     div()
         .flex_none()
         .w(px_to_rems(width))
         .min_w_0()
-        .child(cell(id, text, cx))
+        .child(value_cell(cell, cx))
 }
 
-/// One cell: the content font, truncated with the full value behind a tooltip (the
-/// `headers_view` cell; that helper is private to a file another step owns, so this is
-/// the same shape rather than a call — `cookies_tab::cell`'s precedent).
-fn cell(id: ElementId, text: SharedString, cx: &App) -> impl IntoElement {
-    div()
-        .id(id)
-        .flex_1()
-        .min_w_0()
+/// A value cell: the content font in the text colour, taking the row's free width.
+fn value_cell(cell: Stateful<Div>, cx: &App) -> Stateful<Div> {
+    cell.flex_1()
         .font_buffer(cx)
-        .text_ui_sm(cx)
         .text_color(cx.theme().colors().text)
-        .tooltip(Tooltip::text(text.clone()).builder())
-        .child(div().w_full().min_w_0().truncate().child(text))
 }
 
 /// A section heading above its rows (`LabelSize::Large` is the design system's section
@@ -1012,3 +1207,7 @@ mod timeline_m1_fixes_tests;
 #[cfg(test)]
 #[path = "timeline_keyboard_scroll_tests.rs"]
 mod timeline_keyboard_scroll_tests;
+
+#[cfg(test)]
+#[path = "timeline_selection_tests.rs"]
+mod timeline_selection_tests;

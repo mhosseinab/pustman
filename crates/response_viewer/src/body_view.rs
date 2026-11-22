@@ -28,17 +28,16 @@ use std::time::Duration;
 use gpui::{
     Anchor, AnyElement, Bounds, ClipboardItem, DispatchPhase, Entity, FocusHandle, Focusable,
     HighlightStyle, InteractiveText, KeyBinding, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels,
-    Point, ScrollStrategy, StyledText, Subscription, Task, TextLayout, UniformListScrollHandle,
-    WeakEntity, Window, anchored, canvas, deferred, point,
+    Point, ScrollStrategy, StyledText, Subscription, Task, UniformListScrollHandle, WeakEntity,
+    Window, anchored, canvas, deferred, point,
 };
 use http_engine::{Header, Response, ResponseBody};
 use settings::Setting;
-use text_input::buffer::word_range_at;
 use text_input::input::{Copy, SelectAll};
 use ui::components::context_menu::ContextMenuEvent;
 use ui::prelude::*;
 
-use crate::body_selection::{BodyPoint, BodySelection, clamp_column};
+use crate::body_selection::{BodyPoint, BodySelection};
 use crate::child_id;
 use crate::find::{FindBar, FindEvent, FindMatch};
 use crate::hex_view::{HexRows, HexView};
@@ -48,6 +47,7 @@ use crate::large_body::{self, LargeBodyBanner, LargeBodyNotice, ResponseViewerSe
 use crate::pretty::{FormatError, Formatter};
 use crate::preview::{PreviewContent, PreviewPane};
 use crate::status_line::body_size;
+use crate::text_selection::{TextSelector, column_at, end_of_line};
 
 /// The height of one formatter control (a [`ButtonSize::Medium`]) in pixels at the
 /// default scale: the override menu is anchored just under it.
@@ -168,12 +168,8 @@ pub struct BodyView {
     list_scroll_handle: UniformListScrollHandle,
     /// The pane's own focus handle — what Escape from the find bar hands focus back to.
     focus_handle: FocusHandle,
-    /// The text selected by hand over the Pretty or Raw lines, and whether a drag is
-    /// extending it right now.
-    selection: Option<BodySelection>,
-    selecting: bool,
-    /// What the press that started the selection selects by, so a drag grows by it.
-    select_unit: SelectUnit,
+    /// The text selected by hand over the Pretty or Raw lines.
+    selector: TextSelector,
     /// Where a selecting drag that left the rows is, with the rows' bounds; the
     /// autoscroll keeps stepping toward it while it stays past an edge.
     drag_outside: Option<(Point<Pixels>, Bounds<Pixels>)>,
@@ -225,9 +221,7 @@ impl BodyView {
             find_subscription: None,
             list_scroll_handle: UniformListScrollHandle::default(),
             focus_handle: cx.focus_handle(),
-            selection: None,
-            selecting: false,
-            select_unit: SelectUnit::Character,
+            selector: TextSelector::default(),
             drag_outside: None,
             autoscroll: None,
             body_menu: None,
@@ -239,7 +233,7 @@ impl BodyView {
     /// The selection, while the lines it was made on are the ones on screen: a new body,
     /// another mode or the formatted lines landing all leave it behind.
     fn active_selection(&self) -> Option<&BodySelection> {
-        self.selection.as_ref().filter(|selection| {
+        self.selector.selection().filter(|selection| {
             !selection.is_empty()
                 && matches!(self.mode, BodyMode::Pretty | BodyMode::Raw)
                 && Arc::ptr_eq(&selection.lines, self.shown())
@@ -253,7 +247,9 @@ impl BodyView {
 
     #[cfg(test)]
     pub(crate) fn selection_head_line(&self) -> Option<usize> {
-        self.selection.as_ref().map(|selection| selection.head.line)
+        self.selector
+            .selection()
+            .map(|selection| selection.head.line)
     }
 
     /// A press on a line, as editors take one: a single click places the start, a double
@@ -267,37 +263,8 @@ impl BodyView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let lines = Arc::clone(self.shown());
-        match self.selection.as_mut() {
-            Some(selection) if extend && Arc::ptr_eq(&selection.lines, &lines) => {
-                selection.head = at;
-                self.select_unit = SelectUnit::Character;
-            }
-            _ => {
-                self.select_unit = match click_count {
-                    0 | 1 => SelectUnit::Character,
-                    2 => SelectUnit::Word(word_at(&lines, at)),
-                    3 => SelectUnit::Line(line_at(&lines, at)),
-                    _ => SelectUnit::All,
-                };
-                self.selection = Some(match &self.select_unit {
-                    SelectUnit::Character => BodySelection {
-                        lines,
-                        anchor: at,
-                        head: at,
-                    },
-                    SelectUnit::Word((start, end)) | SelectUnit::Line((start, end)) => {
-                        BodySelection {
-                            lines,
-                            anchor: *start,
-                            head: *end,
-                        }
-                    }
-                    SelectUnit::All => BodySelection::all(lines),
-                });
-            }
-        }
-        self.selecting = true;
+        self.selector
+            .begin(Arc::clone(self.shown()), None, at, extend, click_count);
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }
@@ -305,37 +272,13 @@ impl BodyView {
     /// A drag to `at`: move the selection's end there, or — after a double or triple
     /// click — select from the pressed word or line through the one under the pointer.
     fn extend_selection(&mut self, at: BodyPoint, cx: &mut Context<Self>) {
-        if !self.selecting {
-            return;
-        }
-        let Some(selection) = self.selection.as_mut() else {
-            return;
-        };
-        let (anchor, head) = match &self.select_unit {
-            SelectUnit::Character => (selection.anchor, at),
-            SelectUnit::All => return,
-            SelectUnit::Word(pressed) | SelectUnit::Line(pressed) => {
-                let (start, end) = *pressed;
-                let (under_start, under_end) = match self.select_unit {
-                    SelectUnit::Word(_) => word_at(&selection.lines, at),
-                    _ => line_at(&selection.lines, at),
-                };
-                if under_start < start {
-                    (end, under_start)
-                } else {
-                    (start, end.max(under_end))
-                }
-            }
-        };
-        if selection.anchor != anchor || selection.head != head {
-            selection.anchor = anchor;
-            selection.head = head;
+        if self.selector.extend(None, at) {
             cx.notify();
         }
     }
 
     fn end_selection(&mut self) {
-        self.selecting = false;
+        self.selector.end();
         self.drag_outside = None;
         self.autoscroll = None;
     }
@@ -350,7 +293,7 @@ impl BodyView {
         bounds: Bounds<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        if !self.selecting {
+        if !self.selector.is_selecting() {
             return;
         }
         if position.y < bounds.top() || position.y > bounds.bottom() {
@@ -388,7 +331,8 @@ impl BodyView {
     /// more the farther out it is — and move the selection to the row at that edge.
     /// False once the drag ended or came back over the rows.
     fn autoscroll_step(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some((position, bounds)) = self.drag_outside.filter(|_| self.selecting) else {
+        let Some((position, bounds)) = self.drag_outside.filter(|_| self.selector.is_selecting())
+        else {
             return false;
         };
         let Some((row_height, scroll_top)) = self.row_geometry() else {
@@ -439,7 +383,7 @@ impl BodyView {
         if !matches!(self.mode, BodyMode::Pretty | BodyMode::Raw) {
             return;
         }
-        self.selection = Some(BodySelection::all(Arc::clone(self.shown())));
+        self.selector.select_all(Arc::clone(self.shown()));
         cx.notify();
     }
 
@@ -1388,74 +1332,10 @@ fn render_line_with_matches(
         .into_any_element()
 }
 
-/// The byte column of `line` under the pointer's x. The row's text is one visual line,
-/// so the pointer's y is pinned to it: a drag that wanders above or below the text still
-/// selects by x.
-fn column_at(layout: &TextLayout, line: &str, position: Point<Pixels>) -> usize {
-    let at = point(position.x, layout.bounds().center().y);
-    let index = match layout.index_for_position(at) {
-        Ok(index) | Err(index) => index,
-    };
-    clamp_column(line, index)
-}
-
 /// How often a drag held past the rows' edge scrolls them another step.
 const AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(30);
 /// The most rows one autoscroll step moves, however far past the edge the pointer is.
 const AUTOSCROLL_MAX_ROWS: f32 = 8.;
-
-/// What a selecting press selects by: characters, or the word or line it landed on (as
-/// the range a drag must keep), or everything.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum SelectUnit {
-    Character,
-    Word((BodyPoint, BodyPoint)),
-    Line((BodyPoint, BodyPoint)),
-    All,
-}
-
-/// The word, run of punctuation or gap under `at`, as the text inputs see one.
-fn word_at(lines: &[SharedString], at: BodyPoint) -> (BodyPoint, BodyPoint) {
-    let line = lines.get(at.line).map_or("", |line| line.as_ref());
-    let range = word_range_at(line, at.column);
-    (
-        BodyPoint {
-            line: at.line,
-            column: range.start,
-        },
-        BodyPoint {
-            line: at.line,
-            column: range.end,
-        },
-    )
-}
-
-/// The line under `at` with its line break: through the start of the next line, or to
-/// the end of the last one.
-fn line_at(lines: &[SharedString], at: BodyPoint) -> (BodyPoint, BodyPoint) {
-    let start = BodyPoint {
-        line: at.line,
-        column: 0,
-    };
-    if at.line + 1 < lines.len() {
-        (
-            start,
-            BodyPoint {
-                line: at.line + 1,
-                column: 0,
-            },
-        )
-    } else {
-        (start, end_of_line(lines, at.line))
-    }
-}
-
-fn end_of_line(lines: &[SharedString], line: usize) -> BodyPoint {
-    BodyPoint {
-        line,
-        column: lines.get(line).map_or(0, |text| text.len()),
-    }
-}
 
 /// A muted note line — the empty, loading, lossy and format-fallback states.
 pub(crate) fn note(text: impl Into<SharedString>, cx: &App) -> impl IntoElement {

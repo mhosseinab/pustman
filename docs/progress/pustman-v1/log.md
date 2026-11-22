@@ -255,3 +255,12 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - Cause: `open_tabs` is keyed `(workspace_id, item_id)`; a history entry opened with the recorded request's id gave two tabs one id (the entry twice, or beside its request), so every save — and the closing flush, which keeps the window open on failure — failed with a stacked toast.
 - Fix: `history_panel::open_entry` gives the opened request a fresh `ItemId` (a history tab is a copy, like a new request); `Restore::snapshot` also saves only the first tab per item id, as a guard.
 - Tests: `open_entry_identity_tests` (red: shared id), `restore_duplicate_tests` (red: write-failure toast). workspace 52/52, history_panel 9/9, clippy + fmt clean.
+
+## 2026-11-22 — fix: select and copy text in the Headers, Cookies and Timeline tabs
+
+- Human: "also all text in response tabs including hrader, cookies and time line text values copy paste able".
+- New `response_viewer::text_selection` (`CellSelector`, `selectable_cell`, `selection_handlers`) flattens a tab's cells into one selection. Drag selects across cells and rows. 2 clicks take a word, 3 take a row, 4+ take the whole tab. Ctrl/Cmd+A selects all, and Ctrl/Cmd+C copies, through the shared `ResponseText` key context. The body view now uses the same `TextSelector`.
+- Decision: `": "` goes between label and value, matching HTTP and the row Copy menu; `"\t"` goes between cookie and hop columns, so they paste as TSV; `"\n"` ends each row.
+- Decision: these tabs have no drag auto-scroll. A truncated cell gives its full value only through a triple-click or select-all. Toggling a Timeline hop resets the selection. `CellSelector`/`TextSelector` do not derive `Debug` (PRD §7). `BodySelection` still derives it; that predates this change.
+- `headers_view::render_row` now takes a `RowTable` struct (clippy too_many_arguments).
+- Tests (red first): `headers_selection_tests` (3), `cookies_selection_tests` (3), `timeline_selection_tests` (3). response_viewer 83/83, workspace 602 passed 0 failed, clippy + fmt clean, TRIPWIRE 0.

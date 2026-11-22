@@ -26,6 +26,7 @@ mod preview;
 mod request_as_sent;
 mod save_body;
 mod status_line;
+mod text_selection;
 mod timeline;
 
 pub use body_view::BodyView;
@@ -265,6 +266,7 @@ impl Focusable for ResponseView {
 /// with their feature — [`cookie_dialog`] answers `cookies::Manage` (REQ-HTTP-08).
 pub fn init(cx: &mut App) {
     body_view::init(cx);
+    text_selection::init(cx);
     cookie_dialog::init(cx);
 }
 

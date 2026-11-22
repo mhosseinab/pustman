@@ -26,6 +26,9 @@ use ui::components::context_menu::ContextMenuEvent;
 use ui::prelude::*;
 
 use crate::child_id;
+use crate::text_selection::{
+    CellSelector, SelectableCells, TEXT_CONTEXT, selectable_cell, selection_handlers,
+};
 
 /// One header field as the table shows it: name and value, as they arrived.
 #[derive(Clone, Debug)]
@@ -80,16 +83,28 @@ pub struct HeadersView {
     /// The row menu while it is open.
     row_menu: Option<RowMenu>,
     row_menu_subscription: Option<Subscription>,
+    /// The hand-made selection over the names and values, flattened row by row.
+    selection: CellSelector,
+    /// Where focus lands when a press selects outside any row, so copy has a target.
+    focus_handle: FocusHandle,
+}
+
+impl SelectableCells for HeadersView {
+    fn cell_selector(&mut self) -> &mut CellSelector {
+        &mut self.selection
+    }
 }
 
 impl HeadersView {
     /// An empty table, waiting for a response.
-    pub fn new(_cx: &mut Context<Self>) -> Self {
+    pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             rows: Arc::new(Vec::new()),
             row_focus: Arc::new(Vec::new()),
             row_menu: None,
             row_menu_subscription: None,
+            selection: CellSelector::default(),
+            focus_handle: cx.focus_handle(),
         }
     }
 
@@ -112,6 +127,13 @@ impl HeadersView {
             })
             .collect();
         self.rows = Arc::new(rows);
+        // `name: value`, one row per line — the shape the row menu's Copy and HTTP use.
+        self.selection.set(
+            self.rows
+                .iter()
+                .flat_map(|row| [(row.name.clone(), ": "), (row.value.clone(), "\n")])
+                .collect(),
+        );
         self.row_focus = Arc::new(
             self.rows
                 .iter()
@@ -198,10 +220,14 @@ impl Render for HeadersView {
         let row_focus = Arc::clone(&self.row_focus);
         let open_menu = self.row_menu.clone();
         let view = cx.weak_entity();
+        let selection = Arc::new(self.selection.clone());
         // One base id per entity, so two viewers in one frame never share element ids.
         let base = ElementId::from(("headers-view", cx.entity_id()));
-        v_flex()
+        let root = v_flex()
             .size_full()
+            .key_context(TEXT_CONTEXT)
+            .track_focus(&self.focus_handle);
+        selection_handlers(root, cx)
             .child(
                 h_flex()
                     .w_full()
@@ -219,28 +245,23 @@ impl Render for HeadersView {
                 } else {
                     let row_keys = Arc::clone(&rows);
                     let key_base = base.clone();
-                    let render_base = base.clone();
-                    let render_focus = Arc::clone(&row_focus);
-                    let render_menu = open_menu.clone();
-                    let render_view = view.clone();
+                    let row_count = rows.len();
+                    let table = RowTable {
+                        rows,
+                        base: base.clone(),
+                        row_focus,
+                        open_menu,
+                        view,
+                        selection,
+                    };
                     this.child(VirtualList::new(
                         child_id(&base, "rows"),
-                        rows.len(),
+                        row_count,
                         move |index| match row_keys.get(index) {
                             Some(row) => row.key(&key_base),
                             None => child_id(&key_base, format!("row-{index}")),
                         },
-                        move |index, _window, cx| {
-                            render_row(
-                                &rows,
-                                index,
-                                &render_base,
-                                &render_focus,
-                                &render_menu,
-                                &render_view,
-                                cx,
-                            )
-                        },
+                        move |index, _window, cx| render_row(&table, index, cx),
                     ))
                 }
             })
@@ -256,18 +277,28 @@ fn column_heading(heading: &'static str) -> impl IntoElement {
     )
 }
 
+/// What every row of one frame renders from, moved into the list's row closure.
+struct RowTable {
+    rows: Arc<Vec<HeaderRow>>,
+    base: ElementId,
+    row_focus: Arc<Vec<FocusHandle>>,
+    open_menu: Option<RowMenu>,
+    view: WeakEntity<HeadersView>,
+    selection: Arc<CellSelector>,
+}
+
 /// One header row: name and value, each truncating with its full value in a tooltip. The
 /// row is a tab stop; right-click or Enter/Space on it opens its "Copy" menu, and while
 /// the menu is open it floats over the table at where the row opened it.
-fn render_row(
-    rows: &[HeaderRow],
-    index: usize,
-    base: &ElementId,
-    row_focus: &[FocusHandle],
-    open_menu: &Option<RowMenu>,
-    view: &WeakEntity<HeadersView>,
-    cx: &mut App,
-) -> AnyElement {
+fn render_row(table: &RowTable, index: usize, cx: &mut App) -> AnyElement {
+    let RowTable {
+        rows,
+        base,
+        row_focus,
+        open_menu,
+        view,
+        selection,
+    } = table;
     let (Some(row), Some(focus_handle)) = (rows.get(index), row_focus.get(index)) else {
         return div().into_any_element();
     };
@@ -334,8 +365,22 @@ fn render_row(
         .focus_visible(|style| style.bg(cx.theme().colors().element_selected))
         .on_mouse_down(MouseButton::Right, on_right_click)
         .on_click(on_activate)
-        .child(cell(child_id(&row_id, "name"), row.name.clone(), cx))
-        .child(cell(child_id(&row_id, "value"), row.value.clone(), cx))
+        .child(cell(
+            child_id(&row_id, "name"),
+            2 * index,
+            row.name.clone(),
+            selection,
+            view,
+            cx,
+        ))
+        .child(cell(
+            child_id(&row_id, "value"),
+            2 * index + 1,
+            row.value.clone(),
+            selection,
+            view,
+            cx,
+        ))
         .children(menu_overlay)
         .into_any_element()
 }
@@ -359,17 +404,21 @@ fn open_row_menu(
     }
 }
 
-/// One header cell: the content font, truncated with the full value behind a tooltip.
-fn cell(id: ElementId, text: SharedString, cx: &App) -> impl IntoElement {
-    div()
-        .id(id)
+/// One header cell: selectable text in the content font, truncated with the full value
+/// behind a tooltip. `index` is its place in the flattened cells (`set_headers`).
+fn cell(
+    id: ElementId,
+    index: usize,
+    text: SharedString,
+    selection: &CellSelector,
+    view: &WeakEntity<HeadersView>,
+    cx: &App,
+) -> impl IntoElement {
+    selectable_cell(id, index, text, selection.range_on(index), view.clone(), cx)
         .flex_1()
-        .min_w_0()
         .font_buffer(cx)
         .text_ui_sm(cx)
         .text_color(cx.theme().colors().text)
-        .tooltip(Tooltip::text(text.clone()).builder())
-        .child(div().w_full().min_w_0().truncate().child(text))
 }
 
 /// The state where there is nothing to list: before the first response, or a response
@@ -385,3 +434,7 @@ fn empty_state() -> impl IntoElement {
 #[cfg(test)]
 #[path = "headers_view_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "headers_selection_tests.rs"]
+mod selection_tests;
