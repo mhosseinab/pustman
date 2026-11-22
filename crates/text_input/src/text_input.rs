@@ -3,7 +3,9 @@
 //! Three doors in:
 //! - [`input`] — the [`EditState`] editing core (shared by both widgets) and the
 //!   [`TextInput`] single-line field: typing, cursor motion, shift selection, IME
-//!   through [`gpui::EntityInputHandler`], a placeholder, read-only mode, and the
+//!   through [`gpui::EntityInputHandler`], a placeholder, read-only mode, masked mode
+//!   ([`TextInput::with_masked`]: one mask character per character, to the painted
+//!   line and to the platform alike), and the
 //!   [`TextInputEvent`]s (`Changed`, `Submitted`) an owner subscribes to.
 //! - [`text_area`] — the [`TextArea`] multi-line widget over the same editing core:
 //!   line motion, soft wrap and an optional line-number gutter, with Enter inserting a
