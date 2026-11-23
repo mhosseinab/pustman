@@ -1,5 +1,5 @@
 //! The restore and autosave wire (S23w): every [`Workspace`] window that opens gets the
-//! tabs and layout `workspace::Restore` saved under [`WORKSPACE_KEY`] back, and
+//! tabs and layout `workspace::Restore` saved under [`crate::WORKSPACE_ID`] back, and
 //! `workspace::Autosave` keeps dirty drafts saved on its 2 s tick (PRD REQ-UI-01/02,
 //! REQ-NFR-05). The snapshot and save logic lives in `workspace`; this module only wires
 //! it to the things `workspace` cannot know: when a window opens, when the app's local
@@ -20,12 +20,7 @@ use std::sync::Arc;
 use gpui::{App, Entity, EntityId, Global, Subscription, WeakEntity};
 use workspace::{Autosave, ItemFactory, Restore, Workspace};
 
-use crate::AppStore;
-
-/// The key the one window of v1 saves under. Decision: v1 has a single workspace, so a
-/// stable constant is its id; a multi-workspace build would derive this per window
-/// instead.
-const WORKSPACE_KEY: &str = "default";
+use crate::{AppStore, WORKSPACE_ID};
 
 /// The app-wide wiring state: the registered item kinds, the windows waiting for the
 /// store, and the handles of the windows already wired.
@@ -127,7 +122,7 @@ fn wire_pending_windows(cx: &mut App) {
             let restore = Restore::attach(
                 &workspace,
                 Arc::clone(&store),
-                WORKSPACE_KEY.to_owned(),
+                WORKSPACE_ID.to_owned(),
                 item_factory(),
                 window,
                 cx,

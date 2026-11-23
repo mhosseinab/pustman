@@ -160,12 +160,12 @@ struct ConsoleWiring {
 
 impl Global for ConsoleWiring {}
 
-/// The id of the one workspace v1 has: the same string `restore_wiring::WORKSPACE_KEY`
-/// saves that window's tabs and layout under, and the picker's per-workspace selection
-/// and the quick-look's secret keys must scope to that same workspace. `restore_wiring`'s
-/// copy is module-private and this hotspot step may edit only this file, so the shared
-/// value is written twice; exposing one copy is a follow-up.
-const WORKSPACE_ID: &str = "default";
+/// The id of the one workspace v1 has. Decision: v1 has a single workspace, so a stable
+/// constant is its id; a multi-workspace build would derive this per window instead. It
+/// is both `restore_wiring`'s save key (the tabs and layout one window restores) and the
+/// scope the picker's per-workspace selection and the quick-look's secret keys live
+/// under, so those can never diverge — one value, written once (issue #150).
+pub const WORKSPACE_ID: &str = "default";
 
 /// `environment_picker` (S34w): the inputs its openers read when `environment::SelectEnvironment`
 /// and `environment::QuickLook` fire. Installed where [`AppStore`] lands rather than in
