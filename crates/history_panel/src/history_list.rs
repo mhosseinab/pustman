@@ -18,8 +18,9 @@ use std::time::Duration;
 use console::ConsoleStore;
 use gpui::{
     AnyElement, App, Context, ElementId, Entity, FocusHandle, Focusable, Global,
-    InteractiveElement, IntoElement, ParentElement, Render, Role, ScrollStrategy, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Task, UniformListScrollHandle, Window, div,
+    InteractiveElement, InteractiveText, IntoElement, ParentElement, Render, Role, ScrollStrategy,
+    SharedString, StatefulInteractiveElement, Styled, StyledText, Subscription, Task,
+    UniformListScrollHandle, Window, div,
 };
 use pustman_actions::workspace::NewTab;
 use storage::{HistoryEntry, LocalStore};
@@ -37,6 +38,18 @@ mod tests;
 #[cfg(test)]
 #[path = "history_summary_tests.rs"]
 mod summary_tests;
+
+#[cfg(test)]
+#[path = "history_row_tests.rs"]
+mod row_tests;
+
+#[cfg(test)]
+#[path = "history_day_label_tests.rs"]
+mod day_label_tests;
+
+#[cfg(test)]
+#[path = "history_row_id_tests.rs"]
+mod row_id_tests;
 
 #[cfg(test)]
 #[path = "history_list_activation_tests.rs"]
@@ -109,6 +122,9 @@ pub struct HistoryList {
     /// The in-flight read. Replacing it cancels the previous one (a dropped `Task`
     /// cancels its work — AGENTS.md), so only the newest query's rows can land.
     pending_load: Option<Task<()>>,
+    /// The wake that re-derives the day labels at each UTC midnight ([
+    /// [`Self::arm_day_label_wake`]). Stored so dropping the panel ends the loop.
+    day_label_wake: Option<Task<()>>,
     /// The entry the keyboard is on — its stored id, which survives search re-ordering
     /// — or [`None`] while the arrows and clicks have not put it anywhere. Rows the
     /// store left without an id cannot carry it (none reach the list from `storage`).
@@ -152,6 +168,13 @@ impl HistoryList {
         // the moment the DB holds the row — re-read then, never on a timer.
         let _recorded_observer =
             cx.observe_global::<ConsoleStore>(|this: &mut Self, cx| this.reload(cx));
+        // Day labels (#110): "Today"/"Yesterday" are derived against the UTC day, so a
+        // read must not freeze them. Re-derive whenever the window is activated — the
+        // moment a machine that slept across a UTC midnight comes back.
+        let _activation_observer =
+            cx.observe_window_activation(window, |this: &mut Self, _window, cx| {
+                this.refresh_day_labels(OffsetDateTime::now_utc().date(), cx);
+            });
         let mut this = Self {
             store,
             workspace_id: workspace_id.into(),
@@ -160,11 +183,17 @@ impl HistoryList {
             is_loading: true,
             error: None,
             pending_load: None,
+            day_label_wake: None,
             selected_entry_id: None,
             scroll_handle: UniformListScrollHandle::new(),
-            _subscriptions: vec![_search_subscription, _recorded_observer],
+            _subscriptions: vec![
+                _search_subscription,
+                _recorded_observer,
+                _activation_observer,
+            ],
         };
         this.reload(cx);
+        this.arm_day_label_wake(cx);
         this
     }
 
@@ -311,7 +340,8 @@ impl HistoryList {
                 match loaded {
                     Ok(entries) => {
                         this.error = None;
-                        this.rows = Arc::new(group_by_day(entries));
+                        this.rows =
+                            Arc::new(group_by_day(entries, OffsetDateTime::now_utc().date()));
                     }
                     Err(_error) => {
                         this.error = Some(SharedString::new_static(LOAD_FAILURE_MESSAGE));
@@ -326,13 +356,55 @@ impl HistoryList {
         }));
     }
 
+    /// Re-derive every day header's label against `today` (#110): the labels are
+    /// display data — derived against the day the list is drawn on, never frozen by
+    /// the read that grouped the rows — so a panel left open across UTC midnight gets
+    /// its "Today" corrected by [`Self::arm_day_label_wake`] and by a window
+    /// activation. Notifies only when a label actually changed.
+    fn refresh_day_labels(&mut self, today: Date, cx: &mut Context<Self>) {
+        let stale = self.rows.iter().any(|row| match row {
+            HistoryRow::Day { date, label } => *label != day_label(*date, today),
+            HistoryRow::Entry(_) => false,
+        });
+        if !stale {
+            return;
+        }
+        for row in Arc::make_mut(&mut self.rows) {
+            if let HistoryRow::Day { date, label } = row {
+                *label = day_label(*date, today);
+            }
+        }
+        cx.notify();
+    }
+
+    /// The wake that keeps the day labels fresh (#110): sleep until the next UTC
+    /// midnight, re-derive the labels against the day that began, sleep again. The task
+    /// is stored on the panel, so dropping it drops the task and the loop ends
+    /// (AGENTS.md — a dropped `Task` cancels its work).
+    fn arm_day_label_wake(&mut self, cx: &mut Context<Self>) {
+        self.day_label_wake = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(until_next_utc_midnight(OffsetDateTime::now_utc()))
+                    .await;
+                let today = OffsetDateTime::now_utc().date();
+                let refreshed = this.update(cx, |this, cx| this.refresh_day_labels(today, cx));
+                if refreshed.is_err() {
+                    // Handled: the panel went away with its window; there are no rows
+                    // left to relabel and the wake dies with it.
+                    break;
+                }
+            }
+        }));
+    }
+
     /// One row's content — the wrapper `VirtualList` draws around it carries the row's
     /// id and test selector.
     fn render_row(&mut self, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let rows = Arc::clone(&self.rows);
         match rows.get(index) {
             Some(HistoryRow::Day { label, .. }) => self.render_day_header(label.clone(), cx),
-            Some(HistoryRow::Entry(entry)) => self.render_entry(entry, cx),
+            Some(HistoryRow::Entry(entry)) => self.render_entry(index, entry, cx),
             // The list is told the row count of the same snapshot it draws ids from, so
             // an out-of-range index cannot occur — and must not panic if it ever does.
             None => div().into_any_element(),
@@ -351,16 +423,17 @@ impl HistoryList {
             .into_any_element()
     }
 
-    fn render_entry(&mut self, entry: &HistoryEntry, cx: &mut Context<Self>) -> AnyElement {
-        let target_id = ElementId::NamedChild(
-            Arc::new(entry_element_id(entry.id)),
-            SharedString::new_static("target"),
-        );
+    fn render_entry(
+        &mut self,
+        index: usize,
+        entry: &HistoryEntry,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         // The clickable container is a child id of the row's stable key (the
         // `command_palette::picker`'s row shape), so a click selects and opens *this*
         // entry even if the rows re-order underneath the pointer.
         let row_id = ElementId::NamedChild(
-            Arc::new(entry_element_id(entry.id)),
+            Arc::new(entry_element_id(entry.id, index)),
             SharedString::new_static("row"),
         );
         let selected = entry.id.is_some() && entry.id == self.selected_entry_id;
@@ -396,26 +469,9 @@ impl HistoryList {
                                 .color(method_color(&entry.method, cx)),
                         ),
                     )
-                    .child(
-                        // The target truncates in the narrow dock and keeps its full
-                        // value readable in the tooltip (the `Label::truncate` contract).
-                        div()
-                            .id(target_id)
-                            .flex_1()
-                            .min_w_0()
-                            .tooltip(Tooltip::text(entry.target.clone()).builder())
-                            .child(
-                                Label::new(entry.target.clone())
-                                    .size(LabelSize::Small)
-                                    .truncate(),
-                            ),
-                    ),
+                    .child(target_element(entry, index, cx)),
             )
-            .child(
-                Label::new(entry_summary(entry))
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted),
-            )
+            .child(meta_element(entry))
             .into_any_element()
     }
 }
@@ -462,7 +518,7 @@ impl Render for HistoryList {
                 SharedString::new_static("rows"),
             ),
             rows.len(),
-            move |index| row_element_id(rows.get(index)),
+            move |index| row_element_id(rows.get(index), index),
             cx.processor(|this, index: usize, _window, cx| this.render_row(index, cx)),
         );
 
@@ -612,8 +668,10 @@ fn read_entries(
 }
 
 /// Fold the newest-first entries into the day-grouped rows: one [`HistoryRow::Day`]
-/// header per UTC day, its entries in the order the read returned them.
-fn group_by_day(entries: Vec<HistoryEntry>) -> Vec<HistoryRow> {
+/// header per UTC day, its entries in the order the read returned them. The headers'
+/// labels are derived against `today`, the day the read ran on — [`HistoryList::refresh_day_labels`]
+/// re-derives them when that day is no longer the current one (#110).
+fn group_by_day(entries: Vec<HistoryEntry>, today: Date) -> Vec<HistoryRow> {
     let mut rows = Vec::with_capacity(entries.len());
     let mut current_day: Option<Date> = None;
     for entry in entries {
@@ -622,7 +680,7 @@ fn group_by_day(entries: Vec<HistoryEntry>) -> Vec<HistoryRow> {
             current_day = Some(date);
             rows.push(HistoryRow::Day {
                 date,
-                label: day_label(date),
+                label: day_label(date, today),
             });
         }
         rows.push(HistoryRow::Entry(Box::new(entry)));
@@ -630,11 +688,11 @@ fn group_by_day(entries: Vec<HistoryEntry>) -> Vec<HistoryRow> {
     rows
 }
 
-/// The header text for one day's group: "Today" and "Yesterday" against the UTC day the
-/// entries are grouped by (the same clock `group_by_day` buckets them with), the ISO
-/// date for anything older.
-fn day_label(date: Date) -> SharedString {
-    let today = OffsetDateTime::now_utc().date();
+/// The header text for one day's group: "Today" and "Yesterday" against the UTC day
+/// `today` (the same clock `group_by_day` buckets entries with), the ISO date for
+/// anything older. `today` is passed in, never read here, so the caller decides which
+/// day the labels describe (#110).
+fn day_label(date: Date, today: Date) -> SharedString {
     if date == today {
         SharedString::new_static("Today")
     } else if Some(date) == today.previous_day() {
@@ -644,31 +702,145 @@ fn day_label(date: Date) -> SharedString {
     }
 }
 
+/// How long from `now` until the next UTC midnight — the moment a "Today" an earlier
+/// read derived turns wrong, so the day-label wake sleeps exactly this long (#110).
+fn until_next_utc_midnight(now: OffsetDateTime) -> Duration {
+    let since_midnight = Duration::from_secs(
+        u64::from(now.hour()) * 60 * 60 + u64::from(now.minute()) * 60 + u64::from(now.second()),
+    ) + Duration::from_nanos(u64::from(now.nanosecond()));
+    Duration::from_secs(24 * 60 * 60).saturating_sub(since_midnight)
+}
+
 /// One row's element id — the item's stable identity (a stored entry id, a day's date),
-/// never its row position, which shifts as the list re-groups.
-fn row_element_id(row: Option<&HistoryRow>) -> ElementId {
+/// never its row position, which shifts as the list re-groups. The one exception is the
+/// fallback: a row the store left without an id, or an index past the rows snapshot,
+/// has no stable identity to derive from, so its last-resort key is its row position —
+/// unique within the frame, which is all a fallback owes (#111). Unreachable today:
+/// stored rows always carry ids.
+fn row_element_id(row: Option<&HistoryRow>, index: usize) -> ElementId {
     match row {
         Some(HistoryRow::Day { date, .. }) => ElementId::from(format!("history-day-{date}")),
-        Some(HistoryRow::Entry(entry)) => entry_element_id(entry.id),
-        None => ElementId::from("history-row"),
+        Some(HistoryRow::Entry(entry)) => entry_element_id(entry.id, index),
+        None => ElementId::from(format!("history-row-fallback-{index}")),
     }
 }
 
-/// One entry row's element id: its stored id, which survives search re-ordering.
-fn entry_element_id(id: Option<i64>) -> ElementId {
+/// One entry row's element id: its stored id, which survives search re-ordering. A row
+/// without one falls back to its position (`history-entry-fallback-*` keeps the
+/// fallback from ever impersonating a stored id) — see [`row_element_id`].
+fn entry_element_id(id: Option<i64>, index: usize) -> ElementId {
     match id {
         Some(id) => ElementId::from(format!("history-entry-{id}")),
-        None => ElementId::from("history-entry"),
+        None => ElementId::from(format!("history-entry-fallback-{index}")),
     }
 }
 
-/// The one meta line of an entry row: status and duration (REQ-HIST-01), never the
-/// request or response body (REQ-HIST-03). The duration shows in the shared `ui` form
-/// the Console rows and the response status line show one in (#134).
+/// One entry row's target box test selector: the row's stable key plus `target`, the
+/// `VirtualList` row-selector shape.
+fn target_debug_selector(id: Option<i64>, index: usize) -> String {
+    format!("{}-target", entry_element_id(id, index))
+}
+
+/// One row's target: the URL truncates in the narrow dock, and its hover tooltip
+/// carries the full value when — and only when — the drawn text is not the whole
+/// target (#235): a balloon repeating a visible URL covers the row it repeats (the
+/// `response_viewer` body lines' truncation-tooltip shape).
+fn target_element(entry: &HistoryEntry, index: usize, cx: &App) -> AnyElement {
+    let selector = target_debug_selector(entry.id, index);
+    let text_id = format!("{selector}-text");
+    let text = StyledText::new(entry.target.clone());
+    // The layout the text fills once the row lays it out — read at hover time to see
+    // what was actually drawn.
+    let drawn = text.layout().clone();
+    let full_target = entry.target.clone();
+    div()
+        .id(ElementId::from(selector.clone()))
+        .debug_selector(move || selector)
+        .flex_1()
+        .min_w_0()
+        .font_ui(cx)
+        .text_size(TextSize::Small.rems(cx))
+        .truncate()
+        .child(
+            InteractiveText::new(ElementId::from(text_id), text).tooltip(
+                move |_index, _window, cx| {
+                    // A truncation tooltip only (#235): when the drawn text is the target
+                    // we hold, the hover has nothing to add.
+                    if drawn.text() == full_target {
+                        None
+                    } else {
+                        Some(Tooltip::text(full_target.clone()).into_any_view(cx))
+                    }
+                },
+            ),
+        )
+        .into_any_element()
+}
+
+/// How a send ended, for rows that carry no status code to say it themselves: the two
+/// markers `http_engine` records in `response_summary_json` for sends that never got a
+/// response.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum EntryState {
+    /// The send failed before a response — the summary names the error's kind.
+    Failed,
+    /// The send was cancelled before it finished.
+    Cancelled,
+}
+
+/// The state a send ended in, from the marker `http_engine` stored with it — [`None`]
+/// for a response, which names its outcome as a status code instead.
+fn entry_state(entry: &HistoryEntry) -> Option<EntryState> {
+    let summary = entry.response_summary_json.as_ref()?;
+    if summary
+        .get("cancelled")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        Some(EntryState::Cancelled)
+    } else if summary.get("error").is_some_and(|error| error.is_string()) {
+        Some(EntryState::Failed)
+    } else {
+        None
+    }
+}
+
+/// One row's meta line (#235): what the send ended in, plus how long it took. A
+/// response names itself as "200 · 184 ms"; a send that got no response has no status
+/// code to say so, and its state is named in a pill — [`Badge`], the design system's
+/// "status" tag — in the severity it deserves (`docs/postman_redesign_pack/`,
+/// `01_specs/design_system.md` Response: "HTTP response versus transport failure";
+/// S13/R13).
+fn meta_element(entry: &HistoryEntry) -> AnyElement {
+    let summary = entry_summary(entry);
+    match entry_state(entry) {
+        Some(EntryState::Failed) => Badge::new(summary)
+            .severity(Severity::Error)
+            .into_any_element(),
+        Some(EntryState::Cancelled) => Badge::new(summary).into_any_element(),
+        None => Label::new(summary)
+            .size(LabelSize::XSmall)
+            .color(Color::Muted)
+            .into_any_element(),
+    }
+}
+
+/// The one meta line of an entry row: outcome and duration (REQ-HIST-01), never the
+/// request or response body (REQ-HIST-03). A send that got no response has no status
+/// code, so its state is named instead (#235) — the bare "—" is left only for a row
+/// that stores no outcome at all, which `http_engine` never records. The duration shows
+/// in the shared `ui` form the Console rows and the response status line show one in
+/// (#134).
 fn entry_summary(entry: &HistoryEntry) -> String {
     let mut parts: Vec<String> = Vec::new();
-    if let Some(code) = entry.status {
-        parts.push(code.to_string());
+    match entry_state(entry) {
+        Some(EntryState::Failed) => parts.push(String::from("Failed")),
+        Some(EntryState::Cancelled) => parts.push(String::from("Cancelled")),
+        None => {
+            if let Some(code) = entry.status {
+                parts.push(code.to_string());
+            }
+        }
     }
     if let Some(duration) = entry
         .duration_ms
