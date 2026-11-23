@@ -1122,6 +1122,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "collections_panel"
+version = "0.1.0"
+dependencies = [
+ "api_model",
+ "gpui",
+ "ui",
+ "workspace",
+ "workspace_store",
+]
+
+[[package]]
 name = "color_quant"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

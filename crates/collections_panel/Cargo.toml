@@ -1,0 +1,27 @@
+# crates/collections_panel — the left-dock Collections panel (PRD REQ-UI-01): the open
+# workspace's collections, folders and requests as a virtualized tree (REQ-NFR-02's
+# 10,000-request tree at 60 fps). It reads the workspace through `workspace_store`'s
+# snapshot only: no file IO happens here, and no request content is sent anywhere.
+
+[package]
+name = "collections_panel"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/collections_panel.rs"
+
+[dependencies]
+api_model.workspace = true
+gpui.workspace = true
+ui.workspace = true
+workspace.workspace = true
+workspace_store.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+ui = { workspace = true, features = ["test-support"] }
