@@ -18,8 +18,9 @@ use std::time::Duration;
 use console::ConsoleStore;
 use gpui::{
     AnyElement, App, Context, ElementId, Entity, FocusHandle, Focusable, Global,
-    InteractiveElement, IntoElement, ParentElement, Render, Role, ScrollStrategy, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Task, UniformListScrollHandle, Window, div,
+    InteractiveElement, InteractiveText, IntoElement, ParentElement, Render, Role, ScrollStrategy,
+    SharedString, StatefulInteractiveElement, Styled, StyledText, Subscription, Task,
+    UniformListScrollHandle, Window, div,
 };
 use pustman_actions::workspace::NewTab;
 use storage::{HistoryEntry, LocalStore};
@@ -37,6 +38,10 @@ mod tests;
 #[cfg(test)]
 #[path = "history_summary_tests.rs"]
 mod summary_tests;
+
+#[cfg(test)]
+#[path = "history_row_tests.rs"]
+mod row_tests;
 
 #[cfg(test)]
 #[path = "history_list_activation_tests.rs"]
@@ -352,10 +357,6 @@ impl HistoryList {
     }
 
     fn render_entry(&mut self, entry: &HistoryEntry, cx: &mut Context<Self>) -> AnyElement {
-        let target_id = ElementId::NamedChild(
-            Arc::new(entry_element_id(entry.id)),
-            SharedString::new_static("target"),
-        );
         // The clickable container is a child id of the row's stable key (the
         // `command_palette::picker`'s row shape), so a click selects and opens *this*
         // entry even if the rows re-order underneath the pointer.
@@ -396,26 +397,9 @@ impl HistoryList {
                                 .color(method_color(&entry.method, cx)),
                         ),
                     )
-                    .child(
-                        // The target truncates in the narrow dock and keeps its full
-                        // value readable in the tooltip (the `Label::truncate` contract).
-                        div()
-                            .id(target_id)
-                            .flex_1()
-                            .min_w_0()
-                            .tooltip(Tooltip::text(entry.target.clone()).builder())
-                            .child(
-                                Label::new(entry.target.clone())
-                                    .size(LabelSize::Small)
-                                    .truncate(),
-                            ),
-                    ),
+                    .child(target_element(entry, cx)),
             )
-            .child(
-                Label::new(entry_summary(entry))
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted),
-            )
+            .child(meta_element(entry))
             .into_any_element()
     }
 }
@@ -662,13 +646,112 @@ fn entry_element_id(id: Option<i64>) -> ElementId {
     }
 }
 
-/// The one meta line of an entry row: status and duration (REQ-HIST-01), never the
-/// request or response body (REQ-HIST-03). The duration shows in the shared `ui` form
-/// the Console rows and the response status line show one in (#134).
+/// One entry row's target box test selector: the row's stable key plus `target`, the
+/// `VirtualList` row-selector shape.
+fn target_debug_selector(id: Option<i64>) -> String {
+    format!("{}-target", entry_element_id(id))
+}
+
+/// One row's target: the URL truncates in the narrow dock, and its hover tooltip
+/// carries the full value when — and only when — the drawn text is not the whole
+/// target (#235): a balloon repeating a visible URL covers the row it repeats (the
+/// `response_viewer` body lines' truncation-tooltip shape).
+fn target_element(entry: &HistoryEntry, cx: &App) -> AnyElement {
+    let selector = target_debug_selector(entry.id);
+    let text_id = format!("{selector}-text");
+    let text = StyledText::new(entry.target.clone());
+    // The layout the text fills once the row lays it out — read at hover time to see
+    // what was actually drawn.
+    let drawn = text.layout().clone();
+    let full_target = entry.target.clone();
+    div()
+        .id(ElementId::from(selector.clone()))
+        .debug_selector(move || selector)
+        .flex_1()
+        .min_w_0()
+        .font_ui(cx)
+        .text_size(TextSize::Small.rems(cx))
+        .truncate()
+        .child(
+            InteractiveText::new(ElementId::from(text_id), text).tooltip(
+                move |_index, _window, cx| {
+                    // A truncation tooltip only (#235): when the drawn text is the target
+                    // we hold, the hover has nothing to add.
+                    if drawn.text() == full_target {
+                        None
+                    } else {
+                        Some(Tooltip::text(full_target.clone()).into_any_view(cx))
+                    }
+                },
+            ),
+        )
+        .into_any_element()
+}
+
+/// How a send ended, for rows that carry no status code to say it themselves: the two
+/// markers `http_engine` records in `response_summary_json` for sends that never got a
+/// response.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum EntryState {
+    /// The send failed before a response — the summary names the error's kind.
+    Failed,
+    /// The send was cancelled before it finished.
+    Cancelled,
+}
+
+/// The state a send ended in, from the marker `http_engine` stored with it — [`None`]
+/// for a response, which names its outcome as a status code instead.
+fn entry_state(entry: &HistoryEntry) -> Option<EntryState> {
+    let summary = entry.response_summary_json.as_ref()?;
+    if summary
+        .get("cancelled")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        Some(EntryState::Cancelled)
+    } else if summary.get("error").is_some_and(|error| error.is_string()) {
+        Some(EntryState::Failed)
+    } else {
+        None
+    }
+}
+
+/// One row's meta line (#235): what the send ended in, plus how long it took. A
+/// response names itself as "200 · 184 ms"; a send that got no response has no status
+/// code to say so, and its state is named in a pill — [`Badge`], the design system's
+/// "status" tag — in the severity it deserves (`docs/postman_redesign_pack/`,
+/// `01_specs/design_system.md` Response: "HTTP response versus transport failure";
+/// S13/R13).
+fn meta_element(entry: &HistoryEntry) -> AnyElement {
+    let summary = entry_summary(entry);
+    match entry_state(entry) {
+        Some(EntryState::Failed) => Badge::new(summary)
+            .severity(Severity::Error)
+            .into_any_element(),
+        Some(EntryState::Cancelled) => Badge::new(summary).into_any_element(),
+        None => Label::new(summary)
+            .size(LabelSize::XSmall)
+            .color(Color::Muted)
+            .into_any_element(),
+    }
+}
+
+/// The one meta line of an entry row: outcome and duration (REQ-HIST-01), never the
+/// request or response body (REQ-HIST-03). A send that got no response has no status
+/// code, so its state is named instead (#235) — the bare "—" is left only for a row
+/// that stores no outcome at all, which `http_engine` never records. The duration shows
+/// in the shared `ui` form the Console rows and the response status line show one in
+/// (#134).
 fn entry_summary(entry: &HistoryEntry) -> String {
     let mut parts: Vec<String> = Vec::new();
-    if let Some(code) = entry.status {
-        parts.push(code.to_string());
+    match entry_state(entry) {
+        Some(EntryState::Failed) => parts.push(String::from("Failed")),
+        Some(EntryState::Cancelled) => parts.push(String::from("Cancelled")),
+        None => {
+            if let Some(code) = entry.status {
+                parts.push(code.to_string());
+            }
+        }
     }
     if let Some(duration) = entry
         .duration_ms
