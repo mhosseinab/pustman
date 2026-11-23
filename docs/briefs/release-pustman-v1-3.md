@@ -3,101 +3,73 @@
 ## 1. Window
 | | |
 |---|---|
-| Tag candidate | `release/pustman-v1-3` at **`9e1d8c3`** (`progress: S38 M1 GO`) on `pustman-v1/main` |
-| Range | `release/pustman-v1-2` (`999746d`) .. `9e1d8c3`: 197 commits, 71 of them `progress:`. The other 126: 47 `S<N>:` squash commits (S26a–S37, plus the driver-added S33e, S33w, S33n, S33o, S33p), 53 `remediation: <lane> LOWs`, 16 `fix:`, and 10 others (Appendix). S38 is a sign-off with no squash commit ([S38](../progress/pustman-v1/steps/S38.md)) |
-| Size | 503 files, +53 059 / −562 (`crates/`: 312 files, +48 440 / −452) |
-| Tripwire | `TRIPWIRE 0` at `999746d` and at `9e1d8c3`, both re-run by the brief writer |
-| Migrations / ADRs | No file under `crates/storage/migrations` changed. No ADR added (`docs/decisions/` unchanged) |
+| Tag candidate | `release/pustman-v1-3` at **`430c86f`** (`progress: S38 review fixes R1-R4 merged`) on `pustman-v1/main`. Supersedes the `9e1d8c3` candidate of brief `5bbcb69` |
+| Range | `release/pustman-v1-2` (`999746d`) .. `430c86f`: 207 commits, 74 `progress:`. The other 133: 47 `S<N>:` (S26a–S37 plus driver-added S33e/w/n/o/p), 4 review-fix steps `R1:`–`R4:`, 53 `remediation:`, 17 `fix:` (incl. `84803b5`), 12 others (Appendix). S38 is a sign-off with no squash commit ([S38](../progress/pustman-v1/steps/S38.md)) |
+| Size | 518 files, +56 196 / −633 (`crates/`: 326 files, +51 467 / −522). Since `9e1d8c3`: 34 files, +3 227 / −161 |
+| Tripwire | `TRIPWIRE 0` at `999746d` (prior brief) and at `430c86f` (re-run by the brief writer) |
+| Migrations / ADRs / deltas | No migration, no ADR, no CI-workflow change. `DEPLOY_DELTAS.md` unchanged since `9e1d8c3` |
 | Date | 2026-11-23 |
-| **Verdict** | **NOT PROMOTABLE: the flag rate is 22/47 = 47%, against a 20% ceiling (§5)** |
+| **Verdict** | **NOT PROMOTABLE: flag rate 27/52 = 52% against a 20% ceiling (§5)** |
 
 ## 2. Changes by module
-- **request_editor** (new; S26a, S26b, S26w, S27a–d, S28a–c, S29e, S33a–e, S33n): request tab, URL bar and method, Send/Cancel, the Params, Headers, Body, Auth and Settings tabs, cURL paste and copy, variable highlight, autocomplete, hover and the unresolved-variable warning. S33e routes Send through `http_engine::send_request`, so auth, secrets and history apply.
-- **response_viewer** (new; S29a–c, S29w, S30a–e, S31a–b, S33o, S36a–b, S33p): status line, headers, Raw/Pretty/Hex/safe Preview, find, the large-body fallback, save and copy, the Cookies tab, Timeline and request-as-sent, and the Manage Cookies dialog. Human-requested fixes add text selection and copy (`143c0dd`, `affc474`, `3a625e9`).
-- **console** (new; S32a–d, S32w): ring buffer, send feed, redacted export, bottom-dock panel.
-- **environment_picker** (new; S34a, S34b, S34w): picker that persists the active environment; quick-look that masks secrets.
-- **history_panel** (new; S35a–d, S35w, S33o): list, open, delete/clear, live refresh. History tabs get a fresh id (`918d534`).
-- **http_engine**: `SendOutcome` carries the sent request (S32b); auto-header disable (S27d); the order of cancel and the history row (S33o); macOS TLS name-mismatch reason (`89c7df0`); a query param already in the URL is sent once (`33c412c`).
-- **workspace_store**: on macOS the watcher canonicalizes its root (`89c7df0`). **workspace**: `restore` saves only the first tab per id (`918d534`).
-- **pustman binary**: wires the editor, viewer, console, environment picker, history panel and history recording (S33w), plus one app cookie jar loaded and saved through the store (S33p). App icon (`5868102`).
-- **integration_tests** (new; S37): end-to-end redaction proof. **Harness**: cleanup script, the 3-core cargo cap (`.cargo/config.toml`), verify-script diagnostics (`8caa86a`, `0ab0bf3`).
+- **request_editor / response_viewer / console / environment_picker / history_panel** (new; S26a–S36b, S33e/n/o/p): unchanged from the prior brief (Appendix). New since: History rows can be deleted and cleared (R4 `5ae1c05`); each tab sends and cancels on its own, and auth problems warn (R2 `e77627e`); Manage Cookies confirms a domain Clear, and its saves survive closing (R3 `ade193e`).
+- **api_model**: `redact` also masks percent-, form- and JSON-encoded forms of each secret; adds `percent-encoding`, `url` (R1 `522621c`).
+- **http_engine**: `prepare` registers Auth-tab Bearer/API-key values as secrets (R1); one pending send per `SendOwner` (`client.rs:140`) (R2); `save_jar_latest` serializes every cookie-jar writer under the store lock (`84803b5`, #287). Earlier: S32b, S27d, S33o, `89c7df0`, `33c412c`.
+- **pustman binary**: wiring (S33w, S33p); its cookie save chain now goes through `save_jar_latest` (`84803b5`). **integration_tests**: S37 plus `redaction_encoded_forms` (R1). **docs**: `docs/ARCHITECTURE.md` corrected (`682ab32`).
 
 ## 3. Deploy deltas
 | Step | Type | What | Status |
 |---|---|---|---|
-| app-icon (`5868102`) | scripted | `scripts/install-desktop-entry.sh`: per-user Linux desktop entry and icons | applied (build host, 2026-11-20; prose in `DEPLOY_DELTAS.md`, no captured output) |
+| app-icon (`5868102`) | scripted | `scripts/install-desktop-entry.sh` | applied (build host 2026-11-20, `desktop-file-validate` clean; prose only) |
 
-All 47 step records say `Deploy delta: none`, and so does S38. `.cargo/config.toml` (jobs = 3) is repo config and applies by itself. **Pending: 0. Manual: 0.**
+All 47 step records and S38 say `Deploy delta: none`. R1–R4 and `84803b5` declare none (no record; commit bodies). **Pending: 0. Manual: 0.**
 
 ## 4. Decisions workers made
-- **S38**: the human gave M1 GO on headless evidence (Xvfb + lavapipe, a pi worker) and deferred the Linux and macOS smoke to this tag ([S38](../progress/pustman-v1/steps/S38.md)). The driver ruled that the pi worker could not record the GO itself (log.md:268).
-- **S33e**: the M1 app has no variable source until S41/S43. AC1's `{{base}}` resolution is proven only by `pipeline_tests::` ([S33e](../progress/pustman-v1/steps/S33e.md)).
-- **S33p**: the driver finished the build after a content-filter block and a timeout. Cookies loaded at startup replace any captured earlier. The dialog's own `save_jar` is still off the save chain, so it can race other saves (#287, open; `cookie_dialog.rs:421`) ([S33p](../progress/pustman-v1/steps/S33p.md)).
-- **S33o**: the driver extended the edit set into `http_engine/src/client.rs`. `history_panel` now depends on `console`, a UI→UI dependency. Review 1's HIGH was a Verify filter the driver wrote wrong.
-- **S33a**: a MEDIUM was closed by amending the edit set, with no fix cycle. **S27d**: the driver accepted `#[allow(clippy::large_enum_variant)]` in `api_model` and `workspace_store`.
-- **`affc474`** (human-authored fix): it rewrote the read-only `history_panel/src/open_entry_tests.rs` "through the shell" because the test asserted the removed two-tab behaviour (log.md:251). **`a193c5c`** edits the read-only `reqwest_transport_tests.rs` (+3 lines). These are the only two edits to existing test files in the window.
-- **LOW remediation** was stopped by the human at 52 of 85 lanes. The 92 LOW findings from its reviewers became umbrella issues #271–#285, not one issue per finding (log.md:267).
+- **S38**: M1 GO on headless evidence; Linux/macOS smoke deferred to this tag ([S38](../progress/pustman-v1/steps/S38.md)). **S33e**: `{{base}}` resolution proven only by `pipeline_tests::`. **S33o**: edit set extended into `http_engine/src/client.rs`. **S33a/S27d**: see Appendix.
+- **Human, R3**: chose a confirm over undo for domain Clear (log.md:260). **R1**: accepted that `\uXXXX` and double-JSON-escaped secrets stay unmasked, and that a short Auth value (e.g. `test`) over-masks bodies (#288). **R2**: same-tab resend still replaces its send (REQ-HTTP-12); closing a tab cancels its send.
+- **Existing tests modified (human-authorized)**: `a193c5c` `crates/http_engine/src/reqwest_transport_tests.rs` (+3: `.no_proxy()`, #269, log.md:229); `ade193e` `crates/response_viewer/src/cookie_dialog_clear_domain_tests.rs` (+9: the `clear_domain` helper confirms; no assertion changed; log.md:260). Both are promote-check item-4 exceptions. Also `affc474` rewrote the window-born `open_entry_tests.rs` (log.md:238).
 
 ## 5. Risk flags
-**Flag rate = 22/47 = 47% > 20%, so NOT PROMOTABLE until the flag rules tighten or the human rules again (as for -1 and -2).** The denominator is the 47 `S<N>:` squash commits. S38 (no code) and the remediation lanes are excluded. Adding the 16 `fix:` commits, of which 3 are flagged, gives 25/63 = 40%. Per-step reasons are in the Appendix.
-- **Secrets / redaction:** S28b, S30e, S31b, S32a, S32b, S32c, S33c, S33e, S34b, S37.
-- **Persistence:** S27d, S33w, S33o, S33p, S34a, S34w, S36b. **Deletes:** S35c, S35w, S36a. **TLS:** S28c. **Untrusted import:** S27c (pasted cURL).
-- `fix:` commits: `89c7df0` (TLS, watcher), `a193c5c` (TLS test), `918d534` (tab persistence).
+**Flag rate = 27/52 = 52% > 20%.** Method as before: denominator = 47 `S<N>:` steps, now plus the plan/fix steps R1–R4 and `84803b5` (S38, remediation lanes and `docs:` excluded). Flagged: 22 S-steps (Appendix) + R1 (secrets/redaction), R2 (auth, send/cancel ownership; my call), R3 (deletes, persistence), R4 (deletes) + `84803b5` (persistence). Adding the other 16 `fix:` commits (3 flagged): **30/68 = 44%**.
 
-**Deep-read first:** S33p, S33e, S33o, S37 + S32b/S32c, S35c + S36a, S28c, `affc474`.
+### Review fixes (independent deep-read reviews, log.md:259–261)
+| Review | Found | Fixed by |
+|---|---|---|
+| Redaction | HIGH encoded secret forms leak to Console, history, export; MEDIUM Auth-tab values not registered; MEDIUM S37 can't catch either | R1 `522621c` (+8 tests) |
+| Send pipeline | MEDIUM one global `HttpClient`: a tab's send cancels another's; MEDIUM unresolved auth vars unwarned; MEDIUM incomplete/unsupported auth silent; TLS opt-out clean | R2 `e77627e` (+5 test files) |
+| Deletes | MEDIUM cookie Clear-domain has no confirm; MEDIUM History delete/clear never wired (REQ-HIST-04 unmet) | R3 `ade193e`, R4 `5ae1c05` |
+| S33o + `affc474` | PASS_WITH_ISSUES (LOWs) | → #288 |
+| S33p LOWs (#287) | dialog saves off the chain; stale first load | `84803b5` |
+
+**Deep-read first:** R2 `e77627e`, R1 `522621c`, `84803b5`, R3 `ade193e`, S33p `475bee6`.
 
 ## 6. 10-minute manual test
-Linux: `cargo build --release -p pustman`, then `./target/release/pustman`. macOS: `scripts/bundle-macos.sh`, then smoke `target/release/Pustman.app`.
-1. **Send.** Ctrl/Cmd+T opens a request. POST JSON `{"name":"x"}` to an echo server. Check the status line, the Pretty body and the Console row. Esc mid-send shows "Cancelled".
-2. **TLS.** Send to a self-signed host: a TLS error appears. "Disable verification for this request" re-sends and shows the badge, and other tabs stay verified.
-3. **Cookies.** Send to a server that sets a cookie: it shows in the Cookies tab and in Manage Cookies. Quit and relaunch: the cookie is still there, and the next send carries it. Delete it.
-4. **History.** The send appears without reopening the panel. Open it: exactly one tab. Delete one entry, then Clear; Cancel must leave history untouched. Quit and relaunch with no "could not be saved" toast.
-5. **Secrets.** Put `Authorization: Bearer abc123` in Headers and send. The Console detail and the Timeline "request as sent" must mask it.
-6. **Layout.** Check the Timeline, the Settings-tab number inputs, header-row checkboxes and console rows (#199–#202 are still open on the tracker).
+Linux: `cargo build --release -p pustman`, `./target/release/pustman`. macOS: `scripts/bundle-macos.sh`, smoke `target/release/Pustman.app`.
+1. **Send/cancel per tab.** Two tabs to a slow server; send both. Cancel in tab A: tab B completes. Close a sending tab: its send stops.
+2. **TLS.** Self-signed host errors; "Disable verification" re-sends with the badge; other tabs stay verified.
+3. **Secrets.** Bearer `ab c/1` in Auth, also in a query param. Console raw, Timeline, History row and export show no `ab%20c%2F1`/`ab+c` form.
+4. **Auth warnings.** Bearer `{{missing}}` warns before send and in the Console; empty API key warns.
+5. **Cookies.** Cookie set, survives relaunch, sent next time. Manage Cookies → Clear domain: confirm names domain and count; Escape cancels.
+6. **History.** Live row; delete one row (button, Shift+Delete / Cmd+Backspace); Clear all, Cancel keeps rows; relaunch, no save toast.
 
 ## 7. Not verified
-1. **No Linux or macOS manual smoke of the release build has run.** S38 defers it to this tag.
-2. **The S38 evidence was headless (Xvfb + lavapipe in a cloud container), not on macOS.** All macOS checks, visual judgement and keyboard-only reach of Max redirects were "not verifiable here" (log.md:269). `scripts/bundle-macos.sh` has never run on a macOS host (log.md:174).
-3. **CI has no run for `475bee6` or `924e953`**, because Actions was disabled at the time ([S38](../progress/pustman-v1/steps/S38.md)). For the candidate, run 45146195659 was still `in_progress` on both jobs when this brief was written. The last green macOS run in the window is on `396395c`. 2 macOS flakes of `watcher::git_dir_changes_ignored` have no known cause.
-4. **Single driver or orchestrator review only:** S26w (in-driver review), S33c review 2 (scoped, driver), the S33p build (finished by the driver). The `.reports/*-review*.md` files that the records cite are not in this checkout, so the brief writer could not read the reviews themselves.
-5. **Verify runs that did not complete cleanly:** after the S30c merge, verify stopped in the test stage. A direct `cargo test --workspace` re-run replaced it, with no `VERIFY OK` line. After the S28b merge, the first run exited 1 and a re-run passed.
-6. **Thin review evidence:** the S35b record names no Verify command. The S37 and S30d records show probes but no Verify re-run.
-7. **No step record or review exists for the 16 `fix:` commits or for `5868102`/`222c810`.** Their red/green claims come from log prose only. The 52 remediation lanes have no step records; per log.md:267 each lane got a pi review.
-8. **Shown only in tests or screenshots:** S33o's live refresh and keyboard scrolling of the Timeline ([S33o](../progress/pustman-v1/steps/S33o.md)); `{{var}}` resolution in the running app (S33e).
-9. **Tracker and docs disagree with the code.** #199–#202 are open although S33n, S33o and `c4be074` claim the fixes. `origin/pustman-v1/main` is at `682ab32`, one commit ahead of the candidate, and that commit corrects `docs/ARCHITECTURE.md`, so the candidate's copy is stale.
-10. **Not re-run by the brief writer:** the full `scripts/pustman-v1-verify.sh` and the release build at `9e1d8c3`.
+1. **No Linux or macOS manual smoke of the release build has run** (S38 defers it to this tag); the release build at `430c86f` was not built by the brief writer.
+2. **S38 evidence was headless** (Xvfb + lavapipe, cloud container): macOS, visual judgement, keyboard reach of Max redirects "not verifiable here" (log.md:256). `bundle-macos.sh` never ran on macOS (log.md:174).
+3. **No CI run for `475bee6`/`924e953`** (Actions disabled). CI at `430c86f`: run 45158916827 `in_progress` on both jobs when written. `9e1d8c3` green (run 45146195659). 2 unexplained macOS flakes of `watcher::git_dir_changes_ignored`.
+4. **R1–R4 have no display or E2E check; GPUI tests only.** None has a step record: review verdicts come from commit bodies and log.md:260–261, and `.reports/` is not in this checkout. R2's final verdict after CHANGES_REQUESTED is not stated. `84803b5` had no independent review (driver RED→GREEN claim only).
+5. Older gaps unchanged (Appendix): single-reviewer steps, incomplete verify runs, thin S35b/S37/S30d evidence, no records for 17 `fix:` commits.
+
+**Open follow-ups:** #288 (R1–R4 LOWs: lost auth warnings on transport failure, `is_sending` scope, unbindable History keys, non-transactional cookie writes); #271–#285 and batches #241–#263 (human-only items #106/#107/#116/#151/#195/#236 are closed into those umbrellas; #208's redirect wording is closed as superseded by open #256); medium #31; #20.
 
 ---
 
 ## Appendix
-**Flag reasons.**
-- S27c: pasted cURL replaces the request.
-- S27d: adds a persisted `RequestSettings` field.
-- S28b: auth secrets (#178, now closed).
-- S28c: per-request TLS-off and re-send.
-- S30e: a `Set-Cookie` leak through `Debug` (MEDIUM, fixed).
-- S31b: masks `Authorization`.
-- S32a: the `Debug` URL leak (#108).
-- S32b: redacted wire text and `refused_count`. This closes the S3 CARRY-FORWARD at `crates/console/src/feed.rs:62`.
-- S32c: export re-redaction.
-- S33c: keychain reads.
-- S33e: auth, secrets and history now live.
-- S33w: history writes.
-- S33o: history-row ordering.
-- S33p: the cookie jar is persisted.
-- S34a: kv write.
-- S34b: secret reveal.
-- S34w: makes S34a live.
-- S35c: delete/clear.
-- S35w: wires the deletes.
-- S36a: cookie delete.
-- S36b: `save_jar`.
-- S37: redaction NFR.
+**Flag reasons (S-steps).** S27c cURL replaces request; S27d persisted `RequestSettings`; S28b auth secrets; S28c TLS-off; S30e `Set-Cookie` `Debug` leak; S31b masks `Authorization`; S32a `Debug` URL leak (#108); S32b redacted wire text, `refused_count` (closes S3 CARRY-FORWARD, `crates/console/src/feed.rs`); S32c export re-redaction; S33c keychain reads; S33e auth/secrets/history live; S33w history writes; S33o history-row order; S33p cookie jar persisted; S34a kv write; S34b secret reveal; S34w; S35c delete/clear; S35w wires deletes; S36a cookie delete; S36b `save_jar`; S37 redaction NFR. Flagged prior `fix:` commits: `89c7df0`, `a193c5c`, `918d534`.
 
-**Remediation lanes touching risky areas** (not in the rate): `90ec5a4` sd (console feed and `client.rs`, the secret-URL redaction fix cycle). Storage: `04fb616`, `f9d5353`. History: `d862e93`, `6e0f900`. Deletes: `2521efb`. Cookies: `10939d3`, `b9127b2`, `aefa93f`. cURL: `c4a2da1`, `e11b3ae`.
+**Prior decisions.** S33a: a MEDIUM closed by amending the edit set. S27d: `#[allow(clippy::large_enum_variant)]` accepted. S33o: `history_panel` depends on `console` (UI→UI). LOW remediation stopped at 52/85 lanes; 92 reviewer LOWs filed as umbrellas #271–#285 (log.md:254).
 
-**Other non-step commits.** `5868102`, `c31e3b5`, `774b97c`, `7688dc2`, `dabaedc`, `222c810`, `0a87f87`, `8a9b913`, `a5fcbbb`, `40deef7` (merge).
+**Prior Not-verified detail.** Single driver/orchestrator review: S26w, S33c review 2, S33p build. S30c verify cut off (direct `cargo test` re-run); S28b first verify exit 1. S35b names no Verify; S37/S30d no Verify re-run. No records for `fix:` commits, `5868102`, `222c810`; 52 remediation lanes have no records.
 
-**Tests.** 194 test files were added. One pre-existing test file was modified (`reqwest_transport_tests.rs`), and `affc474` changed one test file that was born in the window. No test file was deleted.
+**Other non-step commits.** `5868102`, `c31e3b5`, `774b97c`, `7688dc2`, `dabaedc`, `222c810`, `0a87f87`, `8a9b913`, `a5fcbbb`, `40deef7` (merge), `5bbcb69` (prior brief), `682ab32`.
 
-**Open `medium` issues:** #31, #199, #200, #201, #202.
+**Tests.** 206 test files added (12 since `9e1d8c3`). Pre-existing files modified: 1 (`reqwest_transport_tests.rs`). Window-born files later modified: `cookie_dialog_clear_domain_tests.rs` (born `b9127b2`, edited R3), `open_entry_tests.rs` (`affc474`). None deleted.
