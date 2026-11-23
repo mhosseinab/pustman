@@ -1,5 +1,6 @@
 //! The GPUI entity that owns an in-flight send (PRD REQ-HTTP-12).
 
+use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::path::PathBuf;
@@ -7,7 +8,7 @@ use std::sync::Arc;
 
 use api_model::{Auth, HttpRequest, Method, SecretValues};
 use futures::channel::oneshot;
-use gpui::{AppContext, Context, EventEmitter, Task};
+use gpui::{AppContext, Context, EntityId, EventEmitter, Task};
 use secrets::{SecretKey, SecretStore};
 use variables::{DynamicValues, ScopeKind, ScopeStack};
 
@@ -132,25 +133,62 @@ impl PartialEq for SendEvent {
 
 impl EventEmitter<SendEvent> for HttpClient {}
 
-/// Owns the request in flight.
+/// Whose send it is: a new send replaces — and so cancels — only its own owner's previous
+/// send, and a cancel drops only its own owner's (REQ-HTTP-12). Two request tabs sharing
+/// the app's one client are two owners, so one tab's send never cancels another's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SendOwner {
+    /// The owner of [`HttpClient::send`], [`HttpClient::send_request`] and
+    /// [`HttpClient::cancel`]: callers that never name themselves share this one slot.
+    Shared,
+    /// A send owned by one entity: a request tab names itself by its entity id.
+    Entity(EntityId),
+}
+
+impl From<EntityId> for SendOwner {
+    fn from(entity: EntityId) -> Self {
+        Self::Entity(entity)
+    }
+}
+
+/// One owner's send in flight.
+struct PendingSend {
+    /// The send's work. One that already finished stays until its owner's next send or
+    /// cancel replaces it; [`PendingSend::is_running`] tells whether it still runs.
+    task: Task<()>,
+    /// The history row the send leaves when it ends before its own work can record it
+    /// (PRD REQ-HIST-01: every send is recorded). `None` for a send that records nothing.
+    history: Option<Arc<HistoryDraft>>,
+    /// Which send it is: what the [`SendEvent`] naming it carries when the send is
+    /// dropped (REQ-HTTP-12).
+    identity: SendIdentity,
+}
+
+impl PendingSend {
+    fn is_running(&self) -> bool {
+        !self.task.is_ready()
+    }
+}
+
+/// Owns the requests in flight, one per [`SendOwner`].
 ///
-/// The task lives here, so dropping it is a deliberate act and never an accident:
-/// [`HttpClient::cancel`] drops it — which aborts the connection — and a new
-/// [`HttpClient::send`] drops the one before it. What a send produces comes back on the
-/// task [`HttpClient::send`] returns.
+/// The tasks live here, so dropping one is a deliberate act and never an accident:
+/// [`HttpClient::cancel_as`] drops its owner's — which aborts the connection — and a new
+/// send from the same owner drops the one before it. Other owners' sends are untouched.
+/// What a send produces comes back on the task the send method returns.
+///
+/// `Decision:` one client keeps one pending send per owner rather than one client entity
+/// per tab: the app's single client already carries the history recorder, the workspace
+/// root and the Console's `watch` subscription, and per-tab clients would each need all
+/// three wired. The owner key keeps "a new send in the same tab replaces the previous
+/// one" exact while tabs stay independent.
 pub struct HttpClient {
     transport: Arc<dyn Transport>,
-    /// The send in flight. One that already finished leaves its task here until the next
-    /// `send` or `cancel` replaces it; [`HttpClient::is_sending`] reports whether it is
-    /// still running.
-    pending_send: Option<Task<()>>,
-    /// The history row the in-flight [`HttpClient::send_request`] leaves when it ends
-    /// before its own work can record it (PRD REQ-HIST-01: every send is recorded).
-    /// `None` for a send that records nothing.
-    pending_history: Option<Arc<HistoryDraft>>,
-    /// Which send is in flight: what the [`SendEvent`] naming it carries when the send
-    /// is dropped (REQ-HTTP-12). `None` when no send is pending.
-    pending_identity: Option<SendIdentity>,
+    /// The [`SendOwner::Shared`] send in flight.
+    pending_send: Option<PendingSend>,
+    /// Every [`SendOwner::Entity`] send, by owner. Finished entries are pruned on the
+    /// next send, so a closed tab leaves nothing behind for long.
+    owned_sends: HashMap<EntityId, PendingSend>,
     /// The root [`send_request`] resolves body file references against (REQ-HTTP-05).
     /// `None` keeps them as they are, which is what [`HttpClient::send`] does too.
     workspace_root: Option<PathBuf>,
@@ -165,8 +203,7 @@ impl HttpClient {
         Self {
             transport,
             pending_send: None,
-            pending_history: None,
-            pending_identity: None,
+            owned_sends: HashMap::new(),
             workspace_root: None,
             history: None,
         }
@@ -185,14 +222,43 @@ impl HttpClient {
         self.history = Some(recorder);
     }
 
-    /// Whether a send is still in flight.
+    /// Whether any owner's send is still in flight.
     pub fn is_sending(&self) -> bool {
         self.pending_send
             .as_ref()
-            .is_some_and(|task| !task.is_ready())
+            .is_some_and(PendingSend::is_running)
+            || self.owned_sends.values().any(PendingSend::is_running)
     }
 
-    /// Send `request`, replacing — and so cancelling — any send still in flight.
+    /// Whether `owner`'s send is still in flight.
+    pub fn is_sending_as(&self, owner: SendOwner) -> bool {
+        let pending = match owner {
+            SendOwner::Shared => self.pending_send.as_ref(),
+            SendOwner::Entity(entity) => self.owned_sends.get(&entity),
+        };
+        pending.is_some_and(PendingSend::is_running)
+    }
+
+    /// Take `owner`'s pending send out of its slot, leaving the slot empty.
+    fn take_pending(&mut self, owner: SendOwner) -> Option<PendingSend> {
+        match owner {
+            SendOwner::Shared => self.pending_send.take(),
+            SendOwner::Entity(entity) => self.owned_sends.remove(&entity),
+        }
+    }
+
+    /// Put `pending` in `owner`'s slot.
+    fn put_pending(&mut self, owner: SendOwner, pending: PendingSend) {
+        match owner {
+            SendOwner::Shared => self.pending_send = Some(pending),
+            SendOwner::Entity(entity) => {
+                self.owned_sends.insert(entity, pending);
+            }
+        }
+    }
+
+    /// Send `request` as [`SendOwner::Shared`], replacing — and so cancelling — that
+    /// owner's send still in flight.
     ///
     /// Dropping the returned task does not cancel the request: the request belongs to
     /// this entity until it finishes or [`HttpClient::cancel`] drops it. The task resolves
@@ -214,14 +280,26 @@ impl HttpClient {
         let transport = self.transport.clone();
         self.drive_send(
             cx,
+            SendOwner::Shared,
             identity,
+            None,
             move || transport.send(request),
             Err(TransportError::Cancelled),
         )
     }
 
-    /// Prepare `input` — secrets, `{{variables}}`, auth — and send it, replacing — and so
-    /// cancelling — any send still in flight.
+    /// [`HttpClient::send_request_as`] for [`SendOwner::Shared`].
+    pub fn send_request(
+        &mut self,
+        input: SendInput,
+        cx: &mut Context<HttpClient>,
+    ) -> Task<Result<SendOutcome, PipelineError>> {
+        self.send_request_as(SendOwner::Shared, input, cx)
+    }
+
+    /// Prepare `input` — secrets, `{{variables}}`, auth — and send it as `owner`,
+    /// replacing — and so cancelling — `owner`'s send still in flight. Other owners'
+    /// sends keep running.
     ///
     /// Preparation reads the OS keychain, which is blocking IO: it runs on the background
     /// executor, never on the foreground, and the transport is called only afterwards. A
@@ -234,8 +312,9 @@ impl HttpClient {
     ///
     /// Dropping the returned task does not cancel the send and nothing is retried, exactly
     /// as for [`HttpClient::send`].
-    pub fn send_request(
+    pub fn send_request_as(
         &mut self,
+        owner: SendOwner,
         input: SendInput,
         cx: &mut Context<HttpClient>,
     ) -> Task<Result<SendOutcome, PipelineError>> {
@@ -254,9 +333,11 @@ impl HttpClient {
         // The send's work and this entity share the one draft (an `Arc`): its gate keeps
         // the send to one row however the two writers race.
         let recorded = draft.clone();
-        let task = self.drive_send(
+        self.drive_send(
             cx,
+            owner,
             identity,
+            draft,
             move || async move {
                 let SendInput {
                     request,
@@ -334,22 +415,22 @@ impl HttpClient {
                 }
             },
             Err(PipelineError::Transport(TransportError::Cancelled)),
-        );
-        // Set alongside the new pending task, after `drive_send` recorded the send it
-        // replaced (a replaced send is a cancellation).
-        self.pending_history = draft;
-        task
+        )
     }
 
-    /// The one cancel/replace/oneshot pipeline behind both send shapes: cancel the send in
-    /// flight (emitting [`SendEvent::Cancelled`]), build the work through `make_work` —
+    /// The one cancel/replace/oneshot pipeline behind both send shapes: cancel `owner`'s
+    /// send in flight and no one else's (emitting [`SendEvent::Cancelled`]), keep the new
+    /// one in `owner`'s slot with its history row `history`, build the work through
+    /// `make_work` —
     /// which lets [`HttpClient::send`] record its request only once the previous send is
     /// gone — run it on the background executor, and hand the caller a task that resolves
     /// with the outcome or `cancelled` once this entity drops the send.
     fn drive_send<T, Work, MakeWork>(
         &mut self,
         cx: &mut Context<HttpClient>,
+        owner: SendOwner,
         identity: SendIdentity,
+        history: Option<Arc<HistoryDraft>>,
         make_work: MakeWork,
         cancelled: T,
     ) -> Task<T>
@@ -358,23 +439,38 @@ impl HttpClient {
         Work: Future<Output = T> + Send + 'static,
         MakeWork: FnOnce() -> Work,
     {
-        self.cancel_pending(cx);
-        self.pending_identity = Some(identity);
+        self.cancel_pending(owner, cx);
+        // A finished send of a tab that has since closed would otherwise stay forever.
+        self.owned_sends.retain(|_, pending| pending.is_running());
         let work = make_work();
         let (sender, receiver) = oneshot::channel();
-        self.pending_send = Some(cx.background_spawn(async move {
+        let task = cx.background_spawn(async move {
             let outcome = work.await;
             if sender.send(outcome).is_err() {
                 // The caller dropped the task it was handed; nobody wants the outcome.
             }
-        }));
+        });
+        self.put_pending(
+            owner,
+            PendingSend {
+                task,
+                history,
+                identity,
+            },
+        );
         cx.background_spawn(async move { receiver.await.unwrap_or(cancelled) })
     }
 
-    /// Drop the in-flight send, which aborts its connection, and leave nothing pending
-    /// (REQ-HTTP-12). A send that already finished is not reported as cancelled.
+    /// [`HttpClient::cancel_as`] for [`SendOwner::Shared`].
     pub fn cancel(&mut self, cx: &mut Context<HttpClient>) {
-        self.cancel_pending(cx);
+        self.cancel_pending(SendOwner::Shared, cx);
+    }
+
+    /// Drop `owner`'s send in flight, which aborts its connection, and leave nothing
+    /// pending for it (REQ-HTTP-12). Other owners' sends keep running. A send that
+    /// already finished is not reported as cancelled.
+    pub fn cancel_as(&mut self, owner: SendOwner, cx: &mut Context<HttpClient>) {
+        self.cancel_pending(owner, cx);
     }
 
     /// Drop the in-flight task and tell subscribers it is gone, with the event naming
@@ -382,11 +478,19 @@ impl HttpClient {
     /// emitted only after that row is stored: the Console entry it becomes and the
     /// History panel's re-read of the database run on this event (S33o), and neither may
     /// land before the row exists.
-    fn cancel_pending(&mut self, cx: &mut Context<HttpClient>) {
-        let was_sending = self.is_sending();
-        self.pending_send = None;
-        let draft = self.pending_history.take();
-        let send = self.pending_identity.take();
+    fn cancel_pending(&mut self, owner: SendOwner, cx: &mut Context<HttpClient>) {
+        let Some(PendingSend {
+            task,
+            history: draft,
+            identity,
+        }) = self.take_pending(owner)
+        else {
+            return;
+        };
+        let was_sending = !task.is_ready();
+        // Dropping the task cancels the send, which aborts its connection.
+        drop(task);
+        let send = Some(identity);
         // The dropped task can no longer record its own row, so the cancelled row is
         // written on a background task of its own (REQ-HIST-01 records every send) and
         // the event follows it — never blocking the foreground on SQLite.
@@ -419,3 +523,7 @@ mod cancel_order_tests;
 #[cfg(test)]
 #[path = "send_identity_tests.rs"]
 mod send_identity_tests;
+
+#[cfg(test)]
+#[path = "concurrent_send_tests.rs"]
+mod concurrent_send_tests;

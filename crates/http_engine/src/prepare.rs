@@ -74,10 +74,7 @@ pub fn prepare(
     secret_key: &dyn Fn(ScopeKind, &str) -> Option<SecretKey>,
     dynamic: &mut DynamicValues,
 ) -> Result<Prepared, PipelineError> {
-    let chain: Vec<&Auth> = std::iter::once(&request.auth)
-        .chain(ancestors.iter().copied())
-        .collect();
-    let (effective, _source) = effective_auth(&chain);
+    let effective = effective_auth_of(request, ancestors);
     let auth_templates = auth_field_templates(&effective);
 
     let mut references = ReferencedSecrets::new(scopes, secrets, secret_key);
@@ -127,15 +124,11 @@ pub fn prepare(
     // caller's `ScopeStack` has no insert API, and a rebuilt stack is the only way to put
     // a fetched secret value where `find` will resolve it without touching `variables`.
     let stack = scopes_with_secrets(scopes, &secrets_fetched);
-    let (mut resolved, warnings) = resolve_request(request, &stack, dynamic)?;
-    // The auth fields resolve against the same stack and the same `DynamicValues`, so one
-    // `{{$guid}}` keeps one value across the request and its auth (REQ-VAR-05). They are
-    // resolved here rather than in the closure below because that closure cannot carry a
-    // `ResolveError`: a cycle in an auth field fails the send like one in any other field.
-    let mut auth_texts = BTreeMap::new();
-    for template in &auth_templates {
-        auth_texts.insert(template.clone(), resolve(template, &stack, dynamic)?.text);
-    }
+    let ResolvedWithAuth {
+        mut resolved,
+        mut warnings,
+        auth_texts,
+    } = resolve_with_auth(request, &auth_templates, &stack, dynamic)?;
     let auth = apply_auth(&mut resolved, &request.auth, ancestors, |template| {
         auth_texts
             .get(template)
@@ -145,6 +138,8 @@ pub fn prepare(
             // placeholder text in a credential.
             .unwrap_or_default()
     });
+    // An auth that added no credential is told, never sent silently (REQ-HTTP-06).
+    warnings.extend(Warning::for_auth(&auth));
     // The body mode's own headers are listed last: auth has added every header the user
     // did not type, and a user header of the same name wins over an auto one.
     resolved.auto_headers = body::auto_headers(
@@ -204,6 +199,76 @@ pub fn prepare(
         warnings,
         auth,
         secrets_used,
+    })
+}
+
+/// The warnings a send of `request` would carry before any secret is read: the request's
+/// own — [`resolve_request`]'s — with the effective auth's unresolved `{{names}}` added to
+/// its [`Warning::UnresolvedVariables`] (REQ-VAR-07). The pre-send check runs this so it
+/// sees exactly the names [`prepare`] sees; `ancestors` are the request's parents' auths,
+/// nearest first, as [`prepare`] takes them. No auth is applied and nothing is read from
+/// the keychain, so an incomplete or unsupported auth is reported by the send itself.
+///
+/// # Errors
+///
+/// What [`resolve_request`] fails with, and a variable cycle in an auth field.
+pub fn presend_warnings(
+    request: &HttpRequest,
+    ancestors: &[&Auth],
+    scopes: &ScopeStack,
+    dynamic: &mut DynamicValues,
+) -> Result<Vec<Warning>, PipelineError> {
+    let effective = effective_auth_of(request, ancestors);
+    let resolved = resolve_with_auth(request, &auth_field_templates(&effective), scopes, dynamic)?;
+    Ok(resolved.warnings)
+}
+
+/// The auth a send of `request` ends up using: its own, or the nearest ancestor's
+/// through [`Auth::Inherit`] — the chain `apply_auth` walks too.
+fn effective_auth_of(request: &HttpRequest, ancestors: &[&Auth]) -> EffectiveAuth {
+    let chain: Vec<&Auth> = std::iter::once(&request.auth)
+        .chain(ancestors.iter().copied())
+        .collect();
+    let (effective, _source) = effective_auth(&chain);
+    effective
+}
+
+/// What [`resolve_with_auth`] produced.
+struct ResolvedWithAuth {
+    /// The request with every field resolved; auth not applied yet.
+    resolved: ResolvedRequest,
+    /// The request's warnings, the auth fields' unresolved names included.
+    warnings: Vec<Warning>,
+    /// Each auth field template's resolved text, for [`apply_auth`].
+    auth_texts: BTreeMap<String, String>,
+}
+
+/// [`resolve_request`] plus the auth field templates, against one stack and one
+/// [`DynamicValues`] so a `{{$guid}}` keeps one value across the request and its auth
+/// (REQ-VAR-05). The auth fields resolve here rather than inside `apply_auth`'s closure
+/// because that closure cannot carry a `ResolveError`: a cycle in an auth field fails
+/// the send like one in any other field. Their unresolved names join the request's
+/// [`Warning::UnresolvedVariables`] (REQ-VAR-07): an auth placeholder never goes out
+/// unannounced.
+fn resolve_with_auth(
+    request: &HttpRequest,
+    auth_templates: &[String],
+    stack: &ScopeStack,
+    dynamic: &mut DynamicValues,
+) -> Result<ResolvedWithAuth, PipelineError> {
+    let (resolved, mut warnings) = resolve_request(request, stack, dynamic)?;
+    let mut auth_texts = BTreeMap::new();
+    let mut unresolved = Vec::new();
+    for template in auth_templates {
+        let auth = resolve(template, stack, dynamic)?;
+        unresolved.extend(auth.unresolved);
+        auth_texts.insert(template.clone(), auth.text);
+    }
+    Warning::add_unresolved(&mut warnings, unresolved);
+    Ok(ResolvedWithAuth {
+        resolved,
+        warnings,
+        auth_texts,
     })
 }
 
@@ -369,3 +434,7 @@ mod tests;
 #[cfg(test)]
 #[path = "prepare_disabled_auto_tests.rs"]
 mod disabled_auto_tests;
+
+#[cfg(test)]
+#[path = "prepare_auth_warning_tests.rs"]
+mod auth_warning_tests;

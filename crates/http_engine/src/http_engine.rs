@@ -38,14 +38,16 @@ mod test_server;
 mod test_support;
 mod transport;
 
-pub use client::{HttpClient, SecretKeyLookup, SendEvent, SendIdentity, SendInput, SendOutcome};
+pub use client::{
+    HttpClient, SecretKeyLookup, SendEvent, SendIdentity, SendInput, SendOutcome, SendOwner,
+};
 pub use cookie_persistence::{load_jar, save_jar, save_jar_latest};
 pub use cookies::{CookieEntry, CookieError, CookieJar};
 pub use error::TransportError;
 pub use file_ref::resolve_file_ref;
 pub use history::{HISTORY_BODY_LIMIT, HistoryDraft, HistoryRecorder};
 pub use pipeline::{PipelineError, Warning, resolve_request};
-pub use prepare::{Prepared, prepare};
+pub use prepare::{Prepared, prepare, presend_warnings};
 pub use request::{
     Header, MultipartField, MultipartValue, RequestBody, ResolvedRequest, SendSettings,
 };

@@ -110,18 +110,11 @@ pub fn record_error(request: Option<&HttpRequest>, error: &PipelineError, cx: &m
     );
 }
 
-/// What one [`Warning`] says to the user: names only, never the values they failed to
-/// resolve (REQ-VAR-07), and the TLS state verbatim (REQ-HTTP-10). One wording for every
-/// entry that carries a warning, finished send or failed.
+/// What one [`Warning`] says to the user: [`Warning::user_message`], the one wording for
+/// every entry that carries a warning, finished send or failed, and for the editor's own
+/// hint.
 fn warning_message(warning: &Warning) -> String {
-    match warning {
-        Warning::UnresolvedVariables(names) => {
-            format!("Unresolved variables: {}", names.join(", "))
-        }
-        Warning::TlsVerifyDisabled => {
-            "TLS certificate verification is disabled for this request.".to_string()
-        }
-    }
+    warning.user_message()
 }
 
 /// Record the warnings a failed send carried (REQ-VAR-07) as one Warning entry per

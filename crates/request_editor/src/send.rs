@@ -26,6 +26,12 @@
 //! beside Send for as long as the override is on. No global setting is ever changed
 //! from here.
 //!
+//! Every tab sends as its own [`SendOwner`] — its entity id — so a send replaces only
+//! this tab's previous send and a cancel drops only this tab's: two tabs sending at once
+//! each get their own response (REQ-HTTP-12). A send whose auth added no credential —
+//! incomplete or unsupported (REQ-HTTP-06) — shows a hint under the URL row
+//! (`auth_warning`), and its warning reaches the Console with the outcome.
+//!
 //! `Decision:` the editor sends through the [`RequestClient`] global instead of holding
 //! a client of its own: `new_request`'s app-level handler constructs `RequestEditor` and
 //! has no transport to build a client from, and this step's Edits list keeps
@@ -36,12 +42,12 @@
 
 use std::time::Duration;
 
-use api_model::HttpRequest;
+use api_model::{Auth, HttpRequest};
 use console::{ConsoleStore, record_error, record_outcome, record_warnings};
 use gpui::{App, Context, Entity, Global, Role, Window};
 use http_engine::{
-    HttpClient, PipelineError, Response, ResponseBody, SendInput, SendOutcome, TransportError,
-    Warning, resolve_request,
+    HttpClient, PipelineError, Response, ResponseBody, SendInput, SendOutcome, SendOwner,
+    TransportError, Warning, presend_warnings,
 };
 use pustman_actions::request;
 use ui::prelude::*;
@@ -71,6 +77,10 @@ pub const TLS_BADGE_SELECTOR: &str = "tls-verification-badge";
 
 /// Test hook: the "Disable verification for this request" offer on a TLS failure.
 pub const TLS_OFFER_SELECTOR: &str = "disable-tls-verification";
+
+/// Test hook: the hint under the URL row when the last send went out without the
+/// credentials its auth was configured for (REQ-HTTP-06).
+pub const AUTH_WARNING_SELECTOR: &str = "auth-warning";
 
 /// The HTTP client every request tab sends through. The app installs it once at
 /// startup; a test installs one backed by `FakeTransport`.
@@ -232,8 +242,9 @@ impl RequestEditor {
         // pre-send check's own names, keychain secrets included (#198): the bar and the
         // recorded warnings see the same list.
         let sent = self.draft.clone();
-        let warnings = match resolve_request(&self.draft, &self.scopes, &mut DynamicValues::new()) {
-            Ok((_, warnings)) => self.drop_keychain_resolved(warnings),
+        let ancestors = self.auth_ancestors(cx);
+        let warnings = match self.presend_check(&ancestors) {
+            Ok(warnings) => warnings,
             Err(error) => {
                 self.fail_send(&sent, &error, &[], cx);
                 return;
@@ -253,13 +264,7 @@ impl RequestEditor {
             // The Auth tab's parent chain, nearest first — `prepare`'s own contract —
             // so the wire carries exactly the effective auth the tab previews. It is
             // empty in M1: nothing calls `AuthTab::set_parents` outside tests yet.
-            ancestors: self
-                .auth_tab
-                .read(cx)
-                .parents()
-                .iter()
-                .map(|(_, auth)| auth.clone())
-                .collect(),
+            ancestors,
             // The send runs on the background executor and takes the stack by value
             // (`SendInput`), while the editor keeps sharing its own (an `Arc`) with
             // every field, so the send works on a `Clone` of it (#197).
@@ -267,7 +272,10 @@ impl RequestEditor {
             secrets: self.secret_sources.store.clone(),
             secret_key: self.secret_sources.key_of.clone(),
         };
-        let send_task = client.update(cx, |client, cx| client.send_request(input, cx));
+        // The send is this tab's own: it replaces only this tab's previous send, never
+        // another tab's (REQ-HTTP-12).
+        let owner = SendOwner::from(cx.entity_id());
+        let send_task = client.update(cx, |client, cx| client.send_request_as(owner, input, cx));
         self.inline_error = None;
         self.tls_offer_error = None;
         self.pending_send = Some(cx.spawn(async move |this, cx| {
@@ -295,7 +303,9 @@ impl RequestEditor {
             .try_global::<RequestClient>()
             .map(|client| client.0.clone())
         {
-            client.update(cx, |client, cx| client.cancel(cx));
+            // Only this tab's send: every other tab's keeps running (REQ-HTTP-12).
+            let owner = SendOwner::from(cx.entity_id());
+            client.update(cx, |client, cx| client.cancel_as(owner, cx));
         }
         cx.notify();
     }
@@ -319,6 +329,8 @@ impl RequestEditor {
     /// holds no response of its own.
     fn clear_previous_response(&mut self, cx: &mut Context<Self>) {
         self.status_line = None;
+        // The auth hint belongs to the previous send's outcome too.
+        self.auth_warning = None;
         self.response_view.update(cx, |view, cx| view.clear(cx));
     }
 
@@ -400,6 +412,16 @@ impl RequestEditor {
                 self.status_line = Some(StatusLine::from_response(&outcome.response));
                 self.inline_error = None;
                 self.tls_offer_error = None;
+                self.auth_warning = outcome
+                    .warnings
+                    .iter()
+                    .find(|warning| {
+                        matches!(
+                            warning,
+                            Warning::AuthIncomplete { .. } | Warning::AuthUnsupported { .. }
+                        )
+                    })
+                    .map(Warning::user_message);
                 if cx.try_global::<ConsoleStore>().is_some() {
                     record_outcome(&outcome, cx);
                 }
@@ -437,6 +459,68 @@ impl RequestEditor {
         self.inline_error
             .clone()
             .map(|error| self.render_inline_error(&error, cx))
+    }
+
+    /// Why the last send went out without credentials, if it did (REQ-HTTP-06): an
+    /// incomplete or unsupported auth, in [`Warning::user_message`]'s wording — the
+    /// Console's entry for the same send says the same thing.
+    pub fn auth_warning(&self) -> Option<&str> {
+        self.auth_warning.as_deref()
+    }
+
+    /// The auth hint under the URL row while the last send went out without the
+    /// credentials its auth was configured for: the user learns it here, not from a 401.
+    pub(super) fn render_auth_warning(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let message = SharedString::from(self.auth_warning.clone()?);
+        Some(
+            h_flex()
+                .id(ElementId::Name(SharedString::new_static(
+                    AUTH_WARNING_SELECTOR,
+                )))
+                .debug_selector(|| AUTH_WARNING_SELECTOR.to_string())
+                .role(Role::Status)
+                .aria_label(message.clone())
+                .min_w_0()
+                .gap(DynamicSpacing::Base02.rems(cx))
+                .items_center()
+                .child(
+                    Icon::new(IconName::TriangleAlert)
+                        .size(IconSize::Small)
+                        .color(Color::Warning),
+                )
+                .child(
+                    Label::new(message)
+                        .size(LabelSize::Small)
+                        .color(Color::Warning),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// The Auth tab's parent chain, nearest first — `prepare`'s own contract — so the
+    /// pre-send check and the wire see exactly the effective auth the tab previews.
+    pub(super) fn auth_ancestors(&self, cx: &App) -> Vec<Auth> {
+        self.auth_tab
+            .read(cx)
+            .parents()
+            .iter()
+            .map(|(_, auth)| auth.clone())
+            .collect()
+    }
+
+    /// The pre-send check (REQ-VAR-07): [`presend_warnings`] — the request's and its
+    /// effective auth's unresolved names, exactly what the send resolves — against the
+    /// editor's own scopes, minus the names the keychain resolves at send
+    /// ([`Self::drop_keychain_resolved`], #198).
+    pub(super) fn presend_check(&self, ancestors: &[Auth]) -> Result<Vec<Warning>, PipelineError> {
+        let ancestors: Vec<&Auth> = ancestors.iter().collect();
+        presend_warnings(
+            &self.draft,
+            &ancestors,
+            &self.scopes,
+            &mut DynamicValues::new(),
+        )
+        .map(|warnings| self.drop_keychain_resolved(warnings))
     }
 
     /// "Sending…" beside the button while a request is in flight — the one piece of
@@ -600,6 +684,22 @@ impl RequestEditor {
     }
 }
 
+/// The editor's release hook: cancel the closed tab's own send, and nothing else — the
+/// client keeps one pending send per tab ([`SendOwner`]), so the other tabs' sends run on.
+/// The cancel goes through the client, so the send gets its cancelled history row and the
+/// Console its one cancelled entry (`console::watch`).
+pub(crate) fn cancel_send_on_release(owner: SendOwner, editor: &mut RequestEditor, cx: &mut App) {
+    if editor.pending_send.take().is_none() {
+        return;
+    }
+    if let Some(client) = cx
+        .try_global::<RequestClient>()
+        .map(|client| client.0.clone())
+    {
+        client.update(cx, |client, cx| client.cancel_as(owner, cx));
+    }
+}
+
 #[cfg(test)]
 #[path = "send_tests.rs"]
 mod tests;
@@ -619,3 +719,15 @@ mod warned_failure_tests;
 #[cfg(test)]
 #[path = "send_offer_tests.rs"]
 mod offer_tests;
+
+#[cfg(test)]
+#[path = "send_tabs_tests.rs"]
+mod tabs_tests;
+
+#[cfg(test)]
+#[path = "send_tab_close_tests.rs"]
+mod tab_close_tests;
+
+#[cfg(test)]
+#[path = "send_auth_warning_tests.rs"]
+mod auth_warning_tests;

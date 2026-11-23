@@ -22,9 +22,8 @@
 
 use api_model::VariableKind;
 use gpui::{AnyElement, Context, Window};
-use http_engine::{Warning, resolve_request};
+use http_engine::Warning;
 use ui::prelude::*;
-use variables::DynamicValues;
 
 use crate::RequestEditor;
 use crate::variable_hover::scope_kind_of;
@@ -85,11 +84,13 @@ impl UnresolvedWarning {
     }
 }
 
-/// The names [`resolve_request`] reported unresolved, when that is what it reported.
+/// The names the pre-send check reported unresolved, when that is what it reported.
 pub(super) fn unresolved_names(warnings: &[Warning]) -> Option<&[String]> {
     warnings.iter().find_map(|warning| match warning {
         Warning::UnresolvedVariables(names) => Some(names.as_slice()),
-        Warning::TlsVerifyDisabled => None,
+        Warning::TlsVerifyDisabled
+        | Warning::AuthIncomplete { .. }
+        | Warning::AuthUnsupported { .. } => None,
     })
 }
 
@@ -147,9 +148,9 @@ impl RequestEditor {
     /// a variable cycle) has no warning to show: the send itself reports that failure
     /// when the user tries it.
     pub(super) fn recheck_unresolved(&mut self, cx: &mut Context<Self>) {
-        let checked = match resolve_request(&self.draft, &self.scopes, &mut DynamicValues::new()) {
-            Ok((_, warnings)) => {
-                let warnings = self.drop_keychain_resolved(warnings);
+        let ancestors = self.auth_ancestors(cx);
+        let checked = match self.presend_check(&ancestors) {
+            Ok(warnings) => {
                 unresolved_names(&warnings).map(|names| UnresolvedWarning::new(names.to_vec()))
             }
             // A request that cannot resolve has no names to warn about; `begin_send`

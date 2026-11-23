@@ -110,6 +110,9 @@ pub struct RequestEditor {
     /// The pre-send unresolved-variable warning bar's state (REQ-VAR-07): [`Some`] while
     /// the bar lists names a send would use without a value (`unresolved_warning`).
     unresolved_warning: Option<UnresolvedWarning>,
+    /// Why the last send went out without the credentials its auth was configured for —
+    /// incomplete or unsupported (REQ-HTTP-06) — shown under the URL row (`send`).
+    auth_warning: Option<String>,
     /// What the status line shows for the last response.
     status_line: Option<StatusLine>,
     /// The response region below the request panes (S29e): the entity a send's result
@@ -138,6 +141,10 @@ pub struct RequestEditor {
     _auth_tab_subscription: Subscription,
     _settings_tab_subscription: Subscription,
     _tab_bar_subscription: Subscription,
+    /// Cancels this tab's in-flight send when the tab is released (closed): a send left
+    /// running would still write its history row, but its Console entry — written by this
+    /// tab when the response lands — could never appear.
+    _release_subscription: Subscription,
 }
 
 /// The request-derived children of a [`RequestEditor`] — the URL bar and the Params,
@@ -256,6 +263,9 @@ impl RequestEditor {
             )
         });
         let tab_bar_subscription = cx.subscribe_in(&tab_bar, window, Self::on_tab_bar_event);
+        let send_owner = http_engine::SendOwner::from(cx.entity_id());
+        let release_subscription =
+            cx.on_release(move |editor, cx| send::cancel_send_on_release(send_owner, editor, cx));
         Self {
             focus_handle: cx.focus_handle().tab_stop(true),
             saved: request.clone(),
@@ -273,6 +283,7 @@ impl RequestEditor {
             inline_error: None,
             tls_offer_error: None,
             unresolved_warning: None,
+            auth_warning: None,
             status_line: None,
             response_view: cx.new(ResponseView::new),
             split_focus: cx.focus_handle().tab_stop(true),
@@ -286,6 +297,7 @@ impl RequestEditor {
             _auth_tab_subscription,
             _settings_tab_subscription: settings_tab_subscription,
             _tab_bar_subscription: tab_bar_subscription,
+            _release_subscription: release_subscription,
         }
     }
 
@@ -614,6 +626,8 @@ impl Render for RequestEditor {
             )
             // Under the URL row, where the send happened: the inline failure.
             .children(self.render_send_error(cx))
+            // And the hint when that send went out without its credentials.
+            .children(self.render_auth_warning(cx))
             // The request tab strip over the tab content: the selection decides which
             // tab's content shows below.
             .child(self.tab_bar.clone())

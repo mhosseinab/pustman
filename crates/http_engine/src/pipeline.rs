@@ -21,6 +21,7 @@ use crate::error::TransportError;
 use crate::request::{
     Header, MultipartField, MultipartValue, RequestBody, ResolvedRequest, SendSettings,
 };
+use crate::request_auth::AppliedAuth;
 
 /// What a send should tell the user before it runs (REQ-VAR-07, REQ-HTTP-10).
 ///
@@ -34,6 +35,79 @@ pub enum Warning {
     /// The request turns TLS certificate verification off; the UI must flag it visibly
     /// (REQ-HTTP-10).
     TlsVerifyDisabled,
+    /// The configured auth added no credential: a field it needs resolved to empty
+    /// (`AppliedAuth::Incomplete`). The send still runs, without credentials, and the
+    /// user is told so (REQ-HTTP-06). Both strings are static names, never field values.
+    AuthIncomplete {
+        kind: &'static str,
+        missing: &'static str,
+    },
+    /// The effective auth is a kind outside the supported subset
+    /// (`AppliedAuth::Unsupported`): nothing was applied and the send runs without
+    /// credentials (REQ-HTTP-06). `kind` is only the auth's `"type"` name.
+    AuthUnsupported { kind: String },
+}
+
+impl Warning {
+    /// What the warning tells the user: names only, never the values they failed to
+    /// resolve (REQ-VAR-07), the TLS state verbatim (REQ-HTTP-10), and an auth that went
+    /// out without credentials (REQ-HTTP-06). The one wording every surface shows — the
+    /// Console's entries and the editor's own hint.
+    pub fn user_message(&self) -> String {
+        match self {
+            Warning::UnresolvedVariables(names) => {
+                format!("Unresolved variables: {}", names.join(", "))
+            }
+            Warning::TlsVerifyDisabled => {
+                "TLS certificate verification is disabled for this request.".to_string()
+            }
+            Warning::AuthIncomplete { kind, missing } => format!(
+                "The {kind} auth was not applied because its {missing} is empty. \
+                 The request was sent without credentials."
+            ),
+            Warning::AuthUnsupported { kind } => format!(
+                "The \"{kind}\" auth type is not supported yet. \
+                 The request was sent without credentials."
+            ),
+        }
+    }
+
+    /// The warning for an auth that added no credential, or `None` when the auth did
+    /// what it was configured to do (REQ-HTTP-06).
+    pub(crate) fn for_auth(auth: &AppliedAuth) -> Option<Self> {
+        match auth {
+            AppliedAuth::None | AppliedAuth::Applied => None,
+            AppliedAuth::Incomplete { kind, missing } => {
+                Some(Warning::AuthIncomplete { kind, missing })
+            }
+            AppliedAuth::Unsupported { kind } => {
+                Some(Warning::AuthUnsupported { kind: kind.clone() })
+            }
+        }
+    }
+
+    /// Add `names` to the [`Warning::UnresolvedVariables`] in `warnings`, after the names
+    /// it already lists and without duplicates — creating it, first, when there is none —
+    /// so one warning names every unresolved variable of the send.
+    pub(crate) fn add_unresolved(warnings: &mut Vec<Warning>, names: Vec<String>) {
+        if names.is_empty() {
+            return;
+        }
+        let existing = warnings.iter_mut().find_map(|warning| match warning {
+            Warning::UnresolvedVariables(listed) => Some(listed),
+            _ => None,
+        });
+        match existing {
+            Some(listed) => {
+                for name in names {
+                    if !listed.contains(&name) {
+                        listed.push(name);
+                    }
+                }
+            }
+            None => warnings.insert(0, Warning::UnresolvedVariables(names)),
+        }
+    }
 }
 
 /// Why [`resolve_request`] produced no request.
