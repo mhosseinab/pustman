@@ -24,7 +24,22 @@
 //! `Decision:` a refused change and a failed save both show inline in the dialog rather
 //! than as a toast: the dialog is still open on exactly the rows the change failed on,
 //! which is where the user is looking (AGENTS.md: errors reach the user, never only a
-//! log).
+//! log). A save that fails after the dialog closed becomes an error toast on the
+//! workspace instead.
+//!
+//! `Decision:` every save is detached, never stored in a field: closing the dialog right
+//! after a change drops the dialog, and a dropped `Task` would cancel a save that has
+//! not run — the jar would forget the change but SQLite would not, so it would come back
+//! on restart. Detached saves still land in order because `save_jar_latest` snapshots
+//! the jar under the store's lock (#287), so the last one to run writes the newest jar.
+//!
+//! `Decision:` a domain's Clear asks first, inline: a confirm naming the domain and the
+//! cookie count takes the list's place (as the add/edit form does), with Cancel focused.
+//! A second `ModalView` would replace this dialog in the workspace's one-modal layer, so
+//! the confirm lives inside it. Cancel and Escape keep every cookie; single-cookie delete
+//! stays one action. Confirming removes exactly the (domain, path, name) identities the
+//! confirm counted, not whatever the live jar holds for the domain by then: a send
+//! landing while the dialog is open can add a cookie the user never saw.
 //!
 //! Cookie values are secrets (PRD §7): nothing here logs or Debug-prints one, and
 //! [`DisplayedRow`] carries no `Debug` — its `value` field can hold one.
@@ -33,8 +48,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use gpui::{
-    App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Global, Render,
-    Subscription, Task, Window,
+    App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Global, KeyDownEvent,
+    Render, Subscription, WeakEntity, Window,
 };
 use http_engine::{CookieEntry, CookieError, CookieJar, save_jar_latest};
 use pustman_actions::cookies::Manage;
@@ -54,6 +69,14 @@ mod tests;
 #[cfg(test)]
 #[path = "cookie_dialog_clear_domain_tests.rs"]
 mod clear_domain_tests;
+
+#[cfg(test)]
+#[path = "cookie_dialog_clear_confirm_tests.rs"]
+mod clear_confirm_tests;
+
+#[cfg(test)]
+#[path = "cookie_dialog_save_failure_tests.rs"]
+mod save_failure_tests;
 
 /// One row's height at the default scale. Rows are uniform because the virtualized list
 /// measures one row for all of them (the `history_list` contract).
@@ -144,19 +167,18 @@ pub struct DisplayedRow {
 }
 
 /// The Manage Cookies dialog: the jar's rows grouped by domain, the inline error a
-/// refused change or failed save leaves, and the save in flight.
+/// refused change or failed save leaves.
 pub struct CookieDialog {
     focus_handle: FocusHandle,
+    /// The workspace the dialog is over: where a save that fails after the dialog closed
+    /// reports itself.
+    workspace: WeakEntity<Workspace>,
     workspace_id: String,
     store: Arc<Mutex<LocalStore>>,
     jar: Arc<Mutex<CookieJar>>,
     rows: Arc<Vec<Row>>,
     /// Why the last change did not happen or did not persist, shown above the rows.
     error: Option<SharedString>,
-    /// The in-flight save. Stored so a second change replaces (cancels) the save it
-    /// supersedes: a save writes the whole snapshot, so only the newest one needs to
-    /// finish (AGENTS.md › Dropping a `Task` cancels it).
-    save_task: Option<Task<()>>,
     /// The add/edit form open over the list, while one is open (REQ-HTTP-08).
     form: Option<Entity<CookieForm>>,
     /// The "Add cookie" button's focus handle: its slot in the tab order.
@@ -164,12 +186,39 @@ pub struct CookieDialog {
     /// Kept so the form's Save and Cancelled events keep reaching us; dropping it would
     /// silently strand the form (AGENTS.md › GPUI).
     form_subscription: Option<Subscription>,
+    /// The confirm a domain's Clear put up, while it is up.
+    pending_clear: Option<PendingClear>,
+}
+
+/// A domain Clear waiting for its confirm: the domain, exactly the cookie identities the
+/// prompt counted (the only ones confirming removes), and the prompt's two buttons'
+/// focus handles.
+struct PendingClear {
+    domain: String,
+    identities: Vec<(String, String, String)>,
+    cancel_focus: FocusHandle,
+    confirm_focus: FocusHandle,
+}
+
+impl PendingClear {
+    /// The question the prompt asks: the domain and how many cookies go.
+    fn prompt(&self) -> String {
+        format!(
+            "Clear {} for {}? They are removed from this workspace's jar and cannot be restored.",
+            cookie_count_label(self.identities.len()),
+            self.domain
+        )
+    }
 }
 
 impl CookieDialog {
     /// A dialog over `inputs`' jar, listing it as it stands right now. Listing is an
     /// in-memory read (the jar is an `Arc<Mutex<CookieJar>>`), so no IO runs here.
-    pub fn new(inputs: CookieDialogInputs, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        inputs: CookieDialogInputs,
+        workspace: WeakEntity<Workspace>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let CookieDialogInputs {
             workspace_id,
             store,
@@ -177,15 +226,16 @@ impl CookieDialog {
         } = inputs;
         let mut dialog = Self {
             focus_handle: cx.focus_handle(),
+            workspace,
             workspace_id,
             store,
             jar,
             rows: Arc::new(Vec::new()),
             error: None,
-            save_task: None,
             form: None,
             add_focus: cx.focus_handle(),
             form_subscription: None,
+            pending_clear: None,
         };
         dialog.reload_rows(cx);
         dialog
@@ -276,6 +326,25 @@ impl CookieDialog {
         self.form.clone()
     }
 
+    /// The question a domain's Clear is asking, while its confirm is up.
+    pub fn clear_confirm_prompt(&self) -> Option<String> {
+        self.pending_clear.as_ref().map(PendingClear::prompt)
+    }
+
+    /// The Clear confirm's destructive button, as the keyboard reaches it.
+    pub fn clear_confirm_focus_handle(&self) -> Option<FocusHandle> {
+        self.pending_clear
+            .as_ref()
+            .map(|pending| pending.confirm_focus.clone())
+    }
+
+    /// The Clear confirm's Cancel button, as the keyboard reaches it.
+    pub fn clear_cancel_focus_handle(&self) -> Option<FocusHandle> {
+        self.pending_clear
+            .as_ref()
+            .map(|pending| pending.cancel_focus.clone())
+    }
+
     /// Rebuild the listed rows from the jar — on open and after every change.
     fn reload_rows(&mut self, cx: &mut Context<Self>) {
         // The handle is cloned out first so the lock never borrows `self` while the
@@ -299,12 +368,59 @@ impl CookieDialog {
         }
     }
 
-    /// Remove every cookie of one domain and persist what is left (REQ-HTTP-08).
-    fn clear_domain(&mut self, domain: &str, cx: &mut Context<Self>) {
-        let domain = domain.to_owned();
+    /// A domain header's Clear: put up the confirm over exactly the cookies the rows list
+    /// for `domain`, with the keyboard on its Cancel — the safe default.
+    fn ask_clear_domain(&mut self, domain: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let identities: Vec<(String, String, String)> = self
+            .rows
+            .iter()
+            .filter_map(|row| match row {
+                Row::Cookie { entry, .. } if entry.domain == domain => {
+                    Some((entry.domain.clone(), entry.path.clone(), entry.name.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        let pending = PendingClear {
+            domain: domain.to_owned(),
+            identities,
+            cancel_focus: cx.focus_handle(),
+            confirm_focus: cx.focus_handle(),
+        };
+        window.focus(&pending.cancel_focus, cx);
+        self.pending_clear = Some(pending);
+        self.error = None;
+        cx.notify();
+    }
+
+    /// Cancel or Escape on the confirm: nothing is removed, and the keyboard goes back
+    /// to the Clear that asked.
+    fn cancel_clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(pending) = self.pending_clear.take()
+            && let Some(clear_focus) = self.clear_focus_handle(&pending.domain)
+        {
+            window.focus(&clear_focus, cx);
+        }
+        cx.notify();
+    }
+
+    /// The confirm's destructive button: remove exactly the counted cookies and persist
+    /// what is left (REQ-HTTP-08). A counted cookie already gone from the jar is skipped
+    /// — it is gone, which is what Clear asked for.
+    fn confirm_clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(pending) = self.pending_clear.take() else {
+            return;
+        };
+        window.focus(&self.add_focus, cx);
+        let listed = pending.identities;
         if let Err(message) = self.change_jar(
             move |jar| {
-                jar.clear_domain(&domain);
+                for (domain, path, name) in &listed {
+                    if jar.delete(domain, path, name).is_err() {
+                        // Handled: the cookie left the jar since the rows were built
+                        // (expired or replaced); there is nothing left to remove.
+                    }
+                }
                 Ok(())
             },
             cx,
@@ -427,22 +543,31 @@ impl CookieDialog {
             Arc::clone(&self.jar),
         );
         cx.notify();
-        self.save_task = Some(cx.spawn(async move |this, cx| {
+        let workspace = self.workspace.clone();
+        // Detached so the save outlives the dialog (module docs' Decision).
+        cx.spawn(async move |this, cx| {
             if let Err(failure) = write.await {
                 // `cookie_persistence`'s failure text is fixed and value-free (PRD §7).
-                let message = failure.to_string();
-                if this
+                let message = SharedString::from(failure.to_string());
+                let shown_inline = this
                     .update(cx, |this, cx| {
-                        this.error = Some(SharedString::from(message));
+                        this.error = Some(message.clone());
                         cx.notify();
                     })
-                    .is_err()
+                    .is_ok();
+                if !shown_inline
+                    && workspace
+                        .update(cx, |workspace, cx| {
+                            workspace.show_toast(message, Severity::Error, None, cx);
+                        })
+                        .is_err()
                 {
-                    // Handled: the dialog closed with its window before the save
+                    // Handled: the workspace went away with its window before the save
                     // failed; there is nobody left to tell.
                 }
             }
-        }));
+        })
+        .detach();
         Ok(())
     }
 
@@ -511,9 +636,11 @@ impl CookieDialog {
                     .size(ButtonSize::Default)
                     .tooltip(Tooltip::text(format!("Remove every cookie for {domain}")))
                     .focus_handle(clear_focus.clone())
-                    .on_click(move |_event, _window, cx| {
+                    .on_click(move |_event, window, cx| {
                         if weak
-                            .update(cx, |dialog, cx| dialog.clear_domain(&cleared_domain, cx))
+                            .update(cx, |dialog, cx| {
+                                dialog.ask_clear_domain(&cleared_domain, window, cx)
+                            })
                             .is_err()
                         {
                             // Handled: the dialog went away with its window while the
@@ -623,6 +750,10 @@ impl Render for CookieDialog {
         let rows = Arc::clone(&self.rows);
         let error = self.error.clone();
         let form = self.form.clone();
+        let clear_confirm = self
+            .pending_clear
+            .as_ref()
+            .map(|pending| render_clear_confirm(&base, pending, cx));
         let content = v_flex()
             .w_full()
             .min_w_0()
@@ -640,6 +771,9 @@ impl Render for CookieDialog {
                 // Decision); the list comes back — refreshed from the jar — after a
                 // save or a cancel.
                 Some(form) => this.child(form),
+                // The Clear confirm is where the list is while it is up (module docs'
+                // Decision): the rows it would remove are exactly what it counts.
+                None if clear_confirm.is_some() => this.children(clear_confirm),
                 None if rows.is_empty() => this.child(empty_state(cx)),
                 None => {
                     let key_rows = Arc::clone(&rows);
@@ -672,8 +806,10 @@ impl Render for CookieDialog {
                     .gap(DynamicSpacing::Base04.rems(cx))
                     .map(|this| match &self.form {
                         // The form is its own add flow (it has Save and Cancel): the
-                        // list's "Add cookie" would only lose what is typed in it.
+                        // list's "Add cookie" would only lose what is typed in it. The
+                        // Clear confirm is its own question too.
                         Some(_) => this,
+                        None if self.pending_clear.is_some() => this,
                         None => this.child(
                             Button::new(child_id(&base, "add-cookie"), "Add cookie")
                                 .start_icon(Icon::new(IconName::Plus))
@@ -729,13 +865,16 @@ fn open_cookie_dialog(_: &Manage, cx: &mut App) {
                 // Cloned out before the workspace update borrows `cx` again.
                 let inputs = cx.try_global::<CookieDialogInputs>().cloned();
                 workspace_handle.update(cx, |workspace, cx| {
+                    let workspace_weak = cx.weak_entity();
                     let Some(inputs) = inputs else {
                         // Errors reach the user: a dialog that cannot save the change
                         // would lose it silently.
                         workspace.show_toast(NOT_WIRED_MESSAGE, Severity::Error, None, cx);
                         return;
                     };
-                    workspace.toggle_modal(window, cx, |_window, cx| CookieDialog::new(inputs, cx));
+                    workspace.toggle_modal(window, cx, |_window, cx| {
+                        CookieDialog::new(inputs, workspace_weak, cx)
+                    });
                 });
             })
             .is_err()
@@ -744,6 +883,55 @@ fn open_cookie_dialog(_: &Manage, cx: &mut App) {
             // workspace left to open the dialog over.
         }
     });
+}
+
+/// The Clear confirm, where the list is: the question naming the domain and the count,
+/// then Cancel and the destructive button that says what it removes. Both buttons are
+/// labelled tab stops Enter and Space activate; Escape inside the confirm cancels it and
+/// stops there, so the dialog's own Escape (close) does not also answer — the
+/// `cookie_form` pattern.
+fn render_clear_confirm(
+    base: &ElementId,
+    pending: &PendingClear,
+    cx: &mut Context<CookieDialog>,
+) -> AnyElement {
+    let confirm_label = format!("Clear {}", cookie_count_label(pending.identities.len()));
+    v_flex()
+        .id(child_id(base, "clear-confirm"))
+        .w_full()
+        .min_w_0()
+        .gap(DynamicSpacing::Base04.rems(cx))
+        .py(DynamicSpacing::Base04.rems(cx))
+        .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+            if event.keystroke.key == "escape" {
+                cx.stop_propagation();
+                this.cancel_clear(window, cx);
+            }
+        }))
+        .child(Label::new(pending.prompt()).size(LabelSize::Small))
+        .child(
+            h_flex()
+                .w_full()
+                .justify_end()
+                .gap(DynamicSpacing::Base04.rems(cx))
+                .child(
+                    Button::new(child_id(base, "clear-cancel"), "Cancel")
+                        .style(ButtonStyle::Subtle)
+                        .focus_handle(pending.cancel_focus.clone())
+                        .on_click(
+                            cx.listener(|this, _event, window, cx| this.cancel_clear(window, cx)),
+                        ),
+                )
+                .child(
+                    Button::new(child_id(base, "clear-confirm-button"), confirm_label)
+                        .style(ButtonStyle::Tinted(TintColor::Error))
+                        .focus_handle(pending.confirm_focus.clone())
+                        .on_click(
+                            cx.listener(|this, _event, window, cx| this.confirm_clear(window, cx)),
+                        ),
+                ),
+        )
+        .into_any_element()
 }
 
 /// The dialog's rows from the jar's cookies: one [`Row::Domain`] header per domain

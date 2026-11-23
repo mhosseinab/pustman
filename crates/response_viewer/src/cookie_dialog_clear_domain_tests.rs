@@ -108,6 +108,15 @@ fn clear_domain(dialog: &Entity<CookieDialog>, cx: &mut VisualTestContext, domai
     draw_window(cx);
     press_key(cx, "enter");
     cx.run_until_parked();
+    // Clear asks first: confirm it the same keyboard way.
+    draw_window(cx);
+    let confirm_handle = cx
+        .read(|cx| dialog.read_with(cx, |dialog, _| dialog.clear_confirm_focus_handle()))
+        .expect("Clear asks for confirmation");
+    cx.update(|window, cx| window.focus(&confirm_handle, cx));
+    draw_window(cx);
+    press_key(cx, "enter");
+    cx.run_until_parked();
 }
 
 #[gpui::test]
