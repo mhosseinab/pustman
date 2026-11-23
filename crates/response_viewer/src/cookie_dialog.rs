@@ -36,7 +36,7 @@ use gpui::{
     App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Global, Render,
     Subscription, Task, Window,
 };
-use http_engine::{CookieEntry, CookieError, CookieJar, save_jar};
+use http_engine::{CookieEntry, CookieError, CookieJar, save_jar_latest};
 use pustman_actions::cookies::Manage;
 use storage::LocalStore;
 use time::format_description::well_known::Rfc2822;
@@ -416,15 +416,16 @@ impl CookieDialog {
         }
         self.rows = Arc::new(build_rows(&jar, cx));
         self.error = None;
-        // The snapshot `save_jar` takes happens right here, on this thread (cheap, no
-        // IO); every SQLite call runs inside its task (ADR-0002).
-        let write = save_jar(
+        drop(jar);
+        // `save_jar_latest` snapshots the jar inside its task under the store's lock, so
+        // this write is ordered with the app's own cookie saves (#287); every SQLite call
+        // runs inside that task (ADR-0002).
+        let write = save_jar_latest(
             cx.background_executor(),
             Arc::clone(&self.store),
             self.workspace_id.clone(),
-            &jar,
+            Arc::clone(&self.jar),
         );
-        drop(jar);
         cx.notify();
         self.save_task = Some(cx.spawn(async move |this, cx| {
             if let Err(failure) = write.await {

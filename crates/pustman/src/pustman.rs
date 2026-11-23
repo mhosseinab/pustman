@@ -298,13 +298,13 @@ fn save_cookie_jar(cx: &mut App) {
             let jar = cx
                 .try_global::<AppCookieJar>()
                 .map(|jar| Arc::clone(&jar.0))?;
-            // A poisoned lock still holds a usable jar (the `http_engine` jar rule).
-            let jar_guard = jar.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            Some(http_engine::save_jar(
+            // `save_jar_latest` snapshots inside its task under the store's lock, so this
+            // write is also ordered with the Manage Cookies dialog's saves (#287).
+            Some(http_engine::save_jar_latest(
                 cx.background_executor(),
                 store,
                 WORKSPACE_ID.to_owned(),
-                &jar_guard,
+                jar,
             ))
         });
         let Some(write) = write else {
@@ -367,6 +367,15 @@ fn install_cookie_wiring(cx: &mut App, store: &Arc<Mutex<LocalStore>>) {
             }
         }
         cx.update(|cx| {
+            // A relaunch since this load started built a newer jar (#287): this load's jar
+            // is no longer the app's, so it must neither enable saving for the newer, not
+            // yet loaded jar nor point the dialog at a jar the transport no longer uses.
+            let still_current = cx
+                .try_global::<AppCookieJar>()
+                .is_some_and(|current| Arc::ptr_eq(&current.0, &jar));
+            if !still_current {
+                return;
+            }
             // Installed once the load has landed (the brief's order), so the dialog lists
             // the loaded jar — and installed on a failed load too: the store is there to
             // save through and the jar is the app's own either way.

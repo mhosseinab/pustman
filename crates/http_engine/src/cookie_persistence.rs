@@ -27,6 +27,10 @@ use crate::cookies::{CookieJar, PUBLIC_SUFFIX_LIST};
 #[path = "cookie_persistence_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "cookie_save_latest_tests.rs"]
+mod save_latest_tests;
+
 /// Loads the workspace's cookie jar from `storage`'s `cookies` table on the background
 /// executor. Rows whose attributes parse as JSON but not as a cookie are skipped, rows
 /// whose domain is a public suffix are dropped (RFC 6265 §5.3 step 5), and expired
@@ -63,6 +67,32 @@ pub fn save_jar(
     executor.spawn(async move {
         let rows = rows?;
         save_to_store(&store, &workspace_id, &rows)
+    })
+}
+
+/// Saves the workspace's live jar the way every writer of it must (#287): the jar is
+/// snapshotted INSIDE the task, while the store's lock is held, so writes from any caller
+/// — the app's send-triggered saves and the Manage Cookies dialog alike — are serialized
+/// by that lock and each one writes the jar as it is when it runs. Whichever save runs
+/// last therefore carries the latest jar, and an earlier save can never land a stale copy
+/// over a newer change. A save whose rows equal the stored ones writes nothing.
+///
+/// Lock order is store, then jar; the jar lock is held only for the snapshot, never
+/// across any `storage` call, and no caller holds the jar while taking the store.
+pub fn save_jar_latest(
+    executor: &BackgroundExecutor,
+    store: Arc<Mutex<LocalStore>>,
+    workspace_id: String,
+    jar: Arc<Mutex<CookieJar>>,
+) -> Task<anyhow::Result<()>> {
+    executor.spawn(async move {
+        let store_guard = lock_store(&store)?;
+        let rows = {
+            // A poisoned jar lock still holds a usable jar (the `cookies` jar rule).
+            let jar_guard = jar.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            snapshot_rows(&workspace_id, &jar_guard)?
+        };
+        write_rows(&store_guard, &workspace_id, &rows)
     })
 }
 
@@ -131,12 +161,26 @@ fn save_to_store(
     rows: &[CookieRow],
 ) -> anyhow::Result<()> {
     let store_guard = lock_store(store)?;
-    let repository = store_guard.cookies();
+    write_rows(&store_guard, workspace_id, rows)
+}
+
+/// The write half of [`save_to_store`], for a caller already holding the store's lock.
+/// When the stored rows already equal `rows` nothing is written (#287): a burst of saves
+/// with no jar change costs one read, not a rewrite of the whole jar.
+fn write_rows(store: &LocalStore, workspace_id: &str, rows: &[CookieRow]) -> anyhow::Result<()> {
+    let repository = store.cookies();
+    let mut stored = repository.list(workspace_id).map_err(write_failure)?;
+    stored.sort_by(|left, right| {
+        (&left.domain, &left.path, &left.name).cmp(&(&right.domain, &right.path, &right.name))
+    });
+    if stored == rows {
+        return Ok(());
+    }
     let kept: std::collections::HashSet<(&str, &str, &str)> = rows
         .iter()
         .map(|row| (row.domain.as_str(), row.path.as_str(), row.name.as_str()))
         .collect();
-    for row in repository.list(workspace_id).map_err(write_failure)? {
+    for row in &stored {
         if !kept.contains(&(row.domain.as_str(), row.path.as_str(), row.name.as_str())) {
             repository
                 .delete(workspace_id, &row.domain, &row.path, &row.name)
