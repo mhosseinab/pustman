@@ -285,7 +285,13 @@ fn save_cookie_jar(cx: &mut App) {
         // Snapshot now, after every earlier save has landed, so this write carries the
         // jar's latest state and nothing older can land after it.
         let write = cx.update(|cx| {
-            cx.global_mut::<CookieWiring>().save_queued = false;
+            let wiring = cx.global_mut::<CookieWiring>();
+            wiring.save_queued = false;
+            // A relaunch between queueing and now resets the flag: the jar is new and not
+            // loaded yet, and writing it would erase the stored rows.
+            if !wiring.load_finished {
+                return None;
+            }
             let store = cx
                 .try_global::<AppStore>()
                 .map(|store| Arc::clone(&store.0))?;
