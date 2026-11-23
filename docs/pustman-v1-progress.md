@@ -116,7 +116,7 @@ Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending)
 | S37 | Redaction NFR test (integration) | passed | 1 | | [S37](progress/pustman-v1/steps/S37.md) | S37 (`ce1b583`) passed |
 | S33n | Fix the M1 request-editor blockers and major layout bugs (driver-added, S38 prereq; #200 #201) | passed | 1 | 35e1813 | [S33n](progress/pustman-v1/steps/S33n.md) | LOW #264 |
 | S33o | Fix the M1 workspace, console, history and timeline major bugs (driver-added, S38 prereq; #199 #202 #205) | passed | 3 | 6cca305 | [S33o](progress/pustman-v1/steps/S33o.md) | 2 review cycles, 3 fixes; LOW #270 |
-| S33p | Wire the app's cookie jar: send, persist, Manage Cookies (driver-added, S38 prereq; #286) | in_progress | 1 | | | found by the S38 headless pre-check |
+| S33p | Wire the app's cookie jar: send, persist, Manage Cookies (driver-added, S38 prereq; #286) | passed | 2 | 475bee6 | [S33p](progress/pustman-v1/steps/S33p.md) | review 2 rounds; LOW #287 |
 | S38 | M1 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off |
 | S39 | `collections_panel`: tree | pending | 0 | | |  |
 | S40 | Collection CRUD, save, ordering, dirty state | pending | 0 | | |  |
