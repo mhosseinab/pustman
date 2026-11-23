@@ -35,6 +35,10 @@ use workspace::Workspace;
 #[path = "selector_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "selector_match_key_tests.rs"]
+mod match_key_tests;
+
 /// The label of the first-class "No environment" option: picking it clears the stored
 /// selection (pack screen S07's "No active environment" state). It is also what the
 /// status bar's active-environment readout shows while none is active — one concept, one
@@ -54,8 +58,11 @@ const NOT_WIRED_MESSAGE: &str =
 /// environments (input to this crate — see the module docs) and the app's local store
 /// (the `pustman::AppStore` global, unreachable without depending on the top crate).
 ///
-/// The app's wire installs one per window; the opener reads it when the action fires, so
-/// replacing it after a change keeps the picker current.
+/// One [`Global`] for the whole app, not one per window: the app's wire installs it
+/// once per app (every window's opener reads that same copy when the action fires), so
+/// replacing it after a change keeps every picker current. `Decision:` it stays
+/// app-wide for v1's one workspace (REQ-VAR-08, pack S07/R07); scoping it per window is
+/// the follow-up that must land before multi-window (issue #118).
 #[derive(Clone)]
 pub struct SelectorInputs {
     /// The workspace the selection is scoped to — it is part of the kv key.
@@ -262,7 +269,11 @@ impl PickerDelegate for EnvironmentSelector {
                 ..
             }) => ElementId::from(format!("environment-{environment_id}")),
             Some(Candidate { id: None, .. }) => ElementId::from("environment-none"),
-            None => ElementId::from("environment-row"),
+            // No stable model id exists for an out-of-range row — it has no candidate —
+            // so the row's own index is the only uniqueness available. It is a fallback
+            // the picker never draws (issue #119: unreachable while `match_count` holds),
+            // and two such rows must still never share one id.
+            None => ElementId::from(format!("environment-out-of-range-{index}")),
         }
     }
 

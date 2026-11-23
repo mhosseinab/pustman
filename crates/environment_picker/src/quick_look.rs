@@ -11,8 +11,8 @@
 //! placement, focus trapping, Escape and click-outside dismissal.
 //!
 //! `Decision:` [`QuickLookInputs`] is an app-global the app's wire installs, the same
-//! "the top crate owns the inputs" shape (and the same caveat as issue #118) as
-//! [`super::SelectorInputs`]: one per window, read when the action fires. This crate
+//! "the top crate owns the inputs" shape as [`super::SelectorInputs`]: one app-wide
+//! [`Global`](gpui::Global) shared by every window, read when the action fires. This crate
 //! reaches neither the app's `AppStore` nor the workspace file, and a quick-look opened
 //! before anything is installed says so in an error toast instead of listing silence.
 //!
