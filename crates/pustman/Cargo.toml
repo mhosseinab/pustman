@@ -34,6 +34,7 @@ request_editor.workspace = true
 response_viewer.workspace = true
 secrets.workspace = true
 settings.workspace = true
+smol.workspace = true
 storage.workspace = true
 text_input.workspace = true
 theme.workspace = true
