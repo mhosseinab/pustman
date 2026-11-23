@@ -63,7 +63,7 @@ These run at the next human sign-off and are recorded in that sign-off's step re
 
 ## Window
 
-Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending) · unpromoted passed steps: S26–S37 (12 plan steps, 42 sub-step commits) · unapplied deltas: 0 (cap 3 / 16). Segment 3 complete (S33e + S33w passed). Next gate: S38 M1 SIGN-OFF (HUMAN), which covers the E2E display checks S26/S28/S32 and then the human "go" for tag `release/pustman-v1-3`.
+Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub push was refused 403, so the human pushes it) · waived 2026-11-23: three existing-test edits, flag rate 27/52 = 52%, doc-truth caveat on docs-only `682ab32` · release build OK in the cloud session; Linux/macOS smoke of -2 and -3 pending (human) · unpromoted passed steps: 0 · unapplied deltas: 0 (cap 3 / 16). **M1 done. Next: Segment 4 (M2), S39–S48.** Eligible now (each depends only on S38): S39a, S40c, S43a, S44a.
 
 ## Status
 
@@ -191,3 +191,4 @@ Each entry is a fact a later step must know, with its source record linked.
 |---|---|---|---|---|---|---|
 | `release/pustman-v1-1` | `6620061` | S0–S10 | PROMOTABLE 9/9 | none (domain-only, D11) | none (domain-only, D11) | [brief](briefs/release-pustman-v1-1.md) |
 | `release/pustman-v1-2` | `999746d` | S11–S24 (34 sub-steps incl. S22f) | NOT PROMOTABLE → **waived** by human-delegated go 2026-11-20: items 1–7, 9 PASS; doc-truth 5/5 claims confirmed, FAIL only on docs-only `019923c`; flag rate 21/34 = 62% | `cargo build --release -p pustman` exit 0 | pending / pending | [brief](briefs/release-pustman-v1-2.md) |
+| `release/pustman-v1-3` | `84cd1c0` | S26–S38 (M1) + S33e/w/n/o/p, #287, R1–R4 review fixes | NOT PROMOTABLE → **waived** by human go 2026-11-23: items 1–3, 5–7, 9 PASS (full verify at `430c86f`, candidate code `a3417c3` VERIFY OK); item 4: human-authorized test edits (#269 `reqwest_transport_tests.rs`, R3 `cookie_dialog_clear_domain_tests.rs`, `affc474` `open_entry_tests.rs`); doc-truth 5/5 (caveat `682ab32`); flag rate 27/52 = 52% | `cargo build --release -p pustman` exit 0 (cloud session); desktop entry script OK in container | pending / pending | [brief](briefs/release-pustman-v1-3.md) |
