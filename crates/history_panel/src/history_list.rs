@@ -59,6 +59,14 @@ mod activation_tests;
 #[path = "history_list_empty_state_tests.rs"]
 mod empty_state_tests;
 
+#[cfg(test)]
+#[path = "history_list_focus_border_tests.rs"]
+mod focus_border_tests;
+
+#[cfg(test)]
+#[path = "history_list_a11y_tests.rs"]
+mod a11y_tests;
+
 /// The panel's stable id: its dock selector entry, its hitbox and the id
 /// [`crate::focus_history_panel`] activates it under.
 pub const PANEL_ID: &str = "history";
@@ -574,17 +582,30 @@ impl HistoryList {
         cx: &App,
     ) -> AnyElement {
         if !self.rows.is_empty() {
+            // The rows are `ListBoxOption`s (REQ-HIST-01), so the container that draws
+            // them is their `ListBox` (#158) — assistive tech navigates a list by its
+            // list, never by loose options (S26/R26). The id it needs for the role
+            // derives from the panel's identity (the search box's focus handle), so two
+            // panels can never collide in one frame.
+            let list_area_id = ElementId::NamedChild(
+                Arc::new(ElementId::from(&self.search.focus_handle(cx))),
+                SharedString::new_static("list-area"),
+            );
             return v_flex()
+                .id(list_area_id)
+                .role(Role::ListBox)
                 .flex_1()
                 .min_h_0()
                 // The list's focus style: the panel's keyboard focus lives in the search
                 // box, so the rows around it say "the list is live" in the theme's focus
-                // token (ux-checklist: visible focus state).
+                // token (ux-checklist: visible focus state). The border is always drawn
+                // (transparent) so the focus ring shows without moving the rows' layout
+                // (the `console` row's focus-ring shape, #157).
+                .border_1()
+                .rounded_sm()
+                .border_color(cx.theme().colors().border_transparent)
                 .when(list_focused, |list_area| {
-                    list_area
-                        .border_1()
-                        .rounded_sm()
-                        .border_color(cx.theme().colors().border_focused)
+                    list_area.border_color(cx.theme().colors().border_focused)
                 })
                 .child(list)
                 .into_any_element();
