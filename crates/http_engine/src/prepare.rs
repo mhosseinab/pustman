@@ -170,13 +170,7 @@ pub fn prepare(
         .into_iter()
         .map(|(_name, value)| value)
         .collect();
-    if auth == AppliedAuth::Applied
-        && let EffectiveAuth::Basic { username, password } = &effective
-    {
-        // A server that echoes request headers (httpbin `/headers`) puts the Basic
-        // credential's base64 form in its body; the resolved username and password
-        // never match that derived string, so the exact string the auth sends is
-        // registered too and its echo is masked everywhere the send is redacted.
+    if auth == AppliedAuth::Applied {
         let resolved = |field: &Option<String>| {
             field
                 .as_deref()
@@ -184,7 +178,25 @@ pub fn prepare(
                 .cloned()
                 .unwrap_or_default()
         };
-        secret_values.push(basic_credentials(&resolved(username), &resolved(password)));
+        // An Auth-tab credential is a secret even when typed in directly rather than
+        // through a `{{secret}}`: under a header the credential list does not name, in
+        // the query, or echoed back in a body (httpbin `/headers`) it would otherwise
+        // be stored in the clear.
+        match &effective {
+            EffectiveAuth::Basic { username, password } => {
+                // The echo carries the Basic credential's base64 form, which the
+                // resolved username and password never match, so the exact string the
+                // auth sends is registered too.
+                secret_values.push(basic_credentials(&resolved(username), &resolved(password)));
+            }
+            EffectiveAuth::Bearer { token } => {
+                let token = resolved(token);
+                secret_values.push(format!("Bearer {token}"));
+                secret_values.push(token);
+            }
+            EffectiveAuth::ApiKey { value, .. } => secret_values.push(resolved(value)),
+            EffectiveAuth::None | EffectiveAuth::Unsupported(_) => {}
+        }
     }
     let secrets_used = SecretValues::from_values(secret_values);
     Ok(Prepared {

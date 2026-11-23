@@ -19,6 +19,7 @@ path = "src/integration_tests.rs"
 api_model.workspace = true
 base64.workspace = true
 console.workspace = true
+futures.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 # Enabling `test-support` is what makes `FakeTransport` visible to this crate's tests:
 # dev-dependencies unify features with the test build.

@@ -8,6 +8,8 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
+use percent_encoding::{AsciiSet, CONTROLS, NON_ALPHANUMERIC, utf8_percent_encode};
+
 /// Every redacted occurrence becomes this. A fixed shape hides how long the secret was, and
 /// the bullet reads as "something was here" in any font. Public because surfaces that must
 /// mask exactly like redaction (the environment quick-look's secret rows) reuse this one
@@ -47,6 +49,10 @@ const CREDENTIAL_HEADERS: [&str; 14] = [
     "proxy-authenticate",
 ];
 
+/// The headers whose value is a URL: redacted through [`redact_url`], which also masks
+/// userinfo and percent-encoded secrets in any spelling.
+const URL_HEADERS: [&str; 3] = ["location", "content-location", "referer"];
+
 /// The URI schemes that carry no authority (RFC 3986 §3.3): everything after the `:` is an
 /// opaque path, so `mailto:bob@example.com` has no userinfo to mask. Only consulted for URLs
 /// without `//`, where a scheme and the schemeless `user:pass@host/…` shape are otherwise
@@ -81,6 +87,10 @@ const OPAQUE_SCHEMES: [&str; 16] = [
 #[derive(Clone, PartialEq, Eq)]
 pub struct SecretValues {
     values: BTreeSet<String>,
+    /// Each kept value as encoders rewrite it (see [`encoded_forms`]). Text is matched
+    /// against these too; URLs are not, because [`redact_url`] decodes every component and
+    /// a literal match on an encoded form would cut a component it must mask whole.
+    forms: BTreeSet<String>,
     refused: usize,
 }
 
@@ -89,6 +99,7 @@ impl SecretValues {
     pub fn new() -> Self {
         Self {
             values: BTreeSet::new(),
+            forms: BTreeSet::new(),
             refused: 0,
         }
     }
@@ -120,6 +131,7 @@ impl SecretValues {
     /// [`Self::refused_count`] instead of per value.
     fn keep(&mut self, value: String) -> bool {
         if is_maskable(&value) {
+            self.forms.extend(encoded_forms(&value));
             self.values.insert(value);
             return true;
         }
@@ -132,6 +144,11 @@ impl SecretValues {
     /// How many non-empty values were refused because they cannot be masked.
     pub fn refused_count(&self) -> usize {
         self.refused
+    }
+
+    /// Every kept value and every encoded form of one.
+    fn all(&self) -> impl Iterator<Item = &str> {
+        self.values.iter().chain(&self.forms).map(String::as_str)
     }
 
     /// How many values are kept.
@@ -148,7 +165,7 @@ impl SecretValues {
     /// caller that reads a bounded window of untrusted text reads this many bytes past
     /// its cut, so every secret the cut could split is read whole.
     pub fn max_len(&self) -> usize {
-        self.values.iter().map(String::len).max().unwrap_or(0)
+        self.all().map(str::len).max().unwrap_or(0)
     }
 
     /// The longest prefix of `text` no kept secret can straddle the end of: every
@@ -162,7 +179,7 @@ impl SecretValues {
         let mut end = text.len();
         loop {
             let mut straddle = 0;
-            for secret in &self.values {
+            for secret in self.all() {
                 let longest = secret.len().saturating_sub(1).min(end);
                 for length in (1..=longest).rev() {
                     // `get` also enforces char boundaries on both sides: a match that
@@ -206,9 +223,22 @@ impl fmt::Debug for SecretValues {
 /// leaves a fragment of another in the clear. Running the result through here again returns
 /// it unchanged: the mask carries no secret (values containing its character are refused,
 /// see [`SecretValues`]), so an already-redacted string never matches again.
+///
+/// Each secret's encoded forms are masked too: a percent-encoded form body, a redirect
+/// target or a JSON echo carries the secret rewritten, never literally.
 pub fn redact_text(text: &str, secrets: &SecretValues) -> String {
+    mask_occurrences(text, secrets.all())
+}
+
+/// [`redact_text`] over the literal values only, for [`redact_url`], which decodes the
+/// encoded spellings itself.
+fn redact_literal_text(text: &str, secrets: &SecretValues) -> String {
+    mask_occurrences(text, secrets.values.iter().map(String::as_str))
+}
+
+fn mask_occurrences<'a>(text: &str, secrets: impl Iterator<Item = &'a str>) -> String {
     let mut spans: Vec<(usize, usize)> = Vec::new();
-    for secret in &secrets.values {
+    for secret in secrets {
         push_spans(text, secret, &mut spans);
     }
     if spans.is_empty() {
@@ -263,6 +293,10 @@ pub fn redact_headers(
             let redacted_name = redact_text(name, secrets);
             let value = if is_credential_header(name) || is_credential_header(&redacted_name) {
                 MASK.to_owned()
+            } else if is_url_header(name) || is_url_header(&redacted_name) {
+                // A redirect target can carry the secret in any percent spelling; the URL
+                // redaction decodes each component instead of matching literal text.
+                redact_url(value, secrets)
             } else {
                 redact_text(value, secrets)
             };
@@ -318,7 +352,7 @@ fn redact_url_once(url: &str, secrets: &SecretValues) -> String {
     // leave the rest of the secret in the clear. Neither heuristic may preempt the other.
     let masked = mask_url_spans(url, secrets);
     let parts_masked = mask_encoded_parts(&masked, secrets);
-    let text_masked = redact_text(&parts_masked, secrets);
+    let text_masked = redact_literal_text(&parts_masked, secrets);
     mask_decoded_spans(&text_masked, secrets)
 }
 
@@ -434,10 +468,108 @@ fn userinfo_regions(url: &str) -> Vec<(usize, usize)> {
 /// the BOM and the soft hyphen, which `trim()` keeps — is padding, and a padded name is
 /// still that header.
 fn is_credential_header(name: &str) -> bool {
+    is_one_of(name, &CREDENTIAL_HEADERS)
+}
+
+/// The headers whose value is a URL, matched like [`is_credential_header`].
+fn is_url_header(name: &str) -> bool {
+    is_one_of(name, &URL_HEADERS)
+}
+
+fn is_one_of(name: &str, names: &[&str]) -> bool {
     let visible: String = name.chars().filter(char::is_ascii_graphic).collect();
-    CREDENTIAL_HEADERS
+    names
         .iter()
-        .any(|credential| visible.eq_ignore_ascii_case(credential))
+        .any(|candidate| visible.eq_ignore_ascii_case(candidate))
+}
+
+/// RFC 3986 unreserved characters stay literal; everything else is escaped. This is what
+/// `encodeURIComponent` and most HTTP libraries write for one query value or path segment.
+const COMPONENT: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~');
+
+/// What the `url` crate (WHATWG URL) escapes in a path segment: a server that builds a
+/// `Location` path from the secret writes `+` and `=` literally and only `/` and the like
+/// escaped.
+const PATH_SEGMENT: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'<')
+    .add(b'>')
+    .add(b'`')
+    .add(b'?')
+    .add(b'{')
+    .add(b'}')
+    .add(b'%')
+    .add(b'/');
+
+/// What the `url` crate (WHATWG URL) escapes in a query: `+ / =` stay literal.
+const QUERY: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'<')
+    .add(b'>')
+    .add(b'\'');
+
+/// The forms `value` takes on the wire or in an echo once an encoder has rewritten it: the
+/// literal match in [`redact_text`] never sees `ab%2Bc` as `ab+c`, so each form is a secret
+/// of its own. Forms equal to `value` collapse in the set. Every form is at least as long as
+/// `value` and adds no mask character, so a maskable value never yields an unmaskable form.
+///
+/// `Decision:` JSON's `\uXXXX` spelling of non-ASCII or of `"` (an `ensure_ascii`
+/// encoder) is not derived: it is one of many equivalent spellings per character and
+/// enumerating them is unbounded. The common serializers' forms are covered.
+fn encoded_forms(value: &str) -> Vec<String> {
+    let mut forms = vec![
+        url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>(),
+        utf8_percent_encode(value, COMPONENT).to_string(),
+        utf8_percent_encode(value, PATH_SEGMENT).to_string(),
+        utf8_percent_encode(value, QUERY).to_string(),
+    ];
+    // Percent-escapes are case-insensitive and some servers echo them in lowercase hex
+    // (legacy encoders such as `HttpUtility.UrlEncode`), so each percent form is also kept
+    // with lowercase hex digits. Mask-more-never-less: a spelling no encoder produces costs
+    // one extra search, nothing more.
+    let lowercase: Vec<String> = forms
+        .iter()
+        .map(|form| lowercase_percent_hex(form))
+        .filter(|lowered| !forms.contains(lowered))
+        .collect();
+    forms.extend(lowercase);
+    // `to_string` of a `&str` cannot fail; a failure would only mean no JSON form to add.
+    if let Ok(quoted) = serde_json::to_string(value)
+        && let Some(escaped) = quoted
+            .strip_prefix('"')
+            .and_then(|rest| rest.strip_suffix('"'))
+    {
+        // JSON allows `\/` for `/` and PHP's `json_encode` writes it by default.
+        forms.push(escaped.replace('/', "\\/"));
+        forms.push(escaped.to_owned());
+    }
+    forms
+}
+
+/// `form` with the two hex digits after every `%` lowercased; nothing else changes.
+fn lowercase_percent_hex(form: &str) -> String {
+    let mut lowered = String::with_capacity(form.len());
+    let mut hex_digits_left = 0;
+    for character in form.chars() {
+        if hex_digits_left > 0 {
+            lowered.push(character.to_ascii_lowercase());
+            hex_digits_left -= 1;
+        } else {
+            if character == '%' {
+                hex_digits_left = 2;
+            }
+            lowered.push(character);
+        }
+    }
+    lowered
 }
 
 fn is_maskable(value: &str) -> bool {
@@ -759,3 +891,11 @@ mod tests;
 #[cfg(test)]
 #[path = "redact_prefix_tests.rs"]
 mod prefix_tests;
+
+#[cfg(test)]
+#[path = "redact_derived_forms_tests.rs"]
+mod derived_forms_tests;
+
+#[cfg(test)]
+#[path = "redact_lowercase_hex_tests.rs"]
+mod lowercase_hex_tests;
