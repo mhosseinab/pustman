@@ -117,7 +117,7 @@ const JAR_LOCK_MESSAGE: &str =
 pub struct CookieDialogInputs {
     /// The workspace the jar and its saved rows belong to.
     pub workspace_id: String,
-    /// The app's local store `save_jar` persists the jar into.
+    /// The app's local store `save_jar_latest` persists the jar into.
     pub store: Arc<Mutex<LocalStore>>,
     /// The workspace's cookie jar the dialog lists and changes.
     pub jar: Arc<Mutex<CookieJar>>,
@@ -458,7 +458,7 @@ impl CookieDialog {
     }
 
     /// The form's Save and Cancel (REQ-HTTP-08): a save goes through the jar and the
-    /// same background `save_jar` every other change uses, and closes the form when it
+    /// same background `save_jar_latest` every other change uses, and closes the form when it
     /// lands; a refused save stays open on exactly the fields it failed on.
     fn on_form_event(
         &mut self,

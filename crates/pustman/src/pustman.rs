@@ -264,8 +264,9 @@ fn init_cookie_saving(cx: &mut App) {
         .push(subscription);
 }
 
-/// Persist the shared jar after a completed send (REQ-WSP-06): `save_jar` snapshots it on
-/// this thread — cheap, no IO — and writes on the background executor (ADR-0002). A failed
+/// Persist the shared jar after a completed send (REQ-WSP-06): `save_jar_latest` snapshots
+/// it inside its background task under the store's lock and writes there (ADR-0002), so
+/// every writer of the jar is ordered (#287). A failed
 /// write is a [`StartupProblems`] toast and a logged error: a lost save is never silent
 /// (AGENTS.md — errors reach the user).
 fn save_cookie_jar(cx: &mut App) {
