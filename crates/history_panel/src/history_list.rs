@@ -29,6 +29,8 @@ use time::{Date, OffsetDateTime};
 use ui::prelude::*;
 use workspace::{DockPosition, Panel, Workspace};
 
+use crate::actions::{ClearHistory, DeleteEntry};
+use crate::delete_entries::HistoryMaintenance;
 use crate::open_entry::open_entry;
 
 #[cfg(test)]
@@ -67,6 +69,10 @@ mod focus_border_tests;
 #[path = "history_list_a11y_tests.rs"]
 mod a11y_tests;
 
+#[cfg(test)]
+#[path = "history_list_delete_ui_tests.rs"]
+mod delete_ui_tests;
+
 /// The panel's stable id: its dock selector entry, its hitbox and the id
 /// [`crate::focus_history_panel`] activates it under.
 pub const PANEL_ID: &str = "history";
@@ -101,6 +107,9 @@ const NEW_REQUEST_ID: &str = "history-new-request";
 
 /// The Clear search call to action's stable id and test selector.
 const CLEAR_SEARCH_ID: &str = "history-clear-search";
+
+/// The header's "Clear all" button: its stable id and test selector.
+pub(crate) const CLEAR_ALL_ID: &str = "history-clear-all";
 
 /// One row of the list: a day header or one recorded send.
 #[derive(Clone, Debug, PartialEq)]
@@ -331,6 +340,67 @@ impl HistoryList {
         });
     }
 
+    /// The delete operations over this panel's workspace history (REQ-HIST-04), with the
+    /// [`Workspace`] resolved from the window root (the [`Self::open_row`] shape) so a
+    /// failure reaches the user as its toast. [`None`] in a window whose root is not a
+    /// workspace: there is no one there to confirm with or report to.
+    fn maintenance(&self, window: &Window, cx: &mut Context<Self>) -> Option<HistoryMaintenance> {
+        let workspace = window.root::<Workspace>().flatten()?;
+        Some(HistoryMaintenance::new(
+            Arc::clone(&self.store),
+            self.workspace_id.clone(),
+            &cx.entity(),
+            &workspace,
+        ))
+    }
+
+    /// Delete one entry by its stored id — the row's delete button and the delete key
+    /// both land here. No confirm: one entry is one action (REQ-HIST-04). Deleting the
+    /// selected entry moves the selection to its neighbour, so the key can be pressed
+    /// again without re-aiming.
+    fn delete_entry(&mut self, entry_id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        // Without a workspace nothing is deleted, so the selection must not move either.
+        let Some(maintenance) = self.maintenance(window, cx) else {
+            return;
+        };
+        if self.selected_entry_id == Some(entry_id) {
+            self.selected_entry_id = self.neighbour_entry_id(entry_id);
+            cx.notify();
+        }
+        maintenance.delete_entry(entry_id, cx);
+    }
+
+    /// The entry after `entry_id` in draw order, or the one before it when it is last.
+    fn neighbour_entry_id(&self, entry_id: i64) -> Option<i64> {
+        let ids: Vec<i64> = self
+            .rows
+            .iter()
+            .filter_map(|row| match row {
+                HistoryRow::Entry(entry) => entry.id,
+                HistoryRow::Day { .. } => None,
+            })
+            .collect();
+        let position = ids.iter().position(|&id| id == entry_id)?;
+        ids.get(position + 1)
+            .or_else(|| position.checked_sub(1).and_then(|before| ids.get(before)))
+            .copied()
+    }
+
+    /// The delete key: deletes the selected entry, and does nothing while the keyboard
+    /// is on no row.
+    fn delete_selected(&mut self, _: &DeleteEntry, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(entry_id) = self.selected_entry_id {
+            self.delete_entry(entry_id, window, cx);
+        }
+    }
+
+    /// "Clear all": opens the confirm modal; only its Confirm clears.
+    fn clear_history(&mut self, _: &ClearHistory, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(maintenance) = self.maintenance(window, cx) {
+            maintenance.clear_all(window, cx);
+        }
+    }
+
     /// Read the history under the current query and land it in the rows. A failure
     /// reaches the user as [`LOAD_FAILURE_MESSAGE`] above the list (AGENTS.md — errors
     /// are never only logged).
@@ -446,8 +516,14 @@ impl HistoryList {
         );
         let selected = entry.id.is_some() && entry.id == self.selected_entry_id;
         let clicked_entry = entry.clone();
+        let delete_button = entry
+            .id
+            .map(|entry_id| self.render_delete_button(entry_id, index, selected, cx));
         v_flex()
             .id(row_id)
+            .when_some(entry.id, |row, entry_id| {
+                row.group(row_hover_group(entry_id))
+            })
             .role(Role::ListBoxOption)
             .aria_selected(selected)
             .w_full()
@@ -477,9 +553,45 @@ impl HistoryList {
                                 .color(method_color(&entry.method, cx)),
                         ),
                     )
-                    .child(target_element(entry, index, cx)),
+                    .child(target_element(entry, index, cx))
+                    .children(delete_button),
             )
             .child(meta_element(entry))
+            .into_any_element()
+    }
+
+    /// One row's delete button (REQ-HIST-04): faded out until the row is hovered or the
+    /// button takes keyboard focus, and shown outright on the keyboard selection, where
+    /// the delete key also acts. Its tooltip names it and teaches that key.
+    fn render_delete_button(
+        &self,
+        entry_id: i64,
+        index: usize,
+        selected: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selector = delete_button_selector(entry_id);
+        let button_id = ElementId::NamedChild(
+            Arc::new(entry_element_id(Some(entry_id), index)),
+            SharedString::new_static("delete"),
+        );
+        div()
+            .flex_none()
+            .debug_selector(move || selector)
+            .child(
+                IconButton::new(
+                    button_id,
+                    IconName::Trash,
+                    Tooltip::for_action("Delete history entry", &DeleteEntry),
+                )
+                .size(ButtonSize::Default)
+                .when(!selected, |button| {
+                    button.faded_until_hovered(row_hover_group(entry_id))
+                })
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    this.delete_entry(entry_id, window, cx);
+                })),
+            )
             .into_any_element()
     }
 }
@@ -536,19 +648,29 @@ impl Render for HistoryList {
             .on_action(cx.listener(Self::select_next))
             .on_action(cx.listener(Self::select_previous))
             .on_action(cx.listener(Self::activate))
+            .on_action(cx.listener(Self::delete_selected))
+            .on_action(cx.listener(Self::clear_history))
             .size_full()
             .font_ui(cx)
             .p(DynamicSpacing::Base08.rems(cx))
             .gap(DynamicSpacing::Base06.rems(cx))
             .child(
-                div()
+                h_flex()
                     .w_full()
                     .flex_none()
-                    .border_1()
-                    .border_color(colors.border)
-                    .rounded_sm()
-                    .px(DynamicSpacing::Base06.rems(cx))
-                    .child(self.search.clone()),
+                    .items_center()
+                    .gap(DynamicSpacing::Base04.rems(cx))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .border_1()
+                            .border_color(colors.border)
+                            .rounded_sm()
+                            .px(DynamicSpacing::Base06.rems(cx))
+                            .child(self.search.clone()),
+                    )
+                    .child(self.clear_all_button(search_is_empty, cx)),
             )
             .map(|panel| match &error {
                 Some(error) => panel.child(
@@ -569,6 +691,27 @@ impl Render for HistoryList {
 }
 
 impl HistoryList {
+    /// The header's "Clear all" (REQ-HIST-04): opens the confirm modal. Disabled only
+    /// when the history is known to be empty — a loaded, unfiltered, error-free read
+    /// with no rows — since a search can hide rows that Clear all would still remove.
+    fn clear_all_button(&self, search_is_empty: bool, cx: &mut Context<Self>) -> AnyElement {
+        let nothing_to_clear =
+            !self.is_loading && self.error.is_none() && search_is_empty && self.rows.is_empty();
+        div()
+            .flex_none()
+            .debug_selector(|| CLEAR_ALL_ID.to_owned())
+            .child(
+                Button::new(CLEAR_ALL_ID, "Clear all")
+                    .style(ButtonStyle::Subtle)
+                    .tooltip(Tooltip::for_action("Clear all history", &ClearHistory))
+                    .disabled(nothing_to_clear)
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.clear_history(&ClearHistory, window, cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
     /// What the area under the search box shows: the rows when there are any, and
     /// otherwise the one state that explains why the list is empty — the design
     /// system's icon + title + call to action block, never a caption below its scale
@@ -754,6 +897,17 @@ fn entry_element_id(id: Option<i64>, index: usize) -> ElementId {
         Some(id) => ElementId::from(format!("history-entry-{id}")),
         None => ElementId::from(format!("history-entry-fallback-{index}")),
     }
+}
+
+/// One entry row's delete button test selector: the stored entry's key plus `delete`.
+/// Only rows with a stored id draw the button — there is nothing to delete without one.
+fn delete_button_selector(id: i64) -> String {
+    format!("{}-delete", entry_element_id(Some(id), 0))
+}
+
+/// The hover group one entry row reveals its delete button under.
+fn row_hover_group(id: i64) -> SharedString {
+    SharedString::from(format!("{}-hover", entry_element_id(Some(id), 0)))
 }
 
 /// One entry row's target box test selector: the row's stable key plus `target`, the

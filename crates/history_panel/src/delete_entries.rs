@@ -10,8 +10,9 @@
 //! `Decision:` the operations are pub methods on [`HistoryMaintenance`], not
 //! `pustman_actions` entries: `pustman_actions::history` holds only `Focus` and this
 //! step may not edit that crate — history delete/clear actions are not yet in
-//! `pustman_actions`. The step that draws the row's delete button and the panel's
-//! "Clear all" button wires them to these methods.
+//! `pustman_actions`. [`HistoryList`] wires them: each row's delete button and the
+//! `history_panel::DeleteEntry` key call [`HistoryMaintenance::delete_entry`], and the
+//! header's "Clear all" calls [`HistoryMaintenance::clear_all`].
 
 use std::sync::{Arc, Mutex};
 
@@ -54,10 +55,10 @@ const CLEAR_CONFIRM_BODY: &str =
 
 /// The Cancel button's test hook ([`ui::components::list::VirtualList`]'s pattern: a
 /// stable selector beside the element id).
-const CANCEL_BUTTON_SELECTOR: &str = "history-clear-cancel";
+pub(crate) const CANCEL_BUTTON_SELECTOR: &str = "history-clear-cancel";
 
 /// The Confirm button's test hook.
-const CONFIRM_BUTTON_SELECTOR: &str = "history-clear-confirm";
+pub(crate) const CONFIRM_BUTTON_SELECTOR: &str = "history-clear-confirm";
 
 /// The two history writes [`HistoryMaintenance`] runs, as one seam over [`LocalStore`]:
 /// the store itself takes no faults, so a test drives the failure-toast path with a
