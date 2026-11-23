@@ -317,8 +317,11 @@ fn install_cookie_wiring(cx: &mut App, store: &Arc<Mutex<LocalStore>>) {
         return;
     };
     let store = Arc::clone(store);
-    let loaded =
-        http_engine::load_jar(cx.background_executor(), Arc::clone(&store), WORKSPACE_ID.to_owned());
+    let loaded = http_engine::load_jar(
+        cx.background_executor(),
+        Arc::clone(&store),
+        WORKSPACE_ID.to_owned(),
+    );
     cx.spawn(async move |cx| {
         match loaded.await {
             Ok(loaded_jar) => {
@@ -329,8 +332,7 @@ fn install_cookie_wiring(cx: &mut App, store: &Arc<Mutex<LocalStore>>) {
                     // merge API, and `CookieJar::add` would narrow a `Domain=` cookie to
                     // a host-only one. The store opens at startup, before any request tab
                     // can send.
-                    let mut jar_guard =
-                        jar.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let mut jar_guard = jar.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                     *jar_guard = loaded_jar;
                 });
             }

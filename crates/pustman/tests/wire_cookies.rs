@@ -213,7 +213,7 @@ fn app_cookie_jar(cx: &VisualTestContext) -> Arc<Mutex<CookieJar>> {
 
 /// A loopback server on the app's tokio runtime — the one `gpui_tokio::init` built.
 fn start_test_server(cx: &VisualTestContext) -> TestServer {
-    let handle = cx.read(|cx| gpui_tokio::Tokio::handle(cx));
+    let handle = cx.read(gpui_tokio::Tokio::handle);
     handle
         .block_on(TestServer::start())
         .expect("the loopback test server starts")
