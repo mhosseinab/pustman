@@ -14,6 +14,7 @@
 //! plus [`init`] — called once at startup after `command_palette` (whose [`Picker`] this
 //! reuses).
 
+pub mod env_editor;
 pub mod quick_look;
 pub mod selector;
 
@@ -22,9 +23,11 @@ pub use selector::{EnvironmentSelector, SelectorInputs, install_inputs};
 use gpui::App;
 
 /// Set the environment picker up: answer `environment::SelectEnvironment` by opening the
-/// picker over the active workspace, and `environment::QuickLook` by opening the
-/// quick-look ([`quick_look`]).
+/// picker over the active workspace, `environment::QuickLook` by opening the quick-look
+/// ([`quick_look`]), and `env_editor::Open` by opening the variables editor
+/// ([`env_editor`]).
 pub fn init(cx: &mut App) {
     selector::init(cx);
     quick_look::init(cx);
+    env_editor::init(cx);
 }

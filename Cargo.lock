@@ -1776,11 +1776,13 @@ dependencies = [
  "gpui",
  "pustman_actions",
  "secrets",
+ "serde_json",
  "storage",
  "tempfile",
  "text_input",
  "ui",
  "workspace",
+ "workspace_store",
 ]
 
 [[package]]
