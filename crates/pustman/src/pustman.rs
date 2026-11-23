@@ -38,10 +38,11 @@ pub struct AppStore(pub Arc<Mutex<LocalStore>>);
 
 impl Global for AppStore {}
 
-/// The problems the init order ran into, and the workspace that shows them once the window
-/// is open: AGENTS.md — a failure the user must know about is never only a log. Problems
-/// arriving before the window (theme, keymap) and after it (the store's background open)
-/// both land here and become error toasts.
+/// The problems the app runs into — at startup or later — and the workspace that shows
+/// them once the window is open: AGENTS.md — a failure the user must know about is never
+/// only a log. Problems arriving before the window (theme, keymap) and after it (the
+/// store's background open, a failed history prune) both land here and become error
+/// toasts.
 #[derive(Default)]
 pub struct StartupProblems {
     workspace: Option<WeakEntity<Workspace>>,
@@ -257,9 +258,28 @@ fn install_history_recording(cx: &mut App) {
         return;
     }
     let retention_days = settings::Settings::get_global(cx).history_retention_days;
-    let recorder =
-        http_engine::HistoryRecorder::new(store, WORKSPACE_ID).with_retention_days(retention_days);
+    // The retention prune runs on the writer's background task (ADR-0002), where no
+    // toast can be shown: its one fixed message crosses to the foreground on this
+    // channel and becomes an error toast (AGENTS.md — errors reach the user).
+    let (prune_failures, prune_failure_reports) = smol::channel::unbounded::<&'static str>();
+    let recorder = http_engine::HistoryRecorder::new(store, WORKSPACE_ID)
+        .with_retention_days(retention_days)
+        .with_prune_failure_report(move |message| {
+            if prune_failures.try_send(message).is_err() {
+                // Handled: the app is shutting down and the reader below is gone — the
+                // toast would have nowhere to show.
+            }
+        });
     client.update(cx, |client, _| client.set_history(recorder));
+    // The reader, for the app's lifetime (detached like [`ConsoleWiring`]'s feed): the
+    // app keeps exactly one per recorder, and a dropped task stops nothing while any
+    // sender is alive.
+    cx.spawn(async move |cx| {
+        while let Ok(message) = prune_failure_reports.recv().await {
+            cx.update(|cx| StartupProblems::push(cx, message));
+        }
+    })
+    .detach();
     cx.default_global::<HistoryRecordingWiring>()
         .recorded
         .push(client.entity_id());

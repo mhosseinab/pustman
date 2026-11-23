@@ -4965,6 +4965,7 @@ dependencies = [
  "response_viewer",
  "secrets",
  "settings",
+ "smol",
  "storage",
  "text_input",
  "theme",

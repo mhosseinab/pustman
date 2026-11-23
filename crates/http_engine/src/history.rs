@@ -61,6 +61,9 @@ pub struct HistoryRecorder {
     workspace_id: String,
     retention_gate: Arc<RetentionGate>,
     retention_days: u32,
+    /// Where a failed retention prune is reported (AGENTS.md: errors reach the user).
+    /// `None` keeps the log-only floor of a caller that installs no report.
+    prune_failure_report: Option<Arc<dyn Fn(&'static str) + Send + Sync>>,
 }
 
 impl HistoryRecorder {
@@ -73,6 +76,7 @@ impl HistoryRecorder {
             workspace_id: workspace_id.into(),
             retention_gate: Arc::new(RetentionGate::new()),
             retention_days: DEFAULT_HISTORY_RETENTION_DAYS,
+            prune_failure_report: None,
         }
     }
 
@@ -83,6 +87,30 @@ impl HistoryRecorder {
     pub fn with_retention_days(mut self, retention_days: u32) -> Self {
         self.retention_days = retention_days;
         self
+    }
+
+    /// Report a failed retention prune (REQ-HIST-04) through `report`, which receives
+    /// the one fixed message `retention` folds the failure into — never the error
+    /// itself, whose text can quote the rows it failed on (PRD §7). The caller that owes
+    /// the user the message installs the report (AGENTS.md: errors reach the user); a
+    /// recorder with no report logs the same fixed message instead.
+    pub fn with_prune_failure_report(
+        mut self,
+        report: impl Fn(&'static str) + Send + Sync + 'static,
+    ) -> Self {
+        self.prune_failure_report = Some(Arc::new(report));
+        self
+    }
+
+    /// Tell the user the retention prune failed (AGENTS.md: errors reach the user):
+    /// through the report [`Self::with_prune_failure_report`] installs, which runs on
+    /// the writer's background task and reaches the caller's own surface, or one fixed
+    /// log line when there is none.
+    fn report_prune_failure(&self, message: &'static str) {
+        match &self.prune_failure_report {
+            Some(report) => report(message),
+            None => log::error!("{message}"),
+        }
     }
 
     /// The record one send leaves behind (REQ-HIST-01 records every send). The request
@@ -210,7 +238,8 @@ impl HistoryDraft {
     /// (REQ-HIST-04). Runs on a background task (ADR-0002) and holds no lock across an
     /// await. Both failures — a poisoned lock and a failed insert — are one fixed
     /// message: the error behind them is dropped unread, because its text can quote the
-    /// row it failed on.
+    /// row it failed on. A failed prune behind the insert is reported to the user
+    /// instead (AGENTS.md: errors reach the user — see [`Self::report_prune_failure`]).
     fn write(&self, entry: HistoryEntry) {
         let mut recorded = match self.recorded.lock() {
             Ok(recorded) => recorded,
@@ -232,11 +261,13 @@ impl HistoryDraft {
                 }
                 // Inside the same lock scope, after the insert: a failed prune never
                 // blocks or undoes the row above.
-                prune_once(
+                if let Some(message) = prune_once(
                     &self.recorder.retention_gate,
                     &store,
                     self.recorder.retention_days,
-                );
+                ) {
+                    self.recorder.report_prune_failure(message);
+                }
             }
             Err(_) => log::error!("the history row could not be written"),
         }
