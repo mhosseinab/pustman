@@ -1,11 +1,15 @@
 //! `history_panel` — the left-dock History panel (PRD §8.5, REQ-HIST-01..04): one
 //! workspace's recorded sends, grouped by day in a virtualized list with a search box
 //! (REQ-HIST-01, REQ-HIST-04). The rows carry method, target, status and time only —
-//! never a request or response body (REQ-HIST-03). Opening an entry, deleting entries
-//! and "Save to collection" are later steps; the list is read-only here.
+//! never a request or response body (REQ-HIST-03). Opening an entry and deleting
+//! entries are here ([`open_entry`], [`delete_entries`]); "Save to collection" is a
+//! later step.
 //!
-//! Two doors in:
+//! Doors in:
 //! - [`history_list`] — the [`HistoryList`] panel and the rows it draws.
+//! - [`open_entry`] — one recorded send comes back as a request tab (REQ-HIST-02).
+//! - [`delete_entries`] — deleting one entry, and "Clear all" behind its confirm modal
+//!   (REQ-HIST-04).
 //! - [`init`] — the app-level wiring this crate owns: `history::Focus` moves keyboard
 //!   focus to the panel (plan D10: feature crates implement their action handlers).
 
