@@ -17,7 +17,7 @@
 
 use std::any::{Any, TypeId, type_name};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use gpui::{App, AppContext, Global, Task};
@@ -339,7 +339,13 @@ impl SettingsStore {
     /// cannot be read keeps the last good values and lands on [`Self::last_error`].
     /// Calling `watch` again replaces the running watcher.
     pub fn watch(cx: &mut App) {
-        let path = paths::user_settings_file();
+        Self::watch_file(cx, paths::user_settings_file());
+    }
+
+    /// The [`Self::watch`] loop over `path` instead of [`paths::user_settings_file`], so
+    /// the loop itself is testable against a temp dir rather than the user's real settings
+    /// file. Calling it again replaces the running watcher of either entry point.
+    fn watch_file(cx: &mut App, path: PathBuf) {
         let task = cx.spawn(async move |cx| {
             let mut last_seen: Option<String> = None;
             loop {
@@ -385,8 +391,16 @@ impl SettingsStore {
 
     /// Record a failure that came with no blob to merge ([`Self::watch`] finding a file
     /// it cannot read): the store keeps the last good values and the error lands on
-    /// [`Self::last_error`] for the UI to show.
+    /// [`Self::last_error`] for the UI to show. An error that is already recorded is left
+    /// alone, so a poll that reads the same failure again does not notify observers —
+    /// nothing an observer could act on has changed.
     fn record_error(cx: &mut App, error: SettingsError) {
+        let already_recorded = cx
+            .try_global::<SettingsStore>()
+            .is_some_and(|store| store.last_error.as_ref() == Some(&error));
+        if already_recorded {
+            return;
+        }
         cx.default_global::<SettingsStore>().last_error = Some(error);
     }
 
@@ -469,3 +483,7 @@ impl Setting for Settings {
 #[cfg(test)]
 #[path = "settings_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "settings_watch_tests.rs"]
+mod watch_tests;
