@@ -29,6 +29,10 @@ use crate::history_list::HistoryList;
 #[path = "delete_entries_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "delete_failure_tests.rs"]
+mod failure_tests;
+
 /// The one message a failed single delete shows. `storage`'s error text can quote the
 /// row it failed on, and rows are request content (REQ-HIST-03) — the failure is folded
 /// into this fixed message and the error is dropped unread (the shape
@@ -55,6 +59,41 @@ const CANCEL_BUTTON_SELECTOR: &str = "history-clear-cancel";
 /// The Confirm button's test hook.
 const CONFIRM_BUTTON_SELECTOR: &str = "history-clear-confirm";
 
+/// The two history writes [`HistoryMaintenance`] runs, as one seam over [`LocalStore`]:
+/// the store itself takes no faults, so a test drives the failure-toast path with a
+/// store that refuses every write (`delete_failure_tests.rs`).
+///
+/// `Decision:` the seam lives here, not in `storage`: `LocalStore` is the synchronous
+/// database (ADR-0002) and must not grow fault switches for one caller's error
+/// reporting — the caller that owes the user a message owns the seam.
+trait HistoryStore: Send + Sync + 'static {
+    /// Remove one recorded send by its stored id.
+    fn delete(&self, workspace_id: &str, entry_id: i64) -> anyhow::Result<()>;
+
+    /// Remove every entry `workspace_id` recorded.
+    fn clear(&self, workspace_id: &str) -> anyhow::Result<()>;
+}
+
+impl HistoryStore for Mutex<LocalStore> {
+    fn delete(&self, workspace_id: &str, entry_id: i64) -> anyhow::Result<()> {
+        // The lock guards the write only — it is never held across an `.await`
+        // (`.agents/rules/rust-code.md`).
+        let store = self
+            .lock()
+            .map_err(|_| anyhow::anyhow!("the local store lock is poisoned"))?;
+        store.history().delete(workspace_id, entry_id)?;
+        Ok(())
+    }
+
+    fn clear(&self, workspace_id: &str) -> anyhow::Result<()> {
+        let store = self
+            .lock()
+            .map_err(|_| anyhow::anyhow!("the local store lock is poisoned"))?;
+        store.history().clear(workspace_id)?;
+        Ok(())
+    }
+}
+
 /// The delete-and-clear operations of one workspace's history: what a row's delete
 /// button and the panel's "Clear all" will run. It carries the store and the workspace
 /// the rows belong to, plus weak references to the list to refresh and the workspace to
@@ -62,7 +101,7 @@ const CONFIRM_BUTTON_SELECTOR: &str = "history-clear-confirm";
 /// click.
 #[derive(Clone)]
 pub struct HistoryMaintenance {
-    store: Arc<Mutex<LocalStore>>,
+    store: Arc<dyn HistoryStore>,
     workspace_id: String,
     list: WeakEntity<HistoryList>,
     workspace: WeakEntity<Workspace>,
@@ -73,6 +112,17 @@ impl HistoryMaintenance {
     /// reporting failures to `workspace`.
     pub fn new(
         store: Arc<Mutex<LocalStore>>,
+        workspace_id: impl Into<String>,
+        list: &Entity<HistoryList>,
+        workspace: &Entity<Workspace>,
+    ) -> Self {
+        Self::over_store(store, workspace_id, list, workspace)
+    }
+
+    /// The same operations over any [`HistoryStore`] seam — what `new` wraps a
+    /// [`LocalStore`] into, and where a failing store plugs in.
+    fn over_store(
+        store: Arc<dyn HistoryStore>,
         workspace_id: impl Into<String>,
         list: &Entity<HistoryList>,
         workspace: &Entity<Workspace>,
@@ -90,8 +140,7 @@ impl HistoryMaintenance {
     pub fn delete_entry(&self, entry_id: i64, cx: &mut App) {
         let workspace_id = self.workspace_id.clone();
         self.run(cx, DELETE_FAILURE_MESSAGE, move |store| {
-            store.history().delete(&workspace_id, entry_id)?;
-            Ok(())
+            store.delete(&workspace_id, entry_id)
         });
     }
 
@@ -118,13 +167,14 @@ impl HistoryMaintenance {
     fn clear_every_entry(&self, cx: &mut App) {
         let workspace_id = self.workspace_id.clone();
         self.run(cx, CLEAR_FAILURE_MESSAGE, move |store| {
-            store.history().clear(&workspace_id)?;
-            Ok(())
+            store.clear(&workspace_id)
         });
     }
 
     /// Run one delete off the foreground and land its result: a success refreshes the
-    /// list, a failure becomes an error toast on the workspace.
+    /// list, a failure becomes an error toast on the workspace. The work runs against
+    /// the [`HistoryStore`] seam, which locks around its own write and never holds the
+    /// lock across an `.await`.
     ///
     /// `Decision:` the task is detached rather than stored in a field: confirming the
     /// modal drops it, and a dropped `Task` would cancel the wipe mid-flight
@@ -135,21 +185,14 @@ impl HistoryMaintenance {
         &self,
         cx: &mut App,
         failure_message: &'static str,
-        work: impl FnOnce(&LocalStore) -> anyhow::Result<()> + Send + 'static,
+        work: impl FnOnce(&dyn HistoryStore) -> anyhow::Result<()> + Send + 'static,
     ) {
         let store = Arc::clone(&self.store);
         let list = self.list.clone();
         let workspace = self.workspace.clone();
         cx.spawn(async move |cx| {
-            // The store lock guards the delete only — it is never held across an
-            // `.await` (`.agents/rules/rust-code.md`).
             let outcome = cx
-                .background_spawn(async move {
-                    let store = store
-                        .lock()
-                        .map_err(|_| anyhow::anyhow!("the local store lock is poisoned"))?;
-                    work(&store)
-                })
+                .background_spawn(async move { work(store.as_ref()) })
                 .await;
             match outcome {
                 Ok(()) => {
