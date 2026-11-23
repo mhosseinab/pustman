@@ -48,6 +48,10 @@ mod row_tests;
 mod day_label_tests;
 
 #[cfg(test)]
+#[path = "history_row_id_tests.rs"]
+mod row_id_tests;
+
+#[cfg(test)]
 #[path = "history_list_activation_tests.rs"]
 mod activation_tests;
 
@@ -400,7 +404,7 @@ impl HistoryList {
         let rows = Arc::clone(&self.rows);
         match rows.get(index) {
             Some(HistoryRow::Day { label, .. }) => self.render_day_header(label.clone(), cx),
-            Some(HistoryRow::Entry(entry)) => self.render_entry(entry, cx),
+            Some(HistoryRow::Entry(entry)) => self.render_entry(index, entry, cx),
             // The list is told the row count of the same snapshot it draws ids from, so
             // an out-of-range index cannot occur — and must not panic if it ever does.
             None => div().into_any_element(),
@@ -419,12 +423,17 @@ impl HistoryList {
             .into_any_element()
     }
 
-    fn render_entry(&mut self, entry: &HistoryEntry, cx: &mut Context<Self>) -> AnyElement {
+    fn render_entry(
+        &mut self,
+        index: usize,
+        entry: &HistoryEntry,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         // The clickable container is a child id of the row's stable key (the
         // `command_palette::picker`'s row shape), so a click selects and opens *this*
         // entry even if the rows re-order underneath the pointer.
         let row_id = ElementId::NamedChild(
-            Arc::new(entry_element_id(entry.id)),
+            Arc::new(entry_element_id(entry.id, index)),
             SharedString::new_static("row"),
         );
         let selected = entry.id.is_some() && entry.id == self.selected_entry_id;
@@ -460,7 +469,7 @@ impl HistoryList {
                                 .color(method_color(&entry.method, cx)),
                         ),
                     )
-                    .child(target_element(entry, cx)),
+                    .child(target_element(entry, index, cx)),
             )
             .child(meta_element(entry))
             .into_any_element()
@@ -509,7 +518,7 @@ impl Render for HistoryList {
                 SharedString::new_static("rows"),
             ),
             rows.len(),
-            move |index| row_element_id(rows.get(index)),
+            move |index| row_element_id(rows.get(index), index),
             cx.processor(|this, index: usize, _window, cx| this.render_row(index, cx)),
         );
 
@@ -703,35 +712,41 @@ fn until_next_utc_midnight(now: OffsetDateTime) -> Duration {
 }
 
 /// One row's element id — the item's stable identity (a stored entry id, a day's date),
-/// never its row position, which shifts as the list re-groups.
-fn row_element_id(row: Option<&HistoryRow>) -> ElementId {
+/// never its row position, which shifts as the list re-groups. The one exception is the
+/// fallback: a row the store left without an id, or an index past the rows snapshot,
+/// has no stable identity to derive from, so its last-resort key is its row position —
+/// unique within the frame, which is all a fallback owes (#111). Unreachable today:
+/// stored rows always carry ids.
+fn row_element_id(row: Option<&HistoryRow>, index: usize) -> ElementId {
     match row {
         Some(HistoryRow::Day { date, .. }) => ElementId::from(format!("history-day-{date}")),
-        Some(HistoryRow::Entry(entry)) => entry_element_id(entry.id),
-        None => ElementId::from("history-row"),
+        Some(HistoryRow::Entry(entry)) => entry_element_id(entry.id, index),
+        None => ElementId::from(format!("history-row-fallback-{index}")),
     }
 }
 
-/// One entry row's element id: its stored id, which survives search re-ordering.
-fn entry_element_id(id: Option<i64>) -> ElementId {
+/// One entry row's element id: its stored id, which survives search re-ordering. A row
+/// without one falls back to its position (`history-entry-fallback-*` keeps the
+/// fallback from ever impersonating a stored id) — see [`row_element_id`].
+fn entry_element_id(id: Option<i64>, index: usize) -> ElementId {
     match id {
         Some(id) => ElementId::from(format!("history-entry-{id}")),
-        None => ElementId::from("history-entry"),
+        None => ElementId::from(format!("history-entry-fallback-{index}")),
     }
 }
 
 /// One entry row's target box test selector: the row's stable key plus `target`, the
 /// `VirtualList` row-selector shape.
-fn target_debug_selector(id: Option<i64>) -> String {
-    format!("{}-target", entry_element_id(id))
+fn target_debug_selector(id: Option<i64>, index: usize) -> String {
+    format!("{}-target", entry_element_id(id, index))
 }
 
 /// One row's target: the URL truncates in the narrow dock, and its hover tooltip
 /// carries the full value when — and only when — the drawn text is not the whole
 /// target (#235): a balloon repeating a visible URL covers the row it repeats (the
 /// `response_viewer` body lines' truncation-tooltip shape).
-fn target_element(entry: &HistoryEntry, cx: &App) -> AnyElement {
-    let selector = target_debug_selector(entry.id);
+fn target_element(entry: &HistoryEntry, index: usize, cx: &App) -> AnyElement {
+    let selector = target_debug_selector(entry.id, index);
     let text_id = format!("{selector}-text");
     let text = StyledText::new(entry.target.clone());
     // The layout the text fills once the row lays it out — read at hover time to see

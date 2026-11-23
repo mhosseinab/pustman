@@ -26,6 +26,10 @@ const PAST_TOOLTIP_DELAY: Duration = Duration::from_millis(600);
 /// fixtures draw, short or truncated.
 const HOVER_INTO_TARGET_PX: f32 = 8.;
 
+/// The row the fixture's one entry draws as: under its day header, second. Its stored
+/// id is what the target's selector derives from, so the row position is a formality.
+const ENTRY_ROW_INDEX: usize = 1;
+
 /// The one UTC day every fixture row lands on.
 fn timestamp() -> OffsetDateTime {
     let day = Date::from_calendar_date(2026, Month::November, 18).expect("a real calendar date");
@@ -92,7 +96,7 @@ fn open_history_panel(
 fn tooltip_after_hovering_target(id: i64, cx: &mut VisualTestContext) -> bool {
     draw_window(cx);
     let target = cx
-        .debug_bounds(leak(target_debug_selector(Some(id))))
+        .debug_bounds(leak(target_debug_selector(Some(id), ENTRY_ROW_INDEX)))
         .expect("the target rendered");
     let hover = Point::new(target.left() + px(HOVER_INTO_TARGET_PX), target.center().y);
     cx.simulate_mouse_move(hover, None::<MouseButton>, Modifiers::none());
