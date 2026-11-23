@@ -1,14 +1,23 @@
 //! The Settings tab (PRD REQ-HTTP-09, REQ-HTTP-10): every [`RequestSettings`] override
-//! this request carries — timeout, redirects, TLS verification, URL encoding, Referer
-//! and HTTP version — each with the "use global default" state [`None`] means (the
-//! model: every field is an [`Option`], `None` inherits the global default).
+//! this request carries — timeout, redirects, keep-Authorization, TLS verification,
+//! URL encoding, Referer, HTTP version and the cookie jar — each with the "use global
+//! default" state [`None`] means (the model: every field is an [`Option`], `None`
+//! inherits the global default).
 //!
 //! `Decision:` the value shown next to the "use global default" state comes from
 //! [`SendSettings::default`] — the base the send pipeline merges the request's overrides
 //! over (`http_engine`'s `pipeline::send_settings`), so what the label promises is what
 //! the send actually inherits. The `settings` crate's `request.*` global was checked
-//! first: it covers four of the eight fields and is not the pipeline's base yet, so
+//! first: it covers four of the ten fields and is not the pipeline's base yet, so
 //! showing its values would promise sends that do not happen.
+//!
+//! `Decision:` the two REQ-HTTP-09 overrides that had no row — keep `Authorization`
+//! across redirects and disable cookie jar (issue #4) — sit beside the rows they share
+//! a wire behavior with, on the composer that specifies the request before it is sent
+//! (S03/R03, HTTP composer and data editors): keep-Authorization under "Redirects",
+//! where the redirect rules live, and the cookie-jar switch under "URL & headers",
+//! next to "Remove Referer header", the other header behavior of a send. Both name
+//! their default from [`SendSettings::default`] like every other row.
 //!
 //! `Decision:` `RequestSettings::remove_referer` has no [`SendSettings`] field — the
 //! pipeline drops it — so there is no code default to show and none is invented here:
@@ -68,6 +77,18 @@ pub const VERIFY_TLS_SWITCH_SELECTOR: &str = "settings-verify-tls-switch";
 /// Test hook: its "use global default" checkbox.
 pub const VERIFY_TLS_DEFAULT_SELECTOR: &str = "settings-verify-tls-default";
 
+/// Test hook: the keep-Authorization switch of the Settings tab.
+pub const KEEP_AUTHORIZATION_SWITCH_SELECTOR: &str = "settings-keep-authorization-switch";
+
+/// Test hook: its "use global default" checkbox.
+pub const KEEP_AUTHORIZATION_DEFAULT_SELECTOR: &str = "settings-keep-authorization-default";
+
+/// Test hook: the disable-cookie-jar switch of the Settings tab.
+pub const DISABLE_COOKIE_JAR_SWITCH_SELECTOR: &str = "settings-disable-cookie-jar-switch";
+
+/// Test hook: its "use global default" checkbox.
+pub const DISABLE_COOKIE_JAR_DEFAULT_SELECTOR: &str = "settings-disable-cookie-jar-default";
+
 /// One per-request override the Settings tab edits, with its new state: [`None`] is the
 /// "use global default" state, `Some(value)` pins the value for this request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,10 +97,12 @@ pub enum SettingChange {
     FollowRedirects(Option<bool>),
     MaxRedirects(Option<u32>),
     FollowOriginalMethod(Option<bool>),
+    KeepAuthorization(Option<bool>),
     VerifyTls(Option<bool>),
     EncodeUrl(Option<bool>),
     RemoveReferer(Option<bool>),
     HttpVersion(Option<HttpVersion>),
+    DisableCookieJar(Option<bool>),
 }
 
 impl SettingChange {
@@ -92,10 +115,12 @@ impl SettingChange {
             SettingChange::FollowOriginalMethod(value) => {
                 settings.follow_original_method = value;
             }
+            SettingChange::KeepAuthorization(value) => settings.keep_authorization = value,
             SettingChange::VerifyTls(value) => settings.verify_tls = value,
             SettingChange::EncodeUrl(value) => settings.encode_url = value,
             SettingChange::RemoveReferer(value) => settings.remove_referer = value,
             SettingChange::HttpVersion(value) => settings.http_version = value,
+            SettingChange::DisableCookieJar(value) => settings.disable_cookie_jar = value,
         }
     }
 }
@@ -227,10 +252,12 @@ pub struct SettingsTab {
     follow_redirects: Option<bool>,
     max_redirects: Option<u32>,
     follow_original_method: Option<bool>,
+    keep_authorization: Option<bool>,
     verify_tls: Option<bool>,
     encode_url: Option<bool>,
     remove_referer: Option<bool>,
     http_version: Option<HttpVersion>,
+    disable_cookie_jar: Option<bool>,
     // The numeric fields' mirrors: created once and kept, so editing one keeps its
     // focus and caret (the `auth_tab` fields' rule). Canonical state is the values
     // above; a programmatic fill echoes [`TextInputEvent::Changed`] and is compared
@@ -259,10 +286,12 @@ impl SettingsTab {
             follow_redirects: None,
             max_redirects: None,
             follow_original_method: None,
+            keep_authorization: None,
             verify_tls: None,
             encode_url: None,
             remove_referer: None,
             http_version: None,
+            disable_cookie_jar: None,
             timeout_input,
             max_redirects_input,
             timeout_invalid: false,
@@ -297,10 +326,12 @@ impl SettingsTab {
         self.follow_redirects = settings.follow_redirects;
         self.max_redirects = settings.max_redirects;
         self.follow_original_method = settings.follow_original_method;
+        self.keep_authorization = settings.keep_authorization;
         self.verify_tls = settings.verify_tls;
         self.encode_url = settings.encode_url;
         self.remove_referer = settings.remove_referer;
         self.http_version = settings.http_version;
+        self.disable_cookie_jar = settings.disable_cookie_jar;
         self.fill_inputs(cx);
         cx.notify();
     }
@@ -324,10 +355,16 @@ impl SettingsTab {
             SettingChange::FollowOriginalMethod(value) => {
                 set_if_changed(&mut self.follow_original_method, value)
             }
+            SettingChange::KeepAuthorization(value) => {
+                set_if_changed(&mut self.keep_authorization, value)
+            }
             SettingChange::VerifyTls(value) => set_if_changed(&mut self.verify_tls, value),
             SettingChange::EncodeUrl(value) => set_if_changed(&mut self.encode_url, value),
             SettingChange::RemoveReferer(value) => set_if_changed(&mut self.remove_referer, value),
             SettingChange::HttpVersion(value) => set_if_changed(&mut self.http_version, value),
+            SettingChange::DisableCookieJar(value) => {
+                set_if_changed(&mut self.disable_cookie_jar, value)
+            }
         };
         if !changed {
             return;
@@ -728,6 +765,19 @@ impl Render for SettingsTab {
                 &weak,
                 cx,
             ),
+            self.render_bool_row(
+                BoolRow {
+                    name: "Keep Authorization across redirects",
+                    description: "Send the Authorization header on to the redirect target instead of dropping it.",
+                    change: SettingChange::KeepAuthorization,
+                    value: self.keep_authorization,
+                    default: Some(defaults.keep_authorization),
+                    switch_selector: KEEP_AUTHORIZATION_SWITCH_SELECTOR,
+                    default_selector: KEEP_AUTHORIZATION_DEFAULT_SELECTOR,
+                },
+                &weak,
+                cx,
+            ),
         ];
         let url_and_headers = [
             self.render_bool_row(
@@ -752,6 +802,19 @@ impl Render for SettingsTab {
                     default: None,
                     switch_selector: "settings-remove-referer-switch",
                     default_selector: "settings-remove-referer-default",
+                },
+                &weak,
+                cx,
+            ),
+            self.render_bool_row(
+                BoolRow {
+                    name: "Disable cookie jar",
+                    description: "Neither apply nor capture cookies for this request.",
+                    change: SettingChange::DisableCookieJar,
+                    value: self.disable_cookie_jar,
+                    default: Some(defaults.disable_cookie_jar),
+                    switch_selector: DISABLE_COOKIE_JAR_SWITCH_SELECTOR,
+                    default_selector: DISABLE_COOKIE_JAR_DEFAULT_SELECTOR,
                 },
                 &weak,
                 cx,
@@ -923,3 +986,7 @@ mod tests;
 #[cfg(test)]
 #[path = "settings_tab_numeric_note_tests.rs"]
 mod numeric_note_tests;
+
+#[cfg(test)]
+#[path = "settings_tab_req_http_09_tests.rs"]
+mod req_http_09_tests;
