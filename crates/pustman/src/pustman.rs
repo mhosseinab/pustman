@@ -14,7 +14,7 @@ mod tests;
 use std::sync::{Arc, Mutex};
 
 use environment_picker::{quick_look, selector};
-use gpui::{App, AppContext, Entity, EntityId, Global, Subscription, TaskExt, WeakEntity};
+use gpui::{App, AppContext, Entity, EntityId, Global, Subscription, Task, WeakEntity};
 use history_panel::HistoryList;
 use secrets::{KeyringStore, SecretStore};
 use settings::Setting;
@@ -229,6 +229,14 @@ struct CookieWiring {
     /// The save observer is installed — once per app, however often a relaunch rebuilds the
     /// jar ([`init_http_client`] runs again and resets [`Self::load_finished`]).
     started: bool,
+    /// The latest save, which the next one awaits before it snapshots the jar: saves land
+    /// one after another, in the order the jar changed. Unordered writes could let an
+    /// older snapshot — still holding a cookie a server has since cleared — land last and
+    /// bring that cookie back on the next launch.
+    save_chain: Option<Task<()>>,
+    /// A save is waiting on the chain and has not snapshotted yet. It will write the jar as
+    /// it is when it runs, so further notifications until then add nothing.
+    save_queued: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -264,43 +272,47 @@ fn save_cookie_jar(cx: &mut App) {
     let Some(wiring) = cx.try_global::<CookieWiring>() else {
         return;
     };
-    if !wiring.load_finished {
+    if !wiring.load_finished || wiring.save_queued {
         return;
     }
-    let Some(store) = cx
-        .try_global::<AppStore>()
-        .map(|store| Arc::clone(&store.0))
-    else {
-        return;
-    };
-    let Some(jar) = cx
-        .try_global::<AppCookieJar>()
-        .map(|jar| Arc::clone(&jar.0))
-    else {
-        return;
-    };
-    let write = {
-        // A poisoned lock still holds a usable jar (the `http_engine` jar rule).
-        let jar_guard = jar.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        http_engine::save_jar(
-            cx.background_executor(),
-            store,
-            WORKSPACE_ID.to_owned(),
-            &jar_guard,
-        )
-    };
-    cx.spawn(async move |cx| {
-        let saved = write.await;
-        if let Err(error) = &saved {
+    let wiring = cx.global_mut::<CookieWiring>();
+    wiring.save_queued = true;
+    let previous = wiring.save_chain.take();
+    let save = cx.spawn(async move |cx| {
+        if let Some(previous) = previous {
+            previous.await;
+        }
+        // Snapshot now, after every earlier save has landed, so this write carries the
+        // jar's latest state and nothing older can land after it.
+        let write = cx.update(|cx| {
+            cx.global_mut::<CookieWiring>().save_queued = false;
+            let store = cx
+                .try_global::<AppStore>()
+                .map(|store| Arc::clone(&store.0))?;
+            let jar = cx
+                .try_global::<AppCookieJar>()
+                .map(|jar| Arc::clone(&jar.0))?;
+            // A poisoned lock still holds a usable jar (the `http_engine` jar rule).
+            let jar_guard = jar.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            Some(http_engine::save_jar(
+                cx.background_executor(),
+                store,
+                WORKSPACE_ID.to_owned(),
+                &jar_guard,
+            ))
+        });
+        let Some(write) = write else {
+            return;
+        };
+        if let Err(error) = write.await {
             // The text is `cookie_persistence`'s own fixed wording; a cookie value never
-            // reaches it (PRD §7).
+            // reaches it (PRD §7). A lost save is never silent (AGENTS.md).
             cx.update(|cx| {
                 StartupProblems::push(cx, format!("your cookies could not be saved ({error})"));
             });
         }
-        saved
-    })
-    .detach_and_log_err(cx);
+    });
+    cx.global_mut::<CookieWiring>().save_chain = Some(save);
 }
 
 /// The load side of the cookie wire (S33p): what the store-open path runs once the local
