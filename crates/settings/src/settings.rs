@@ -391,8 +391,16 @@ impl SettingsStore {
 
     /// Record a failure that came with no blob to merge ([`Self::watch`] finding a file
     /// it cannot read): the store keeps the last good values and the error lands on
-    /// [`Self::last_error`] for the UI to show.
+    /// [`Self::last_error`] for the UI to show. An error that is already recorded is left
+    /// alone, so a poll that reads the same failure again does not notify observers —
+    /// nothing an observer could act on has changed.
     fn record_error(cx: &mut App, error: SettingsError) {
+        let already_recorded = cx
+            .try_global::<SettingsStore>()
+            .is_some_and(|store| store.last_error.as_ref() == Some(&error));
+        if already_recorded {
+            return;
+        }
         cx.default_global::<SettingsStore>().last_error = Some(error);
     }
 

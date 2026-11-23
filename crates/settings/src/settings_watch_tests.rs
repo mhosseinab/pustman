@@ -82,7 +82,11 @@ fn watch_ignores_unchanged_user_text(cx: &mut TestAppContext) {
 
     poll(cx);
     poll(cx);
-    assert_eq!(notifications.get(), 1, "re-reading the same text is a no-op");
+    assert_eq!(
+        notifications.get(),
+        1,
+        "re-reading the same text is a no-op"
+    );
     cx.update(|cx| assert_eq!(Settings::get_global(cx).ui_font_size, 20));
 }
 
@@ -113,7 +117,11 @@ fn watch_missing_file_leaves_the_store_alone(cx: &mut TestAppContext) {
             None,
             "a missing file is not an error"
         );
-        assert_eq!(Settings::get_global(cx).ui_font_size, 16, "the defaults stand");
+        assert_eq!(
+            Settings::get_global(cx).ui_font_size,
+            16,
+            "the defaults stand"
+        );
     });
 }
 
@@ -143,6 +151,37 @@ fn watch_records_a_read_error_and_keeps_last_good_values(cx: &mut TestAppContext
             "the last good values stand"
         );
     });
+}
+
+#[gpui::test]
+fn unchanged_read_error_notifies_observers_once(cx: &mut TestAppContext) {
+    // A file that stays unreadable is re-read every poll, but the error does not change:
+    // only the first failure may notify, or an observing UI re-runs (and would re-toast)
+    // on every tick although `last_error` is unchanged.
+    let dir = tempfile::tempdir().expect("temp settings dir");
+    let path = user_file(&dir);
+    fs::create_dir(&path).expect("an unreadable stand-in for the user file");
+    cx.update(|cx| {
+        SettingsStore::init(cx, None).expect("the defaults merge");
+        Settings::register(cx);
+        SettingsStore::watch_file(cx, path.clone());
+    });
+    let (notifications, _subscription) = notification_counter(cx);
+
+    poll(cx);
+    assert_eq!(
+        notifications.get(),
+        1,
+        "the first failure is recorded and notifies once"
+    );
+
+    poll(cx);
+    poll(cx);
+    assert_eq!(
+        notifications.get(),
+        1,
+        "the same failure does not notify again"
+    );
 }
 
 #[gpui::test]
