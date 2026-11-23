@@ -54,10 +54,10 @@ These run at the next human sign-off and are recorded in that sign-off's step re
 |---|---|---|---|
 | E2E display scenario: S22 (shell, docks, toasts) | human | S25 | done 2026-11-20 (human smoke, M0 GO; [S25](progress/pustman-v1/steps/S25.md)) |
 | Live keyring: `cargo test -p secrets -- --ignored` | human | S25 | done 2026-11-20 (1 passed, build host) |
-| E2E display scenario: S26 (send/cancel from the URL bar) | human | S38 | pending |
-| E2E display scenario: S28 (TLS badge, auth tabs) | human | S38 | pending |
-| E2E display scenario: S32 (console dock) | human | S38 | pending |
-| E2E display scenario: S33o (History live refresh; Timeline wheel + keyboard scroll; Ctrl/Cmd-Tab with Timeline focused) | human | S38 | pending |
+| E2E display scenario: S26 (send/cancel from the URL bar) | human | S38 | done 2026-11-23 (headless pre-check screenshots; M1 GO, [S38](progress/pustman-v1/steps/S38.md)) |
+| E2E display scenario: S28 (TLS badge, auth tabs) | human | S38 | done 2026-11-23 (headless pre-check screenshots; M1 GO, [S38](progress/pustman-v1/steps/S38.md)) |
+| E2E display scenario: S32 (console dock) | human | S38 | done 2026-11-23 (headless pre-check screenshots; M1 GO, [S38](progress/pustman-v1/steps/S38.md)) |
+| E2E display scenario: S33o (History live refresh; Timeline wheel + keyboard scroll; Ctrl/Cmd-Tab with Timeline focused) | human | S38 | done 2026-11-23 (headless pre-check screenshots; M1 GO, [S38](progress/pustman-v1/steps/S38.md)) |
 | Push `pustman-v1/main` and confirm CI green (S1 delta) | human | next promotion | done 2026-11-18 (CI run 44240566190 on `e5347fc`: verify (ubuntu-latest) success, verify (macos-latest) success) |
 | Manual smoke on Linux + macOS for each `release/pustman-v1-<n>` (n ≥ 2) | human | each promotion | pending |
 
@@ -117,7 +117,7 @@ Last tag: `release/pustman-v1-2` @ `999746d` (waived; Linux/macOS smoke pending)
 | S33n | Fix the M1 request-editor blockers and major layout bugs (driver-added, S38 prereq; #200 #201) | passed | 1 | 35e1813 | [S33n](progress/pustman-v1/steps/S33n.md) | LOW #264 |
 | S33o | Fix the M1 workspace, console, history and timeline major bugs (driver-added, S38 prereq; #199 #202 #205) | passed | 3 | 6cca305 | [S33o](progress/pustman-v1/steps/S33o.md) | 2 review cycles, 3 fixes; LOW #270 |
 | S33p | Wire the app's cookie jar: send, persist, Manage Cookies (driver-added, S38 prereq; #286) | passed | 2 | 475bee6 | [S33p](progress/pustman-v1/steps/S33p.md) | review 2 rounds; LOW #287 |
-| S38 | M1 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off |
+| S38 | M1 SIGN-OFF (HUMAN) | passed | 1 | 924e953 | [S38](progress/pustman-v1/steps/S38.md) | human "M1 GO" 2026-11-23 after the headless pre-check and S33p |
 | S39 | `collections_panel`: tree | pending | 0 | | |  |
 | S40 | Collection CRUD, save, ordering, dirty state | pending | 0 | | |  |
 | S41 | Open, create and recent workspaces; format-version banner | pending | 0 | | |  |
