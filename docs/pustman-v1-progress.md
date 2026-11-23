@@ -118,11 +118,11 @@ Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub p
 | S33o | Fix the M1 workspace, console, history and timeline major bugs (driver-added, S38 prereq; #199 #202 #205) | passed | 3 | 6cca305 | [S33o](progress/pustman-v1/steps/S33o.md) | 2 review cycles, 3 fixes; LOW #270 |
 | S33p | Wire the app's cookie jar: send, persist, Manage Cookies (driver-added, S38 prereq; #286) | passed | 2 | 475bee6 | [S33p](progress/pustman-v1/steps/S33p.md) | review 2 rounds; LOW #287 |
 | S38 | M1 SIGN-OFF (HUMAN) | passed | 1 | 924e953 | [S38](progress/pustman-v1/steps/S38.md) | human "M1 GO" 2026-11-23 after the headless pre-check and S33p |
-| S39 | `collections_panel`: tree | pending | 0 | | |  |
+| S39 | `collections_panel`: tree | in_progress | 0 | | |  |
 | S40 | Collection CRUD, save, ordering, dirty state | pending | 0 | | |  |
 | S41 | Open, create and recent workspaces; format-version banner | pending | 0 | | |  |
 | S42 | External change bar and problem badges | pending | 0 | | |  |
-| S43 | Environment editor: shared, local and secret values; set-secret prompt on send | pending | 0 | | |  |
+| S43 | Environment editor: shared, local and secret values; set-secret prompt on send | in_progress | 0 | | |  |
 | S43w | Wire the active environment and globals into open editors (driver-added, S48 prereq; after S41, S43) | pending | 0 | | |  |
 | S44 | `git` crate + status bar branch and dirty count | pending | 0 | | |  |
 | S45 | Import/export UI (Postman collection, environment, globals) | pending | 0 | | |  |
