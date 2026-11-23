@@ -35,6 +35,10 @@ use workspace::Workspace;
 #[path = "selector_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "selector_match_key_tests.rs"]
+mod match_key_tests;
+
 /// The label of the first-class "No environment" option: picking it clears the stored
 /// selection (pack screen S07's "No active environment" state). It is also what the
 /// status bar's active-environment readout shows while none is active — one concept, one
@@ -265,7 +269,11 @@ impl PickerDelegate for EnvironmentSelector {
                 ..
             }) => ElementId::from(format!("environment-{environment_id}")),
             Some(Candidate { id: None, .. }) => ElementId::from("environment-none"),
-            None => ElementId::from("environment-row"),
+            // No stable model id exists for an out-of-range row — it has no candidate —
+            // so the row's own index is the only uniqueness available. It is a fallback
+            // the picker never draws (issue #119: unreachable while `match_count` holds),
+            // and two such rows must still never share one id.
+            None => ElementId::from(format!("environment-out-of-range-{index}")),
         }
     }
 
