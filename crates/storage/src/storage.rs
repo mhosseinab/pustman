@@ -879,3 +879,7 @@ fn history_entry_from_row(row: &Row<'_>) -> rusqlite::Result<HistoryEntry> {
 #[cfg(test)]
 #[path = "storage_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "schema_objects_tests.rs"]
+mod schema_objects_tests;
