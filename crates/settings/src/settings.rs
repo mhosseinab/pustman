@@ -17,7 +17,7 @@
 
 use std::any::{Any, TypeId, type_name};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use gpui::{App, AppContext, Global, Task};
@@ -339,7 +339,13 @@ impl SettingsStore {
     /// cannot be read keeps the last good values and lands on [`Self::last_error`].
     /// Calling `watch` again replaces the running watcher.
     pub fn watch(cx: &mut App) {
-        let path = paths::user_settings_file();
+        Self::watch_file(cx, paths::user_settings_file());
+    }
+
+    /// The [`Self::watch`] loop over `path` instead of [`paths::user_settings_file`], so
+    /// the loop itself is testable against a temp dir rather than the user's real settings
+    /// file. Calling it again replaces the running watcher of either entry point.
+    fn watch_file(cx: &mut App, path: PathBuf) {
         let task = cx.spawn(async move |cx| {
             let mut last_seen: Option<String> = None;
             loop {
@@ -469,3 +475,7 @@ impl Setting for Settings {
 #[cfg(test)]
 #[path = "settings_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "settings_watch_tests.rs"]
+mod watch_tests;
