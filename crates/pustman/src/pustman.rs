@@ -7,6 +7,10 @@ pub mod app_icon;
 pub mod restore_wiring;
 pub mod status_items;
 
+#[cfg(test)]
+#[path = "pustman_tests.rs"]
+mod tests;
+
 use std::sync::{Arc, Mutex};
 
 use environment_picker::{quick_look, selector};
@@ -366,6 +370,17 @@ fn register_pending_history_panels(cx: &mut App) {
             // The window closed before there was a store to register against.
             continue;
         }
+        // The registration lives as long as its workspace: when the workspace is
+        // released with its window, its id goes with it (the `restore_wiring` shape —
+        // issue #163).
+        let release = cx.observe_release(&workspace, move |_workspace, cx| {
+            cx.default_global::<HistoryPanelWiring>()
+                .registered
+                .retain(|registered| *registered != workspace_id);
+        });
+        cx.default_global::<HistoryPanelWiring>()
+            ._subscriptions
+            .push(release);
         cx.default_global::<HistoryPanelWiring>()
             .registered
             .push(workspace_id);
