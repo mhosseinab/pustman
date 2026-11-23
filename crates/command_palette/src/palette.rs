@@ -258,24 +258,25 @@ fn toggle_palette(_: &palette::Toggle, cx: &mut App) {
         return;
     };
     cx.defer(move |cx| {
-        if window_handle
-            .update(cx, |root, window, cx| {
-                let Ok(workspace) = root.downcast::<Workspace>() else {
-                    return;
-                };
-                // Collected before the palette takes focus: the list is what the user
-                // could dispatch where they were, not what the query field can.
-                let actions = window.available_actions(cx);
-                workspace.update(cx, |workspace, cx| {
-                    workspace.toggle_modal(window, cx, |window, cx| {
-                        Picker::new(PaletteDelegate::new(actions), window, cx)
-                    });
+        match window_handle.update(cx, |root, window, cx| {
+            let Ok(workspace) = root.downcast::<Workspace>() else {
+                return;
+            };
+            // Collected before the palette takes focus: the list is what the user
+            // could dispatch where they were, not what the query field can.
+            let actions = window.available_actions(cx);
+            workspace.update(cx, |workspace, cx| {
+                workspace.toggle_modal(window, cx, |window, cx| {
+                    Picker::new(PaletteDelegate::new(actions), window, cx)
                 });
-            })
-            .is_err()
-        {
-            // The window closed between the keystroke and this callback; there is no
-            // workspace left to open the palette over and nothing to tell anyone about.
+            });
+        }) {
+            Ok(()) => {}
+            // The window closed between the keystroke and this callback: there is no
+            // workspace left to open the palette over and nobody left to tell, so this
+            // toggle is dropped here on purpose — the discard is spelled out, not a
+            // result silently dropped on the floor.
+            Err(_window_gone) => {}
         }
     });
 }
