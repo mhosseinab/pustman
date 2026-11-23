@@ -4972,6 +4972,7 @@ dependencies = [
  "theme",
  "time",
  "ui",
+ "url",
  "variables",
  "workspace",
 ]

@@ -14,7 +14,7 @@ mod tests;
 use std::sync::{Arc, Mutex};
 
 use environment_picker::{quick_look, selector};
-use gpui::{App, AppContext, Entity, EntityId, Global, Subscription, WeakEntity};
+use gpui::{App, AppContext, Entity, EntityId, Global, Subscription, TaskExt, WeakEntity};
 use history_panel::HistoryList;
 use secrets::{KeyringStore, SecretStore};
 use settings::Setting;
@@ -41,6 +41,16 @@ pub enum StoreLocation {
 pub struct AppStore(pub Arc<Mutex<LocalStore>>);
 
 impl Global for AppStore {}
+
+/// The app's one cookie jar (REQ-HTTP-08): the [`Arc`] every send captures `Set-Cookie`
+/// into and sends `Cookie` back from (S33p). [`init_http_client`] builds it with the
+/// transport, [`install_cookie_wiring`] reloads and persists it once the local store
+/// exists (REQ-WSP-06), and the Manage Cookies dialog lists it (issue #286) — all through
+/// this one handle, because replacing the jar would leave the transport sending from the
+/// old one. Cookie values are secrets (PRD §7): nothing here prints them.
+pub struct AppCookieJar(pub Arc<Mutex<http_engine::CookieJar>>);
+
+impl Global for AppCookieJar {}
 
 /// The problems the app runs into — at startup or later — and the workspace that shows
 /// them once the window is open: AGENTS.md — a failure the user must know about is never
@@ -133,19 +143,28 @@ pub fn init_with_store(cx: &mut App, store: StoreLocation) {
 /// (REQ-HTTP-12). Its [`Subscription`] lives in [`ConsoleWiring`] for the app's lifetime
 /// — dropping a subscription stops the recording.
 ///
+/// `cookies` (S33p): the jar [`AppCookieJar`] holds is built here, with the transport, and
+/// handed to [`http_engine::ReqwestTransport::with_cookie_jar`] so every send applies it
+/// and captures against it (REQ-HTTP-08). [`init_cookie_saving`] persists it after each
+/// completed send and [`install_cookie_wiring`] reloads it when the store lands.
+///
 /// `history` (S33w): every send this client makes is recorded into the local store
 /// (PRD §8.5, REQ-HIST-01). The store lands on a background task, so the recorder is
 /// installed by [`init_history_recording`] when [`AppStore`] lands — exactly once per
 /// client.
 fn init_http_client(cx: &mut App) {
     gpui_tokio::init(cx);
-    let transport = http_engine::ReqwestTransport::new(gpui_tokio::Tokio::handle(cx));
+    let jar = Arc::new(Mutex::new(http_engine::CookieJar::new()));
+    cx.set_global(AppCookieJar(Arc::clone(&jar)));
+    let transport =
+        http_engine::ReqwestTransport::new(gpui_tokio::Tokio::handle(cx)).with_cookie_jar(jar);
     let client = cx.new(|_| http_engine::HttpClient::new(Arc::new(transport)));
     let subscription = console::watch(&client, cx);
     cx.default_global::<ConsoleWiring>()
         ._subscriptions
         .push(subscription);
     request_editor::send::set_http_client(client, cx);
+    init_cookie_saving(cx);
     init_history_recording(cx);
 }
 
@@ -197,6 +216,152 @@ fn install_environment_picker_inputs(cx: &mut App, store: &Arc<Mutex<LocalStore>
             secret_store,
         },
     );
+}
+
+/// The app-wide cookie wire (S33p): whether the jar [`init_http_client`] built has finished
+/// its first load from `storage`, and the [`Subscription`] that persists it after every
+/// completed send — one wiring for the app's lifetime, reset per jar.
+#[derive(Default)]
+struct CookieWiring {
+    /// The initial `load_jar` has landed (or failed), so saves may run. Until then a save
+    /// would write the still-empty jar over rows that were never read.
+    load_finished: bool,
+    /// The save observer is installed — once per app, however often a relaunch rebuilds the
+    /// jar ([`init_http_client`] runs again and resets [`Self::load_finished`]).
+    started: bool,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl Global for CookieWiring {}
+
+/// `cookies` (S33p): the save side of the wire — one observer of the app's per-send Console
+/// notification, for the app's lifetime. `Decision:` that notification is the app's
+/// completed-send hook: `HttpClient`'s [`http_engine::SendEvent`] reports cancellations
+/// only and the history recorder's row writes are internal to `http_engine`, while every
+/// completed send — a response or a failure — lands one Console entry
+/// (`request_editor::send`'s `finish_send`), and the History panel already live-reloads on
+/// this same notification. The observer is installed here and armed only once the jar's
+/// first load has landed ([`CookieWiring::load_finished`]); a send completed before that is
+/// saved by the next one instead of over the not-yet-read rows.
+fn init_cookie_saving(cx: &mut App) {
+    let wiring = cx.default_global::<CookieWiring>();
+    wiring.load_finished = false;
+    if wiring.started {
+        return;
+    }
+    wiring.started = true;
+    let subscription = cx.observe_global::<console::ConsoleStore>(save_cookie_jar);
+    cx.default_global::<CookieWiring>()
+        ._subscriptions
+        .push(subscription);
+}
+
+/// Persist the shared jar after a completed send (REQ-WSP-06): `save_jar` snapshots it on
+/// this thread — cheap, no IO — and writes on the background executor (ADR-0002). A failed
+/// write is a [`StartupProblems`] toast and a logged error: a lost save is never silent
+/// (AGENTS.md — errors reach the user).
+fn save_cookie_jar(cx: &mut App) {
+    let Some(wiring) = cx.try_global::<CookieWiring>() else {
+        return;
+    };
+    if !wiring.load_finished {
+        return;
+    }
+    let Some(store) = cx
+        .try_global::<AppStore>()
+        .map(|store| Arc::clone(&store.0))
+    else {
+        return;
+    };
+    let Some(jar) = cx
+        .try_global::<AppCookieJar>()
+        .map(|jar| Arc::clone(&jar.0))
+    else {
+        return;
+    };
+    let write = {
+        // A poisoned lock still holds a usable jar (the `http_engine` jar rule).
+        let jar_guard = jar.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        http_engine::save_jar(
+            cx.background_executor(),
+            store,
+            WORKSPACE_ID.to_owned(),
+            &jar_guard,
+        )
+    };
+    cx.spawn(async move |cx| {
+        let saved = write.await;
+        if let Err(error) = &saved {
+            // The text is `cookie_persistence`'s own fixed wording; a cookie value never
+            // reaches it (PRD §7).
+            cx.update(|cx| {
+                StartupProblems::push(cx, format!("your cookies could not be saved ({error})"));
+            });
+        }
+        saved
+    })
+    .detach_and_log_err(cx);
+}
+
+/// The load side of the cookie wire (S33p): what the store-open path runs once the local
+/// store exists — the jar's reload from `storage` (REQ-WSP-06) into the very [`Arc`] the
+/// transport sends and captures through ([`AppCookieJar`]), then the Manage Cookies
+/// dialog's inputs (issue #286).
+fn install_cookie_wiring(cx: &mut App, store: &Arc<Mutex<LocalStore>>) {
+    let Some(jar) = cx
+        .try_global::<AppCookieJar>()
+        .map(|jar| Arc::clone(&jar.0))
+    else {
+        // `init_http_client` installs the jar before any store can land (the
+        // `install_history_recording` shape); without one there is nothing to load into.
+        return;
+    };
+    let store = Arc::clone(store);
+    let loaded =
+        http_engine::load_jar(cx.background_executor(), Arc::clone(&store), WORKSPACE_ID.to_owned());
+    cx.spawn(async move |cx| {
+        match loaded.await {
+            Ok(loaded_jar) => {
+                cx.update(|_cx| {
+                    // The same `Arc` the transport holds, so the contents change under it
+                    // and no second jar can exist. `Decision:` loaded rows win over
+                    // whatever a send captured before the load landed: the jar has no
+                    // merge API, and `CookieJar::add` would narrow a `Domain=` cookie to
+                    // a host-only one. The store opens at startup, before any request tab
+                    // can send.
+                    let mut jar_guard =
+                        jar.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    *jar_guard = loaded_jar;
+                });
+            }
+            Err(error) => {
+                // The text is `cookie_persistence`'s own fixed wording (PRD §7), surfaced
+                // the way the store-open failure is — never only logged. Handled here so
+                // the dialog and later saves still work on the jar there is.
+                cx.update(|cx| {
+                    StartupProblems::push(
+                        cx,
+                        format!("your saved cookies could not be read back ({error})"),
+                    );
+                });
+            }
+        }
+        cx.update(|cx| {
+            // Installed once the load has landed (the brief's order), so the dialog lists
+            // the loaded jar — and installed on a failed load too: the store is there to
+            // save through and the jar is the app's own either way.
+            response_viewer::cookie_dialog::install_inputs(
+                cx,
+                response_viewer::cookie_dialog::CookieDialogInputs {
+                    workspace_id: WORKSPACE_ID.to_owned(),
+                    store,
+                    jar,
+                },
+            );
+            cx.default_global::<CookieWiring>().load_finished = true;
+        });
+    })
+    .detach();
 }
 
 /// The app-wide history-recording wire (S33w): the [`http_engine::HistoryRecorder`] the
@@ -449,8 +614,8 @@ fn init_keymap(cx: &mut App) {
 }
 
 /// `storage`: the local store opened and migrated off the foreground thread (REQ-NFR-02),
-/// installed as [`AppStore`] when it lands, with [`install_environment_picker_inputs`] right
-/// behind it. A store that will not open falls back to an
+/// installed as [`AppStore`] when it lands, with [`install_environment_picker_inputs`] and
+/// [`install_cookie_wiring`] right behind it. A store that will not open falls back to an
 /// in-memory one so the app still runs — with an error toast, because nothing is saved
 /// then.
 fn open_local_store(cx: &mut App, location: StoreLocation) {
@@ -462,10 +627,12 @@ fn open_local_store(cx: &mut App, location: StoreLocation) {
             StoreStartup::Opened(store) => {
                 cx.set_global(AppStore(Arc::clone(&store)));
                 install_environment_picker_inputs(cx, &store);
+                install_cookie_wiring(cx, &store);
             }
             StoreStartup::Fallback { store, reason } => {
                 cx.set_global(AppStore(Arc::clone(&store)));
                 install_environment_picker_inputs(cx, &store);
+                install_cookie_wiring(cx, &store);
                 StartupProblems::push(
                     cx,
                     format!(
