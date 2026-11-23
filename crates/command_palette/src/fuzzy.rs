@@ -1,7 +1,8 @@
 //! The fuzzy scorer the [`crate::Picker`] ranks its matches with.
 //!
-//! A simple scorer on purpose: `score` walks the query through the candidate as a
-//! case-insensitive subsequence and grades where the match landed — an exact prefix
+//! A simple scorer on purpose: `score` grades the best alignment of the query in the
+//! candidate — the strongest way to spell the query out as a case-insensitive
+//! subsequence — by where it landed: an exact prefix
 //! first, then matches on word starts (after ` `, `_`, `-`, `/`, `.`, `:` or a camelCase
 //! hump), then contiguous runs, then scattered letter hits. Zed's `fuzzy` crate is GPL
 //! and is never copied, and no third-party matcher (`fuzzy-matcher`, `nucleo`, …) is
@@ -70,61 +71,164 @@ pub fn rank<'a>(query: &str, candidates: impl IntoIterator<Item = &'a str>) -> V
     matches
 }
 
-/// The greedy match and its grade: the leftmost subsequence of `candidate` the query
-/// spells out, graded by where it landed. The leftmost match is a deliberate simplicity
-/// — a query box's candidates are short, and a smarter alignment is a future improvement.
+/// The strongest match and its grade: every alignment of `query` in `candidate` — every
+/// way to spell the query out as a case-insensitive subsequence — is scored and the best
+/// one wins, so a tight match later in the candidate outranks a loose earlier one.
+///
+/// The search carries partial alignments one query character at a time and merges all
+/// that end at the same candidate position with the same tier facts, keeping it
+/// `O(query × candidate²)` and free of recursion.
 fn match_candidate(query: &str, candidate: &str) -> Option<(Score, Vec<usize>)> {
     if query.is_empty() {
         return Some((0, Vec::new()));
     }
 
-    let query_length = query.chars().count();
-    let mut positions = Vec::new();
-    let mut word_start_hits: usize = 0;
-    let mut contiguous_pairs: usize = 0;
-    let mut previous_character: Option<char> = None;
-    let mut query_characters = query.chars().peekable();
+    let query_characters: Vec<char> = query.chars().collect();
+    let candidate_characters: Vec<char> = candidate.chars().collect();
+    let mut frontier = empty_frontier(candidate_characters.len());
+    frontier[frontier_index(None, false, true, true)] = Some(PartialAlignment {
+        previous_position: None,
+        word_start_any: false,
+        all_contiguous: true,
+        exact_prefix: true,
+        bonus: 0,
+        positions: Vec::new(),
+    });
 
-    // `char_indices` keeps us honest about multi-byte characters while `enumerate`
-    // numbers positions in characters — positions are char indices, never byte offsets.
-    for (position, (_byte_offset, character)) in candidate.char_indices().enumerate() {
-        let Some(&query_character) = query_characters.peek() else {
-            break;
+    for (query_index, &query_character) in query_characters.iter().enumerate() {
+        let mut next_frontier = empty_frontier(candidate_characters.len());
+        for partial in frontier.iter().flatten() {
+            let first_position = partial.previous_position.map_or(0, |position| position + 1);
+            for (position, &candidate_character) in
+                candidate_characters.iter().enumerate().skip(first_position)
+            {
+                if !characters_match(query_character, candidate_character) {
+                    continue;
+                }
+                let previous_character = position
+                    .checked_sub(1)
+                    .and_then(|index| candidate_characters.get(index))
+                    .copied();
+                let word_start = is_word_start(previous_character, candidate_character);
+                let contiguous = partial
+                    .previous_position
+                    .is_some_and(|last| last + 1 == position);
+                let mut positions = partial.positions.clone();
+                positions.push(position);
+                keep_if_stronger(
+                    &mut next_frontier,
+                    PartialAlignment {
+                        previous_position: Some(position),
+                        word_start_any: partial.word_start_any || word_start,
+                        all_contiguous: partial.all_contiguous
+                            && (partial.previous_position.is_none() || contiguous),
+                        exact_prefix: partial.exact_prefix && position == query_index,
+                        bonus: partial
+                            .bonus
+                            .saturating_add(if word_start { WORD_START_BONUS } else { 0 })
+                            .saturating_add(if contiguous { CONTIGUITY_BONUS } else { 0 }),
+                        positions,
+                    },
+                );
+            }
+        }
+        frontier = next_frontier;
+        if frontier.iter().all(Option::is_none) {
+            return None;
+        }
+    }
+
+    strongest_alignment(&frontier, query_characters.len())
+}
+
+/// One partial alignment the search carries: where the last match landed, the facts the
+/// tier is graded on (any word start, one contiguous run, an exact prefix so far), the
+/// bonus earned so far, and the matched positions for highlighting.
+#[derive(Clone)]
+struct PartialAlignment {
+    previous_position: Option<usize>,
+    word_start_any: bool,
+    all_contiguous: bool,
+    exact_prefix: bool,
+    bonus: Score,
+    positions: Vec<usize>,
+}
+
+/// Frontier slot layout: one slot per (last matched position, tier flags) pair — the
+/// three flags packed into the low bits of the index.
+const FLAG_WORD_START_ANY: usize = 1;
+const FLAG_ALL_CONTIGUOUS: usize = 2;
+const FLAG_EXACT_PREFIX: usize = 4;
+const FLAG_COUNT: usize = 8;
+
+/// The frontier slot a partial alignment belongs to. Everything the remaining query can
+/// still earn or land in depends only on the slot, so the strongest alignment per slot
+/// is the only one worth keeping.
+fn frontier_index(
+    previous_position: Option<usize>,
+    word_start_any: bool,
+    all_contiguous: bool,
+    exact_prefix: bool,
+) -> usize {
+    let previous = previous_position.map_or(0, |position| position + 1);
+    (previous * FLAG_COUNT)
+        | (usize::from(word_start_any) * FLAG_WORD_START_ANY)
+        | (usize::from(all_contiguous) * FLAG_ALL_CONTIGUOUS)
+        | (usize::from(exact_prefix) * FLAG_EXACT_PREFIX)
+}
+
+fn empty_frontier(candidate_length: usize) -> Vec<Option<PartialAlignment>> {
+    vec![None; (candidate_length + 1) * FLAG_COUNT]
+}
+
+/// Keep `alignment` in its frontier slot when its bonus beats what is already there —
+/// the slot fixes the tier the alignment can land in, so the bonus is all that separates
+/// them. Ties keep the alignment found first, which is the leftmost one.
+fn keep_if_stronger(frontier: &mut [Option<PartialAlignment>], alignment: PartialAlignment) {
+    let index = frontier_index(
+        alignment.previous_position,
+        alignment.word_start_any,
+        alignment.all_contiguous,
+        alignment.exact_prefix,
+    );
+    let stronger = frontier[index]
+        .as_ref()
+        .is_none_or(|kept| alignment.bonus > kept.bonus);
+    if stronger {
+        frontier[index] = Some(alignment);
+    }
+}
+
+/// The strongest finished alignment: the biggest tier it can land in (exact prefix,
+/// then any word start, then one contiguous run) plus that alignment's bonus and one
+/// point per matched character. Ties keep the first slot, so the result is deterministic.
+fn strongest_alignment(
+    frontier: &[Option<PartialAlignment>],
+    query_length: usize,
+) -> Option<(Score, Vec<usize>)> {
+    let character_bonus = CHAR_BONUS.saturating_mul(counted(query_length));
+    let mut best: Option<(Score, Vec<usize>)> = None;
+    for partial in frontier.iter().flatten() {
+        let tier = if partial.exact_prefix {
+            TIER_EXACT_PREFIX
+        } else if partial.word_start_any {
+            TIER_WORD_START
+        } else if partial.all_contiguous {
+            TIER_CONTIGUOUS
+        } else {
+            0
         };
-        if !characters_match(query_character, character) {
-            previous_character = Some(character);
-            continue;
+        let score = tier
+            .saturating_add(partial.bonus)
+            .saturating_add(character_bonus);
+        let stronger = best
+            .as_ref()
+            .is_none_or(|(best_score, _)| score > *best_score);
+        if stronger {
+            best = Some((score, partial.positions.clone()));
         }
-        if positions.last().is_some_and(|&last| last + 1 == position) {
-            contiguous_pairs += 1;
-        }
-        if is_word_start(previous_character, character) {
-            word_start_hits += 1;
-        }
-        positions.push(position);
-        query_characters.next();
-        previous_character = Some(character);
     }
-
-    if query_characters.next().is_some() {
-        return None;
-    }
-
-    let exact_prefix = positions.last() == Some(&(query_length - 1));
-    let tier = if exact_prefix {
-        TIER_EXACT_PREFIX
-    } else if word_start_hits > 0 {
-        TIER_WORD_START
-    } else if contiguous_pairs + 1 == positions.len() {
-        TIER_CONTIGUOUS
-    } else {
-        0
-    };
-    let bonuses = WORD_START_BONUS
-        .saturating_mul(counted(word_start_hits))
-        .saturating_add(CONTIGUITY_BONUS.saturating_mul(counted(contiguous_pairs)))
-        .saturating_add(CHAR_BONUS.saturating_mul(counted(positions.len())));
-    Some((tier.saturating_add(bonuses), positions))
+    best
 }
 
 /// Case-insensitive per character: `'A'` matches `'a'`, in any script.
@@ -153,3 +257,7 @@ fn counted(items: usize) -> Score {
 #[cfg(test)]
 #[path = "fuzzy_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "fuzzy_alignment_tests.rs"]
+mod alignment_tests;

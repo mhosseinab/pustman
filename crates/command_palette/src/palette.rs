@@ -14,7 +14,7 @@
 //! the palette takes focus, so the list is what the user could dispatch where they were
 //! and not what the query field can.
 
-use gpui::{Action, App, Context, DismissEvent, ElementId, SharedString, Window};
+use gpui::{Action, App, Context, DismissEvent, ElementId, Global, SharedString, Window};
 use pustman_actions::palette;
 use ui::prelude::*;
 use workspace::{ModalView, Workspace};
@@ -47,8 +47,50 @@ impl PaletteEntry {
     }
 }
 
-/// The delegate behind the command palette: every dispatchable action, sorted by name,
-/// fuzzy-filtered by [`crate::fuzzy`] against the query.
+/// How recently each action was confirmed from the palette: the rows the palette opens
+/// with list the most recently used actions first (pack S15/R15; `postman-screens.md`:
+/// "Recently used actions first"), then the rest alphabetically.
+///
+/// `Decision:` recency is a per-session app [`Global`], not persisted. It only reorders
+/// rows the query and keymap already order otherwise, so it is a convenience rather
+/// than user data; persisting it is a `storage` decision for a later step.
+#[derive(Default)]
+struct PaletteUsage {
+    recent: Vec<String>,
+}
+
+impl Global for PaletteUsage {}
+
+impl PaletteUsage {
+    /// Note that `action_name` was just used: it moves to the front of the recency list.
+    fn record(&mut self, action_name: &str) {
+        self.recent.retain(|used| used != action_name);
+        self.recent.insert(0, action_name.to_owned());
+    }
+
+    /// How recently `action_name` was used: 0 is the most recent, [`NEVER_USED`] when it
+    /// was never confirmed.
+    fn recency(&self, action_name: &str) -> usize {
+        self.recent
+            .iter()
+            .position(|used| used == action_name)
+            .unwrap_or(NEVER_USED)
+    }
+}
+
+/// The recency of an action the palette has recorded nothing about: it sorts behind
+/// every used action.
+const NEVER_USED: usize = usize::MAX;
+
+/// The recency of `action_name` under `usage` — [`NEVER_USED`] before the palette has
+/// recorded anything.
+fn recency_of(usage: Option<&PaletteUsage>, action_name: &str) -> usize {
+    usage.map_or(NEVER_USED, |usage| usage.recency(action_name))
+}
+
+/// The delegate behind the command palette: every dispatchable action, most recently
+/// used first and then sorted by name, fuzzy-filtered by [`crate::fuzzy`] against the
+/// query.
 pub struct PaletteDelegate {
     entries: Vec<PaletteEntry>,
     matches: Vec<usize>,
@@ -57,9 +99,11 @@ pub struct PaletteDelegate {
 
 impl PaletteDelegate {
     /// The palette over `actions` — everything the user could dispatch where they were,
-    /// minus the palette's own mechanics, sorted by name so the list is deterministic.
-    pub fn new(actions: impl IntoIterator<Item = Box<dyn Action>>) -> Self {
+    /// minus the palette's own mechanics, in row order: the most recently used actions
+    /// first (pack S15/R15), the rest alphabetically so the list is deterministic.
+    pub fn new(actions: impl IntoIterator<Item = Box<dyn Action>>, cx: &App) -> Self {
         let hidden = hidden_action_names();
+        let usage = cx.try_global::<PaletteUsage>();
         let mut entries: Vec<PaletteEntry> = actions
             .into_iter()
             .filter(|action| !hidden.contains(&action.name()))
@@ -69,8 +113,11 @@ impl PaletteDelegate {
             })
             .collect();
         entries.sort_by(|left, right| {
-            left.name
-                .cmp(&right.name)
+            // A never-used action's [`NEVER_USED`] recency sorts it behind every use,
+            // so the used actions lead, most recent first.
+            recency_of(usage, left.action.name())
+                .cmp(&recency_of(usage, right.action.name()))
+                .then_with(|| left.name.cmp(&right.name))
                 .then_with(|| left.action.name().cmp(right.action.name()))
         });
         let matches = (0..entries.len()).collect();
@@ -121,6 +168,10 @@ impl PickerDelegate for PaletteDelegate {
         let Some(entry) = self.entry_at(self.selected) else {
             return;
         };
+        // Confirming is where the palette learns what the user actually picks: the
+        // action leads the next palette's rows (pack S15/R15).
+        cx.default_global::<PaletteUsage>()
+            .record(entry.action.name());
         let action = entry.action.boxed_clone();
         // Dismiss first: the modal layer restores focus as it goes. The dispatch is one
         // effect later (`window.defer`), so it runs against the *restored* focus and the
@@ -258,24 +309,25 @@ fn toggle_palette(_: &palette::Toggle, cx: &mut App) {
         return;
     };
     cx.defer(move |cx| {
-        if window_handle
-            .update(cx, |root, window, cx| {
-                let Ok(workspace) = root.downcast::<Workspace>() else {
-                    return;
-                };
-                // Collected before the palette takes focus: the list is what the user
-                // could dispatch where they were, not what the query field can.
-                let actions = window.available_actions(cx);
-                workspace.update(cx, |workspace, cx| {
-                    workspace.toggle_modal(window, cx, |window, cx| {
-                        Picker::new(PaletteDelegate::new(actions), window, cx)
-                    });
+        match window_handle.update(cx, |root, window, cx| {
+            let Ok(workspace) = root.downcast::<Workspace>() else {
+                return;
+            };
+            // Collected before the palette takes focus: the list is what the user
+            // could dispatch where they were, not what the query field can.
+            let actions = window.available_actions(cx);
+            workspace.update(cx, |workspace, cx| {
+                workspace.toggle_modal(window, cx, |window, cx| {
+                    Picker::new(PaletteDelegate::new(actions, cx), window, cx)
                 });
-            })
-            .is_err()
-        {
-            // The window closed between the keystroke and this callback; there is no
-            // workspace left to open the palette over and nothing to tell anyone about.
+            });
+        }) {
+            Ok(()) => {}
+            // The window closed between the keystroke and this callback: there is no
+            // workspace left to open the palette over and nobody left to tell, so this
+            // toggle is dropped here on purpose — the discard is spelled out, not a
+            // result silently dropped on the floor.
+            Err(_window_gone) => {}
         }
     });
 }
@@ -287,3 +339,7 @@ impl<D: PickerDelegate> ModalView for Picker<D> {}
 #[cfg(test)]
 #[path = "palette_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "palette_recent_tests.rs"]
+mod recent_tests;
