@@ -4,13 +4,15 @@
 //! retention SQL and no date math of its own.
 //!
 //! The window arrives as a value: `http_engine` is a domain crate and never reads
-//! `settings`; the caller passes its `history_retention_days` (default 30). A failed
-//! prune is one fixed message — `storage`'s error text can quote the rows it failed on,
+//! `settings`; the caller passes its `history_retention_days` (default 30) and can
+//! update it in place through [`RetentionWindow`], so a settings change reaches an
+//! installed recorder without a rebuild (issue #196). A failed prune is one fixed message — `storage`'s error text can quote the rows it failed on,
 //! and rows are request content (PRD §7) — handed back to the writer, which reports it
 //! to the user (AGENTS.md: errors reach the user); the prune never blocks or undoes the
 //! row the write inserted.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use storage::LocalStore;
 
@@ -48,6 +50,30 @@ impl RetentionGate {
 /// fixed wording and the error is dropped unread (the shape `history_panel`'s delete
 /// failures take).
 pub(crate) const PRUNE_FAILURE_MESSAGE: &str = "Old request history entries could not be removed";
+
+/// The retention window (REQ-HIST-04) a [`crate::HistoryRecorder`] prunes by. Shared by
+/// every clone of the recorder — the drafts of sends already in flight hold clones — so
+/// a caller setting it from settings reaches all of them at once (issue #196) instead of
+/// the value being frozen when the recorder was built.
+#[derive(Clone)]
+pub(crate) struct RetentionWindow(Arc<AtomicU32>);
+
+impl RetentionWindow {
+    /// A window of `retention_days` days.
+    pub(crate) fn new(retention_days: u32) -> Self {
+        Self(Arc::new(AtomicU32::new(retention_days)))
+    }
+
+    /// The window the writer prunes by right now.
+    pub(crate) fn days(&self) -> u32 {
+        self.0.load(Ordering::Acquire)
+    }
+
+    /// Set the window every clone prunes by from now on.
+    pub(crate) fn set(&self, retention_days: u32) {
+        self.0.store(retention_days, Ordering::Release);
+    }
+}
 
 /// Prune `store`'s history rows older than `retention_days` days (REQ-HIST-04), at most
 /// once per app session. The claim is taken before the delete, so a prune is attempted

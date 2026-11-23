@@ -29,7 +29,9 @@ use variables::{ScopeStack, spans};
 use crate::error::TransportError;
 use crate::pipeline::PipelineError;
 use crate::response::{Response, ResponseBody};
-use crate::retention::{DEFAULT_HISTORY_RETENTION_DAYS, RetentionGate, prune_once};
+use crate::retention::{
+    DEFAULT_HISTORY_RETENTION_DAYS, RetentionGate, RetentionWindow, prune_once,
+};
 
 #[cfg(test)]
 #[path = "history_tests.rs"]
@@ -60,7 +62,10 @@ pub struct HistoryRecorder {
     store: Arc<Mutex<LocalStore>>,
     workspace_id: String,
     retention_gate: Arc<RetentionGate>,
-    retention_days: u32,
+    /// The retention window (REQ-HIST-04), shared with every clone of this recorder —
+    /// the drafts of sends already in flight hold clones — so
+    /// [`HistoryRecorder::set_retention_days`] reaches all of them at once (issue #196).
+    retention_days: RetentionWindow,
     /// Where a failed retention prune is reported (AGENTS.md: errors reach the user).
     /// `None` keeps the log-only floor of a caller that installs no report.
     prune_failure_report: Option<Arc<dyn Fn(&'static str) + Send + Sync>>,
@@ -75,18 +80,27 @@ impl HistoryRecorder {
             store,
             workspace_id: workspace_id.into(),
             retention_gate: Arc::new(RetentionGate::new()),
-            retention_days: DEFAULT_HISTORY_RETENTION_DAYS,
+            retention_days: RetentionWindow::new(DEFAULT_HISTORY_RETENTION_DAYS),
             prune_failure_report: None,
         }
     }
 
     /// The retention window the writer prunes by (REQ-HIST-04): the caller's
     /// `history_retention_days`, since this domain crate never reads `settings` itself.
-    /// `0` disables pruning, as in `storage`'s `prune_older_than`. Additive, so
+    /// `0` disables pruning, as in `storage`'s `prune_older_than`. Later changes arrive
+    /// through [`HistoryRecorder::set_retention_days`]. Additive, so
     /// [`HistoryRecorder::new`] keeps its signature.
-    pub fn with_retention_days(mut self, retention_days: u32) -> Self {
-        self.retention_days = retention_days;
+    pub fn with_retention_days(self, retention_days: u32) -> Self {
+        self.retention_days.set(retention_days);
         self
+    }
+
+    /// Update the retention window live (REQ-HIST-04): every clone of this recorder —
+    /// including the drafts of sends already in flight — prunes by `retention_days` from
+    /// now on, so a caller's settings change needs no restart (issue #196). `0` disables
+    /// pruning, as in `storage`'s `prune_older_than`.
+    pub fn set_retention_days(&self, retention_days: u32) {
+        self.retention_days.set(retention_days);
     }
 
     /// Report a failed retention prune (REQ-HIST-04) through `report`, which receives
@@ -264,7 +278,7 @@ impl HistoryDraft {
                 if let Some(message) = prune_once(
                     &self.recorder.retention_gate,
                     &store,
-                    self.recorder.retention_days,
+                    self.recorder.retention_days.days(),
                 ) {
                     self.recorder.report_prune_failure(message);
                 }
