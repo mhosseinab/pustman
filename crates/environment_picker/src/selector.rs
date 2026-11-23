@@ -54,8 +54,11 @@ const NOT_WIRED_MESSAGE: &str =
 /// environments (input to this crate — see the module docs) and the app's local store
 /// (the `pustman::AppStore` global, unreachable without depending on the top crate).
 ///
-/// The app's wire installs one per window; the opener reads it when the action fires, so
-/// replacing it after a change keeps the picker current.
+/// One [`Global`] for the whole app, not one per window: the app's wire installs it
+/// once per app (every window's opener reads that same copy when the action fires), so
+/// replacing it after a change keeps every picker current. `Decision:` it stays
+/// app-wide for v1's one workspace (REQ-VAR-08, pack S07/R07); scoping it per window is
+/// the follow-up that must land before multi-window (issue #118).
 #[derive(Clone)]
 pub struct SelectorInputs {
     /// The workspace the selection is scoped to — it is part of the kv key.
