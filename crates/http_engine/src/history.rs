@@ -602,7 +602,11 @@ fn redacted_body_prefix(
 /// window are the body's own bytes and stay: only the tail the window cut is dropped.
 fn without_incomplete_utf8_tail(bytes: &[u8]) -> &[u8] {
     let mut scanned = 0;
-    while let Some(remaining) = bytes.get(scanned..) {
+    // Each round advances `scanned` by at most the length of the slice it just read, so
+    // `scanned` never passes `bytes.len()` and every round ends in a return: the empty
+    // tail a lookup past the end would be is valid UTF-8, which returns `bytes` too.
+    loop {
+        let remaining = bytes.get(scanned..).unwrap_or_default();
         let error = match std::str::from_utf8(remaining) {
             Ok(_) => return bytes,
             Err(error) => error,
@@ -618,7 +622,6 @@ fn without_incomplete_utf8_tail(bytes: &[u8]) -> &[u8] {
             Some(length) => scanned += error.valid_up_to() + length,
         }
     }
-    bytes
 }
 
 /// The error's variant as a fixed kind string. Never the error's text: `Display`,
