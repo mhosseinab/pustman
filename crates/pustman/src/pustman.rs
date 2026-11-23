@@ -206,10 +206,18 @@ fn install_environment_picker_inputs(cx: &mut App, store: &Arc<Mutex<LocalStore>
 #[derive(Default)]
 struct HistoryRecordingWiring {
     started: bool,
-    /// The clients that already got their recorder, so `set_history` runs exactly once
-    /// per client however often [`AppStore`] is set.
-    recorded: Vec<EntityId>,
+    /// The recorders installed so far and the client each went to: `set_history` runs
+    /// exactly once per client however often [`AppStore`] is set, and a
+    /// `history_retention_days` change updates every recorder here (issue #196).
+    installed: Vec<InstalledRecorder>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// One client's installed [`http_engine::HistoryRecorder`] (issue #196): the client id
+/// keeps one recorder per client, and the recorder is what a settings change updates.
+struct InstalledRecorder {
+    client: EntityId,
+    recorder: http_engine::HistoryRecorder,
 }
 
 impl Global for HistoryRecordingWiring {}
@@ -224,13 +232,17 @@ fn init_history_recording(cx: &mut App) {
         return;
     }
     cx.default_global::<HistoryRecordingWiring>().started = true;
-    // The retention window is the typed `history_retention_days` setting (REQ-HIST-04);
-    // the recorder takes its value once, when it is built below.
+    // The retention window is the typed `history_retention_days` setting (REQ-HIST-04):
+    // the recorder takes its value when it is built below and follows later changes
+    // through [`update_history_retention`] (issue #196).
     settings::Settings::register(cx);
-    let subscription = cx.observe_global::<AppStore>(install_history_recording);
+    let subscriptions = [
+        cx.observe_global::<AppStore>(install_history_recording),
+        cx.observe_global::<settings::SettingsStore>(update_history_retention),
+    ];
     cx.default_global::<HistoryRecordingWiring>()
         ._subscriptions
-        .push(subscription);
+        .extend(subscriptions);
     install_history_recording(cx);
 }
 
@@ -256,8 +268,9 @@ fn install_history_recording(cx: &mut App) {
     };
     if cx
         .default_global::<HistoryRecordingWiring>()
-        .recorded
-        .contains(&client.entity_id())
+        .installed
+        .iter()
+        .any(|installed| installed.client == client.entity_id())
     {
         return;
     }
@@ -274,7 +287,7 @@ fn install_history_recording(cx: &mut App) {
                 // toast would have nowhere to show.
             }
         });
-    client.update(cx, |client, _| client.set_history(recorder));
+    client.update(cx, |client, _| client.set_history(recorder.clone()));
     // The reader, for the app's lifetime (detached like [`ConsoleWiring`]'s feed): the
     // app keeps exactly one per recorder, and a dropped task stops nothing while any
     // sender is alive.
@@ -285,8 +298,22 @@ fn install_history_recording(cx: &mut App) {
     })
     .detach();
     cx.default_global::<HistoryRecordingWiring>()
-        .recorded
-        .push(client.entity_id());
+        .installed
+        .push(InstalledRecorder {
+            client: client.entity_id(),
+            recorder,
+        });
+}
+
+/// `history_retention_days` (REQ-HIST-04) follows its setting while the app runs (issue
+/// #196): a change updates every installed recorder's retention window at once — the
+/// shape `console::init` uses for `console_max_entries` — so the value is not frozen at
+/// the moment the recorder was built.
+fn update_history_retention(cx: &mut App) {
+    let retention_days = settings::Settings::get_global(cx).history_retention_days;
+    for installed in &cx.default_global::<HistoryRecordingWiring>().installed {
+        installed.recorder.set_retention_days(retention_days);
+    }
 }
 
 /// The app-wide history-panel wiring (S35w): the windows waiting for the local store the
