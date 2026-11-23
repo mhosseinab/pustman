@@ -251,6 +251,9 @@ fn send_settings(overrides: Option<&RequestSettings>) -> SendSettings {
     if let Some(follow_original_method) = overrides.follow_original_method {
         settings.follow_original_method = follow_original_method;
     }
+    if let Some(keep_authorization) = overrides.keep_authorization {
+        settings.keep_authorization = keep_authorization;
+    }
     if let Some(verify_tls) = overrides.verify_tls {
         settings.verify_tls = verify_tls;
     }
@@ -259,6 +262,9 @@ fn send_settings(overrides: Option<&RequestSettings>) -> SendSettings {
     }
     if let Some(http_version) = overrides.http_version {
         settings.http_version = http_version;
+    }
+    if let Some(disable_cookie_jar) = overrides.disable_cookie_jar {
+        settings.disable_cookie_jar = disable_cookie_jar;
     }
     settings
 }
@@ -270,3 +276,7 @@ mod tests;
 #[cfg(test)]
 #[path = "pipeline_param_mirror_tests.rs"]
 mod param_mirror_tests;
+
+#[cfg(test)]
+#[path = "pipeline_req_http_09_tests.rs"]
+mod req_http_09_tests;

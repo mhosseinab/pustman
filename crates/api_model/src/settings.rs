@@ -30,6 +30,10 @@ pub struct RequestSettings {
     pub max_redirects: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub follow_original_method: Option<bool>,
+    /// Keep the `Authorization` header across redirects (REQ-HTTP-09). Off by default:
+    /// a redirect can cross hosts, and credentials must not follow it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_authorization: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verify_tls: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -38,6 +42,10 @@ pub struct RequestSettings {
     pub remove_referer: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_version: Option<HttpVersion>,
+    /// Neither apply nor capture cookies for this send (REQ-HTTP-09): the cookie jar
+    /// is off for this request alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disable_cookie_jar: Option<bool>,
     /// The auto headers this request leaves out of the send (REQ-HTTP-03): the names of
     /// generated headers — `Host`, `Content-Type`, … — the user switched off. An empty
     /// list is the default and never serializes, so the deterministic workspace format
@@ -67,3 +75,7 @@ mod tests;
 #[cfg(test)]
 #[path = "settings_disabled_auto_tests.rs"]
 mod disabled_auto_tests;
+
+#[cfg(test)]
+#[path = "settings_req_http_09_tests.rs"]
+mod req_http_09_tests;
