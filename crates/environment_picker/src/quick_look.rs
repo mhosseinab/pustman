@@ -324,7 +324,7 @@ impl QuickLook {
         // While the fetch is in flight the cell says so and the toggle stays off: the
         // reveal is not on until the value is on screen.
         row.local = LocalValueDisplay::Checking;
-        // The row's label and scope name, cloned out before the task borrows nothing.
+        // The row's scope id and variable key, cloned out before the task borrows nothing.
         let scope_id = row.scope_id.clone();
         let variable_key = row.key.clone();
         let workspace_id = self.workspace_id.clone();
