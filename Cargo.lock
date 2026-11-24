@@ -1160,6 +1160,7 @@ dependencies = [
  "api_model",
  "gpui",
  "pustman_actions",
+ "request_editor",
  "serde_json",
  "storage",
  "tempfile",
@@ -1167,6 +1168,7 @@ dependencies = [
  "time",
  "ui",
  "workspace",
+ "workspace_store",
 ]
 
 [[package]]

@@ -20,6 +20,7 @@
 pub mod fuzzy;
 pub mod palette;
 pub mod picker;
+pub mod quick_open;
 pub mod recent;
 
 pub use picker::{PICKER_CONTEXT, Picker, PickerDelegate};
@@ -44,6 +45,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("escape", Cancel, Some(PICKER_CONTEXT)),
     ]);
     palette::init(cx);
+    quick_open::init(cx);
     recent::init(cx);
 }
 
