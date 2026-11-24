@@ -649,7 +649,9 @@ impl EnvEditor {
             secrets,
         } = opened;
         let scope_id = target.scope_id().to_owned();
-        let rows = target
+        // Annotated: with the type left to the struct field below, `for row in &rows`
+        // overflows trait resolution on macOS (E0275 through itertools' IntoIterator impls).
+        let rows: Vec<Row> = target
             .variables()
             .iter()
             .enumerate()
