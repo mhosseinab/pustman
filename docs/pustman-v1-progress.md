@@ -124,7 +124,7 @@ Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub p
 | S42 | External change bar and problem badges | pending | 0 | | |  |
 | S43 | Environment editor: shared, local and secret values; set-secret prompt on send | in_progress | 0 | | | S43a, S43b merged |
 | S43w | Wire the active environment and globals into open editors (driver-added, S48 prereq; after S41, S43) | pending | 0 | | |  |
-| S44 | `git` crate + status bar branch and dirty count | in_progress | 0 | | | S44a, S44b merged |
+| S44 | `git` crate + status bar branch and dirty count | done | 0 | | | S44a, S44b, S44w merged |
 | S45 | Import/export UI (Postman collection, environment, globals) | pending | 0 | | |  |
 | S46 | Quick open (`Ctrl/Cmd-P`) | pending | 0 | | |  |
 | S47 | Sharing AC: two clones of one Git repository | pending | 0 | | |  |

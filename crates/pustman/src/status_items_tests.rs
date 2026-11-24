@@ -44,8 +44,9 @@ fn the_status_bar_carries_the_console_count_and_the_environment(cx: &mut TestApp
         })
     });
     assert_eq!(
-        left_items, 1,
-        "the status bar's left half carries the console count, not an empty strip"
+        left_items, 2,
+        "the status bar's left half carries the console count and the git branch item \
+         (S44w; the branch item hides itself outside a repository), not an empty strip"
     );
     assert_eq!(
         right_items, 1,

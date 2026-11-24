@@ -4990,6 +4990,7 @@ dependencies = [
  "command_palette",
  "console",
  "environment_picker",
+ "git",
  "gpui",
  "gpui_platform",
  "gpui_tokio",
