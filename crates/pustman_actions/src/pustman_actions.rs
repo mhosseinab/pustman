@@ -112,6 +112,26 @@ pub mod environment {
             QuickLook,
         ]
     );
+
+    /// Opens the variables editor on the active scope with the cursor in one secret's
+    /// masked value field (S43c): what the `UnresolvedSecret` error panel's "Set <name>"
+    /// button dispatches. `name` is the variable key — never its value — and it is the
+    /// lookup, not a display string: the editor aims at the row that carries it.
+    //
+    // `gpui` re-exports the `schemars` its own `Action` schema API is built on
+    // (`gpui::private` is the re-export macro-generated code names); the derive's
+    // generated schema impl resolves through this alias, so no new dependency appears.
+    use gpui::private::schemars;
+
+    #[derive(
+        Clone, PartialEq, Eq, Debug, serde::Deserialize, schemars::JsonSchema, gpui::Action,
+    )]
+    #[action(namespace = environment)]
+    pub struct EditSecret {
+        /// The variable key whose secret row takes the cursor.
+        #[serde(default)]
+        pub name: String,
+    }
 }
 
 /// History panel.

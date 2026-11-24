@@ -27,6 +27,7 @@ const EXPECTED_ACTIONS: &[&str] = &[
     "quick_open::Toggle",
     "environment::SelectEnvironment",
     "environment::QuickLook",
+    "environment::EditSecret",
     "history::Focus",
     "console::Clear",
     "console::Pause",

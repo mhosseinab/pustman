@@ -25,6 +25,7 @@ pub mod pretty;
 mod preview;
 mod request_as_sent;
 mod save_body;
+pub mod set_secret;
 mod status_line;
 mod table_cells;
 mod text_selection;
@@ -48,6 +49,7 @@ use http_engine::{Response, TransportError};
 use ui::prelude::*;
 
 use crate::error_panel::ErrorPanel;
+use crate::set_secret::FailedSend;
 use crate::status_line::body_size;
 
 /// The key context the response viewer answers in. The default keymaps bind
@@ -94,6 +96,9 @@ pub struct ResponseView {
     timeline: Entity<TimelineTab>,
     /// The failed send on screen instead of its body (REQ-RESP-08).
     error: Option<TransportError>,
+    /// The send the failure came with (S43c fix 3), captured when the panel is built:
+    /// what its Resend answers are checked against.
+    failed_send: Option<FailedSend>,
     /// The response on screen, kept for `response::SaveBody` and `response::CopyBody`
     /// (REQ-RESP-07): the actions save and copy the bytes it arrived as.
     response: Option<Arc<Response>>,
@@ -124,6 +129,7 @@ impl ResponseView {
             cookies: cx.new(CookiesTab::new),
             timeline: cx.new(TimelineTab::new),
             error: None,
+            failed_send: None,
             response: None,
             save_task: None,
             copy_task: None,
@@ -138,6 +144,7 @@ impl ResponseView {
     pub fn set_response(&mut self, response: Response, cx: &mut Context<Self>) {
         let response = Arc::new(response);
         self.error = None;
+        self.failed_send = None;
         self.response = Some(Arc::clone(&response));
         self.status_line = Some(StatusLine::new(
             ElementId::from(&self.focus_handle),
@@ -170,6 +177,7 @@ impl ResponseView {
     pub fn set_error(&mut self, error: TransportError, cx: &mut Context<Self>) {
         self.status_line = None;
         self.error = Some(error);
+        self.failed_send = crate::set_secret::capture_failed_send(cx);
         cx.notify();
     }
 
@@ -187,6 +195,7 @@ impl ResponseView {
         self.status_line = None;
         self.response = None;
         self.error = None;
+        self.failed_send = None;
         self.body = cx.new(BodyView::new);
         self._body_subscription = cx.subscribe(&self.body, Self::on_body_event);
         self.headers = cx.new(HeadersView::new);
@@ -199,9 +208,9 @@ impl ResponseView {
     /// (REQ-RESP-08), otherwise the selected tab's pane.
     fn pane(&self) -> AnyElement {
         match &self.error {
-            Some(error) => {
-                ErrorPanel::new(ElementId::from(&self.focus_handle), error).into_any_element()
-            }
+            Some(error) => ErrorPanel::new(ElementId::from(&self.focus_handle), error)
+                .with_failed_send(self.failed_send.clone())
+                .into_any_element(),
             None => match self.selected_tab {
                 HEADERS_TAB => self.headers.clone().into_any_element(),
                 COOKIES_TAB => self.cookies.clone().into_any_element(),
@@ -281,6 +290,7 @@ impl Render for ResponseView {
                 // with no response the body region is the whole area (REQ-RESP-08).
                 None => this.child(match &self.error {
                     Some(error) => ErrorPanel::new(ElementId::from(&self.focus_handle), error)
+                        .with_failed_send(self.failed_send.clone())
                         .into_any_element(),
                     None => empty_state(cx).into_any_element(),
                 }),
@@ -371,3 +381,15 @@ mod selector_exports_tests;
 #[cfg(test)]
 #[path = "table_cells_tests.rs"]
 mod table_cells_tests;
+
+#[cfg(test)]
+#[path = "set_secret_resend_tests.rs"]
+mod set_secret_resend_tests;
+
+#[cfg(test)]
+#[path = "set_secret_panel_tests.rs"]
+mod set_secret_panel_tests;
+
+#[cfg(test)]
+#[path = "set_secret_send_tests.rs"]
+mod set_secret_send_tests;

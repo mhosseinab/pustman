@@ -5,12 +5,16 @@
 //! and [`TransportError::suggested_fix`] — and titles the callout with the failure's
 //! human name ("Invalid URL", "TLS error"), never the enum variant the code uses. The
 //! "Open in Console" link appears only while `console::Focus` can be dispatched: the
-//! Console is a later step, so today there is no link at all — never a stub.
+//! Console is a later step, so today there is no link at all — never a stub. An
+//! `UnresolvedSecret` additionally carries [`SetSecretRow`] under its fix: one "Set
+//! <name>" button per missing secret, and Resend once they are set (PRD §8.6,
+//! [`crate::set_secret`]).
 
 use http_engine::TransportError;
 use ui::prelude::*;
 
 use crate::child_id;
+use crate::set_secret::{FailedSend, SetSecretRow, display_name};
 
 /// The action the "Open in Console" link dispatches. Nothing registers it until the
 /// Console exists, so the link's visibility is asked of the action registry every frame.
@@ -77,6 +81,19 @@ pub struct ErrorPanel {
     message: SharedString,
     suggested_fix: SharedString,
     severity: Severity,
+    /// The `UnresolvedSecret` panel's own remedy (module docs): a "Set <name>" button
+    /// per missing name. `None` on every other kind of failure.
+    set_secret: Option<SetSecretRow>,
+}
+
+impl ErrorPanel {
+    /// Bind the panel to the send it failed with (S43c fix 3): its Resend answers are
+    /// checked against that send, captured at panel-build time — never re-read from the
+    /// wire, whose inputs may name another tab's failure by now.
+    pub fn with_failed_send(mut self, failed_send: Option<FailedSend>) -> Self {
+        self.set_secret = self.set_secret.map(|row| row.with_failed_send(failed_send));
+        self
+    }
 }
 
 impl ErrorPanel {
@@ -84,13 +101,22 @@ impl ErrorPanel {
     /// caller's stable id, so two viewers in one frame never share element ids. The
     /// texts are computed here, never in `render`.
     pub fn new(id: impl Into<ElementId>, error: &TransportError) -> Self {
+        let id = id.into();
+        let set_secret = match error {
+            TransportError::UnresolvedSecret { names } => Some(SetSecretRow::new(
+                child_id(&id, "set-secret"),
+                names.clone(),
+            )),
+            _ => None,
+        };
         Self {
-            id: id.into(),
+            id,
             kind: error_kind(error),
             title: error_title(error).into(),
-            message: error.user_message().into(),
+            message: display_name(&error.user_message()).into(),
             suggested_fix: error.suggested_fix().into(),
             severity: severity(error),
+            set_secret,
         }
     }
 
@@ -177,6 +203,7 @@ impl RenderOnce for ErrorPanel {
                             .debug_selector(move || fix_selector)
                             .child(Label::new(fix_label).size(LabelSize::Small)),
                     )
+                    .when_some(self.set_secret, |callout, row| callout.child(row))
                     .map(|this| {
                         if console_focus {
                             this.child(

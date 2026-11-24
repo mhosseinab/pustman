@@ -142,6 +142,7 @@ use gpui::{
     Action, App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Global,
     Render, WeakEntity, Window,
 };
+use pustman_actions::environment::EditSecret;
 use secrets::{SecretError, SecretKey, SecretStore, SecretValue};
 use storage::{LocalStore, LocalValue};
 use text_input::TextInput;
@@ -170,6 +171,10 @@ mod globals_tests;
 #[cfg(test)]
 #[path = "env_editor_stale_read_tests.rs"]
 mod stale_read_tests;
+
+#[cfg(test)]
+#[path = "env_editor_edit_secret_tests.rs"]
+mod edit_secret_tests;
 
 #[cfg(test)]
 #[path = "env_editor_read_only_tests.rs"]
@@ -228,6 +233,11 @@ const DESCRIPTION_PLACEHOLDER: &str = "what this variable is for";
 /// actionable).
 const KEY_REQUIRED_MESSAGE: &str =
     "Every variable needs a key — fill the empty Key cell before saving.";
+
+/// What `environment::EditSecret` is told when the scope it opened has no secret row for
+/// the name the action carries (S43c): the button that dispatched it names the key
+/// already, so this message names neither the key nor any value (AGENTS.md › Security).
+const NO_SECRET_ROW_MESSAGE: &str = "That secret is not a variable in the scope this editor has open — set it there under its own name.";
 
 /// The prefix and suffix around the key two rows share.
 const DUPLICATE_KEY_PREFIX: &str = "Two variables share the key `";
@@ -1864,26 +1874,55 @@ fn lock_store(store: &Mutex<LocalStore>) -> anyhow::Result<MutexGuard<'_, LocalS
         .map_err(|_| anyhow::anyhow!("the local store was left mid-operation by a failed task"))
 }
 
-/// Wire the editor to `env_editor::Open`: open it over the active workspace with the
-/// [`EnvEditorInputs`] the app's wire installed.
+/// Wire the editor to `env_editor::Open` and `environment::EditSecret` (S43c): open it
+/// over the active workspace with the [`EnvEditorInputs`] the app's wire installed, the
+/// second with the cursor in the secret row it names.
 pub fn init(cx: &mut App) {
     cx.on_action(open_env_editor);
+    cx.on_action(open_env_editor_on_secret);
+}
+
+/// `env_editor::Open`: the editor with no particular row to aim at.
+fn open_env_editor(_: &Open, cx: &mut App) {
+    open_editor(None, cx);
+}
+
+/// `environment::EditSecret` (S43c): the editor with the cursor in `action.name`'s
+/// secret value field — the `UnresolvedSecret` panel's "Set <name>" button's door. The
+/// name is a lookup key and is never displayed here ([`NO_SECRET_ROW_MESSAGE`]).
+fn open_env_editor_on_secret(action: &EditSecret, cx: &mut App) {
+    open_editor(Some(action.name.clone()), cx);
 }
 
 /// Open the editor in the active window: first read the scope as it is on disk and in
-/// the local store (module docs), off the foreground, then open over it. The dispatch
+/// the local store (module docs), off the foreground, then open over it — with the
+/// cursor in `focus`'s secret row, when one is named (S43c). The dispatch
 /// happens inside the window's own update and a window cannot be updated while it is on
 /// the update stack, so the open is deferred — the shape [`super::quick_look`]'s opener
 /// uses for the same situation.
-fn open_env_editor(_: &Open, cx: &mut App) {
+fn open_editor(focus: Option<String>, cx: &mut App) {
     let Some(window_handle) = cx.active_window() else {
         return;
     };
     cx.defer(move |cx| {
-        let prepared = window_handle.update(cx, |root, _window, cx| {
+        let prepared = window_handle.update(cx, |root, window, cx| {
             let Ok(workspace_handle) = root.downcast::<Workspace>() else {
                 return None;
             };
+            // S43c: with an editor already on screen, the open below would toggle it
+            // shut ([`toggle_modal`]) — aim the cursor at the row instead.
+            if let Some(name) = focus.as_deref()
+                && workspace_handle
+                    .read(cx)
+                    .modal_layer()
+                    .active_modal::<EnvEditor>()
+                    .is_some()
+            {
+                workspace_handle.update(cx, |workspace, cx| {
+                    aim_at_secret(workspace, name, window, cx)
+                });
+                return None;
+            }
             // Cloned out before the workspace update borrows `cx` again.
             let inputs = match cx.try_global::<EnvEditorInputs>().cloned() {
                 Some(inputs) => inputs,
@@ -1938,6 +1977,9 @@ fn open_env_editor(_: &Open, cx: &mut App) {
                         workspace_handle.toggle_modal(window, cx, |window, cx| {
                             EnvEditor::new(inputs, opened, workspace, window, cx)
                         });
+                        if let Some(name) = focus {
+                            aim_at_secret(workspace_handle, &name, window, cx);
+                        }
                     });
                 })
                 .is_err()
@@ -1948,4 +1990,27 @@ fn open_env_editor(_: &Open, cx: &mut App) {
         })
         .detach();
     });
+}
+
+/// Put the cursor in `name`'s secret value field in the editor just opened (S43c). A
+/// name this scope has no secret row for is said out loud — the "Set <name>" button
+/// promised this row (AGENTS.md: errors reach the user) — with a message that names
+/// neither the key nor any value: the button that dispatched this already names the key,
+/// and a crafted key never reaches a message (AGENTS.md › Security).
+fn aim_at_secret(
+    workspace: &mut Workspace,
+    name: &str,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let Some(editor) = workspace.modal_layer().active_modal::<EnvEditor>() else {
+        // The editor did not open; its own opener has already said why (module docs).
+        return;
+    };
+    let Some(field) = editor.read(cx).secret_value_field(name) else {
+        workspace.show_toast(NO_SECRET_ROW_MESSAGE, Severity::Error, None, cx);
+        return;
+    };
+    let handle = field.read(cx).focus_handle(cx);
+    window.focus(&handle, cx);
 }

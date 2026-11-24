@@ -33,9 +33,17 @@ theme.workspace = true
 # parses RFC 2822 expiry text (`OffsetDateTime::parse`) and must compile on its own.
 time = { workspace = true, features = ["parsing"] }
 ui.workspace = true
+# The Resend re-check runs `http_engine::prepare` — the send's own resolution — whose
+# `DynamicValues` is one re-check's own (REQ-VAR-05's shape).
+variables.workspace = true
 workspace.workspace = true
 
 [dev-dependencies]
+# The tests drive the real variables editor through `environment::EditSecret` and read
+# its rows; the production code coordinates with it through that action only
+# (ARCHITECTURE.md: "anything else coordinates through `workspace`"). Cargo allows a
+# cycle that runs through a dev-dependency.
+environment_picker.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 image.workspace = true
 # The request-as-sent tests derive auto headers through a dry `http_engine::prepare`,
@@ -49,4 +57,6 @@ tokio.workspace = true
 tempfile.workspace = true
 ui = { workspace = true, features = ["test-support"] }
 url.workspace = true
-variables.workspace = true
+# The set-secret test builds the variables editor's inputs from a real workspace item
+# (`EditTarget::new`), the shape `workspace_store::open` hands the app.
+workspace_store.workspace = true
