@@ -11,6 +11,7 @@
 
 pub mod crud;
 pub mod navigation;
+pub mod reorder;
 pub mod tree;
 
 pub use tree::{CollectionsTree, PANEL_ID, TreeRow};
@@ -32,6 +33,12 @@ mod crud_integrity_tests;
 #[cfg(test)]
 #[path = "crud_queue_tests.rs"]
 mod crud_queue_tests;
+
+// The move-integrity tests (S40b fix 1), same shape again: outside `reorder::`, so the
+// step's `reorder::` filter still reports PASS 1.
+#[cfg(test)]
+#[path = "reorder_move_tests.rs"]
+mod reorder_move_tests;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -80,6 +87,7 @@ pub fn init(cx: &mut App) {
         .push(subscription);
     navigation::init(cx);
     crud::init(cx);
+    reorder::init(cx);
 }
 
 /// The tree's content before a workspace is open (`workspace_open` is S41a): nothing to

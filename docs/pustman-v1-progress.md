@@ -119,7 +119,7 @@ Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub p
 | S33p | Wire the app's cookie jar: send, persist, Manage Cookies (driver-added, S38 prereq; #286) | passed | 2 | 475bee6 | [S33p](progress/pustman-v1/steps/S33p.md) | review 2 rounds; LOW #287 |
 | S38 | M1 SIGN-OFF (HUMAN) | passed | 1 | 924e953 | [S38](progress/pustman-v1/steps/S38.md) | human "M1 GO" 2026-11-23 after the headless pre-check and S33p |
 | S39 | `collections_panel`: tree | done | 0 | | | S39a, S39b, S39w merged |
-| S40 | Collection CRUD, save, ordering, dirty state | in_progress | 0 | | | S40a, S40c merged |
+| S40 | Collection CRUD, save, ordering, dirty state | done | 0 | | | S40a, S40b, S40c merged |
 | S41 | Open, create and recent workspaces; format-version banner | done | 0 | | | S41a, S41b, S41c, S41d merged |
 | S41d | Read-only workspace disables editing in the request and environment editors; the env editor refuses before any write (driver-added, from the S41c review) | done | 0 | | | S41d merged |
 | S42 | External change bar and problem badges | pending | 0 | | |  |

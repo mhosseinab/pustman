@@ -788,7 +788,7 @@ impl CollectionsTree {
     }
 
     /// The selected row's item — [`None`] with no selection and on a problem row.
-    fn selected_item(&self) -> Option<ItemId> {
+    pub(crate) fn selected_item(&self) -> Option<ItemId> {
         self.selected_key().and_then(|key| self.item_at(&key))
     }
 
@@ -806,7 +806,11 @@ impl CollectionsTree {
     /// The workspace root, if this workspace takes writes at all. A read-only workspace
     /// (REQ-WSP-04) and an empty panel state (no workspace open) are reported, not
     /// silently ignored.
-    fn writable_root(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<PathBuf> {
+    pub(crate) fn writable_root(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<PathBuf> {
         if self.snapshot.read_only {
             self.notify_user(
                 SharedString::new_static(
@@ -835,7 +839,7 @@ impl CollectionsTree {
     /// Put `message` in front of the user — a toast on the workspace window, or the log
     /// when that window is already gone (S40c's shape: path and reason only, never
     /// request content).
-    fn notify_user(
+    pub(crate) fn notify_user(
         &self,
         message: impl Into<SharedString>,
         severity: Severity,
@@ -854,8 +858,9 @@ impl CollectionsTree {
 
     /// Queue one write on the tree's single write slot and start it if the slot is
     /// free (AGENTS.md › no blocking IO on the foreground thread; S40a fix 1). Every
-    /// verb — create, rename, duplicate, delete — lands through here.
-    fn run_write(
+    /// verb — create, rename, duplicate, delete, and [`crate::reorder`]'s moves — lands
+    /// through here.
+    pub(crate) fn run_write(
         &mut self,
         expand: Option<ItemId>,
         window: &mut Window,
@@ -935,7 +940,7 @@ impl CollectionsTree {
 
 /// What a background write reports back: the workspace as it now stands on disk, and
 /// what to tell the user when the write itself failed.
-struct WriteReport {
+pub(crate) struct WriteReport {
     /// Read after the write — a write that failed part-way can still have changed files.
     refreshed: Result<WorkspaceSnapshot, String>,
     failure: Option<String>,
@@ -943,7 +948,7 @@ struct WriteReport {
 
 impl WriteReport {
     /// The report after `work` ran: the re-read workspace plus `failure`, unchanged.
-    fn after_write(root: &Path, failure: Option<String>) -> Self {
+    pub(crate) fn after_write(root: &Path, failure: Option<String>) -> Self {
         Self {
             refreshed: workspace_store::open(root).map_err(|error| {
                 format!(
@@ -999,7 +1004,7 @@ fn row_item_id(row: &TreeRow) -> Option<ItemId> {
 /// Which container orders each item (REQ-WSP-01) — what "the item's parent" means
 /// everywhere in this file. A child two parents both claim keeps the first (in id
 /// order), which is what the tree draws it under too.
-fn parent_map(items: &BTreeMap<ItemId, Item>) -> BTreeMap<ItemId, ItemId> {
+pub(crate) fn parent_map(items: &BTreeMap<ItemId, Item>) -> BTreeMap<ItemId, ItemId> {
     let mut parents = BTreeMap::new();
     for (id, item) in items {
         if let Some(order) = container_order(&item.body) {
@@ -1031,14 +1036,15 @@ fn insert_after(body: &mut ItemBody, after: ItemId, id: ItemId) {
 }
 
 /// Take `id` out of a container's `order`.
-fn remove_child(body: &mut ItemBody, id: ItemId) {
+pub(crate) fn remove_child(body: &mut ItemBody, id: ItemId) {
     if let Some(order) = container_order_mut(body) {
         order.retain(|child| *child != id);
     }
 }
 
-/// Set a container's `order` — the duplicate's copy of a source's children.
-fn set_order(body: &mut ItemBody, order: Vec<ItemId>) {
+/// Set a container's `order` — the duplicate's copy of a source's children, and
+/// [`crate::reorder`]'s moves.
+pub(crate) fn set_order(body: &mut ItemBody, order: Vec<ItemId>) {
     if let Some(current) = container_order_mut(body) {
         *current = order;
     }
