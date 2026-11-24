@@ -11,6 +11,7 @@
 
 pub mod crud;
 pub mod navigation;
+pub mod problems;
 pub mod reorder;
 pub mod tree;
 

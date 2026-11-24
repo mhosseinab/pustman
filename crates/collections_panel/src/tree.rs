@@ -5,8 +5,9 @@
 //! Row order is the `order` arrays' (REQ-WSP-01) — a parent stores its children's ids in
 //! display order and the tree walks those, never the name order or the directory order.
 //! Containers expand and collapse; every request row carries its method badge. A file the
-//! snapshot could not read draws its error badge after the items, with the problem's own
-//! words beside it (REQ-COLLAB-02; the detail UI is S42b).
+//! snapshot could not read draws its error badge after the items, with a message naming the
+//! file and the line beside it (REQ-COLLAB-02; [`crate::problems`] owns the badge and its
+//! details popover).
 //!
 //! The rows are virtualized through [`VirtualList`] (REQ-NFR-02): the tree flattens the
 //! visible rows once per structural change — an expand, a collapse, a new snapshot — and
@@ -22,10 +23,11 @@ use gpui::{
 };
 use ui::prelude::*;
 use workspace::{DockPosition, Panel};
-use workspace_store::{ItemBody, ItemProblem, ItemProblemKind, WorkspaceSnapshot};
+use workspace_store::{ItemBody, WorkspaceSnapshot};
 
 use crate::crud::Crud;
 use crate::navigation::{COLLECTIONS_TREE_CONTEXT, Navigation};
+use crate::problems::Problems;
 use crate::reorder::Reorder;
 
 #[cfg(test)]
@@ -72,12 +74,13 @@ pub enum TreeRow {
         name: SharedString,
         method: SharedString,
     },
-    /// A file the snapshot could not read, with the words its error badge (`summary`)
-    /// and its tooltip (`detail`) carry.
+    /// A file the snapshot could not read, with the words its error badge (`summary`),
+    /// its tooltip (`detail`) and its details popover (`guidance`) carry.
     Problem {
         path: SharedString,
         summary: SharedString,
         detail: SharedString,
+        guidance: SharedString,
     },
 }
 
@@ -150,6 +153,9 @@ pub struct CollectionsTree {
     /// The drag state: where a drop lands while a row drag hovers the tree
     /// ([`crate::reorder`]).
     pub(crate) reorder: Reorder,
+    /// The problem rows' state: the merge-conflict lines and the one open details
+    /// popover ([`crate::problems`]).
+    pub(crate) problems: Problems,
     focus_handle: FocusHandle,
 }
 
@@ -160,9 +166,12 @@ impl CollectionsTree {
         // The panel is one tab stop, so the keyboard can reach the tree (S39b gives it
         // the arrow-key selection on top).
         let focus_handle = cx.focus_handle().tab_stop(true);
-        let rows = Arc::new(visible_rows(&snapshot, &BTreeSet::new()));
+        let mut problems = Problems::new(cx);
+        problems.refresh(&snapshot.root, &snapshot.problems, cx);
+        let rows = Arc::new(visible_rows(&snapshot, &BTreeSet::new(), &problems));
         Self {
             snapshot,
+            problems,
             expanded: BTreeSet::new(),
             rows,
             navigation: Navigation::new(),
@@ -180,6 +189,11 @@ impl CollectionsTree {
     /// Show a different snapshot — the workspace was opened, saved or changed on disk.
     pub fn set_snapshot(&mut self, snapshot: WorkspaceSnapshot, cx: &mut Context<Self>) {
         self.snapshot = snapshot;
+        // The rows change under any open details popover, and the new conflicted files
+        // need their marker lines read again.
+        self.problems
+            .refresh(&self.snapshot.root, &self.snapshot.problems, cx);
+        self.close_problem_details(cx);
         self.reflatten(cx);
     }
 
@@ -196,14 +210,16 @@ impl CollectionsTree {
 
     /// Flip one container between open and closed — its disclosure's click.
     pub fn toggle_expanded(&mut self, id: ItemId, cx: &mut Context<Self>) {
+        // The rows move under an open details popover.
+        self.close_problem_details(cx);
         let is_expanded = !self.expanded.contains(&id);
         self.set_expanded(id, is_expanded, cx);
     }
 
     /// Re-derive the rows after a structural change (an expand, a collapse, a new
     /// snapshot) and redraw. Never called per frame (`references/performance.md`).
-    fn reflatten(&mut self, cx: &mut Context<Self>) {
-        self.rows = Arc::new(visible_rows(&self.snapshot, &self.expanded));
+    pub(crate) fn reflatten(&mut self, cx: &mut Context<Self>) {
+        self.rows = Arc::new(visible_rows(&self.snapshot, &self.expanded, &self.problems));
         cx.notify();
     }
 
@@ -239,7 +255,8 @@ impl CollectionsTree {
                 path,
                 summary,
                 detail,
-            } => self.render_problem(path, summary, detail, &row_key, cx),
+                guidance,
+            } => self.render_problem(path, summary, detail, guidance, &row_key, cx),
         }
     }
 
@@ -280,6 +297,9 @@ impl CollectionsTree {
             .pl(px_to_rems(indent))
             .cursor_pointer()
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                // A row click takes the keyboard somewhere new, so any details
+                // popover goes with it.
+                this.close_problem_details(cx);
                 this.click_row(click_key.clone(), request, window, cx);
             }))
             // A right-click is this row's action menu, and only this row's: it stops the
@@ -365,28 +385,25 @@ impl CollectionsTree {
         )
     }
 
-    /// A problem row: the error badge and what is wrong with which file — in the same
-    /// row frame as the items, so the selection walks over it too.
+    /// A problem row: the error badge (`crate::problems`) beside its message naming the
+    /// file and the line — in the same row frame as the items, so the selection walks
+    /// over it too.
     fn render_problem(
-        &self,
+        &mut self,
         path: SharedString,
         summary: SharedString,
         detail: SharedString,
+        guidance: SharedString,
         row_key: &ElementId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let badge_selector = format!("{row_key}-badge");
+        let badge = self.problem_badge(path, summary, detail.clone(), guidance, row_key, cx);
         self.row_frame(0, row_key, None, cx)
             .gap(DynamicSpacing::Base03.rems(cx))
             .px(DynamicSpacing::Base04.rems(cx))
-            .child(
-                div()
-                    .flex_none()
-                    .debug_selector(move || badge_selector)
-                    .child(Badge::new(summary).severity(Severity::Error)),
-            )
+            .child(badge)
             .child(row_label(
-                format!("{path} — {detail}").into(),
+                detail,
                 ElementId::from(format!("{row_key}-name")),
                 LabelFont::Ui,
                 TextSize::Small,
@@ -493,6 +510,8 @@ impl CollectionsTree {
             )
             // The open row menu floats above everything the panel draws.
             .children(self.crud.menu_overlay(cx))
+            // As does one problem row's details popover.
+            .children(self.details_overlay(cx))
     }
 }
 
@@ -636,7 +655,11 @@ fn row_label(
 
 /// The rows the tree draws: the snapshot's items threaded through the `order` arrays and
 /// the expansion state, with the unreadable files after them.
-fn visible_rows(snapshot: &WorkspaceSnapshot, expanded: &BTreeSet<ItemId>) -> Vec<TreeRow> {
+fn visible_rows(
+    snapshot: &WorkspaceSnapshot,
+    expanded: &BTreeSet<ItemId>,
+    problems: &Problems,
+) -> Vec<TreeRow> {
     let mut children_in_order: BTreeMap<ItemId, Vec<ItemId>> = BTreeMap::new();
     let mut has_parent: BTreeSet<ItemId> = BTreeSet::new();
     for (id, item) in &snapshot.items {
@@ -697,7 +720,7 @@ fn visible_rows(snapshot: &WorkspaceSnapshot, expanded: &BTreeSet<ItemId>) -> Ve
         );
     }
 
-    rows.extend(snapshot.problems.iter().map(problem_row));
+    rows.extend(problems.rows(&snapshot.problems));
     rows
 }
 
@@ -829,20 +852,5 @@ fn request_kind(request: &Request) -> String {
             .and_then(|kind| kind.as_str())
             .unwrap_or("request")
             .to_owned(),
-    }
-}
-
-/// One unreadable file's row: the file it is about, the short summary its error badge
-/// carries, and the problem's own words as the detail (REQ-COLLAB-02).
-fn problem_row(problem: &ItemProblem) -> TreeRow {
-    let summary = match &problem.kind {
-        ItemProblemKind::InvalidJson { .. } => "Invalid JSON",
-        ItemProblemKind::ConflictMarkers => "Merge conflict",
-        ItemProblemKind::DuplicateId { .. } => "Duplicate id",
-    };
-    TreeRow::Problem {
-        path: SharedString::from(problem.path.to_string_lossy().into_owned()),
-        summary: SharedString::new_static(summary),
-        detail: SharedString::from(problem.kind.to_string()),
     }
 }
