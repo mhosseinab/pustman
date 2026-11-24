@@ -5001,6 +5001,7 @@ dependencies = [
  "gpui",
  "gpui_platform",
  "gpui_tokio",
+ "hex",
  "history_panel",
  "http_engine",
  "image",
