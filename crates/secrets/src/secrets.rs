@@ -83,13 +83,14 @@ pub trait SecretStore: Send + Sync {
 
 /// Why a secret operation failed.
 ///
-/// Every variant names the key it concerns or a platform diagnostic. No variant holds a
-/// secret value.
+/// Every variant names the key it concerns or a platform diagnostic; the text the user
+/// sees names only the variable's own key, never the machine-made workspace and scope
+/// ids the keychain account carries. No variant holds a secret value.
 #[derive(Debug, thiserror::Error)]
 pub enum SecretError {
     /// No secret is stored for this key: never set, or deleted. Callers surface this as
     /// "unresolved secret" (PRD REQ-VAR-SHARE-02) instead of sending an empty string.
-    #[error("no secret is stored for {key}")]
+    #[error("no secret is stored for `{}`", key.variable_key())]
     NotFound { key: SecretKey },
 
     /// The key cannot be represented in the OS keychain: an empty or NUL-carrying
@@ -99,7 +100,7 @@ pub enum SecretError {
 
     /// The value is empty: refused before it reached the keychain on
     /// [`SecretStore::set`], or found empty in a stored entry on [`SecretStore::get`].
-    #[error("the secret value for {key} is empty; a secret must have a value")]
+    #[error("the secret value for `{}` is empty; a secret must have a value", key.variable_key())]
     InvalidValue { key: SecretKey },
 
     /// The OS keychain could not be reached or refused the operation.
@@ -108,7 +109,7 @@ pub enum SecretError {
 
     /// The keychain holds an entry Pustman cannot read as text; the secret must be set
     /// again.
-    #[error("the stored secret for {key} cannot be read; set it again")]
+    #[error("the stored secret for `{}` cannot be read; set it again", key.variable_key())]
     UnusableSecret { key: SecretKey },
 }
 
@@ -131,3 +132,7 @@ fn checked_stored_value(key: &SecretKey, value: SecretValue) -> Result<SecretVal
     check_value(key, &value)?;
     Ok(value)
 }
+
+#[cfg(test)]
+#[path = "secrets_tests.rs"]
+mod tests;

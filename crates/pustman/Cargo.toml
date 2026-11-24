@@ -29,6 +29,7 @@ gpui.workspace = true
 gpui_platform.workspace = true
 gpui_tokio.workspace = true
 hex.workspace = true
+sha2.workspace = true
 history_panel.workspace = true
 http_engine.workspace = true
 image.workspace = true

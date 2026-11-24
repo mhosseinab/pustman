@@ -21,12 +21,17 @@
 //! never takes a value from storage: its only value is the keychain's, read by
 //! `http_engine::prepare` at send through [`SecretSources`].
 //!
-//! `Decision:` which secrets the keychain holds is checked off the foreground whenever
-//! the scopes or the keychain change, and [`SecretSources`] names a key only for those.
-//! The pre-send check (#198) then warns about a secret with nothing stored — and
-//! "Send anyway" fails it as unresolved — without touching the keychain on the
-//! foreground. A keychain that cannot be reached counts as holding the entry, so the
-//! send reports that failure itself.
+//! `Decision:` which secrets the keychain holds is checked off the foreground, and
+//! [`SecretSources`] names a key only for those. The pre-send check (#198) then warns
+//! about a secret with nothing stored — and "Send anyway" fails it as unresolved —
+//! without touching the keychain on the foreground. A keychain that cannot be reached
+//! counts as holding the entry, so the send reports that failure itself. (fix 2) Every
+//! read can be an OS prompt on an unsigned build, so the check runs only when the set of
+//! secret keys changes (the workspace's key, or a secret variable added, removed or
+//! renamed) or another keychain is installed — never on an environment switch or an
+//! unrelated disk change. What the app itself writes to the keychain is learnt from the
+//! write: the wire installs the keychain behind [`TrackedKeychain`], which notes each
+//! key set or removed (never a value).
 //!
 //! `Decision:` (fix 1) local values, the active environment's selection and keychain
 //! entries live under [`workspace_key`]: the workspace's `pustman.json` id bound to the
@@ -37,24 +42,28 @@
 //! is known, the picker's, quick-look's and environment editor's inputs are removed, so
 //! none of them can act on the previous folder's.
 //!
-//! `Decision:` every request editor is bound to the workspace open when it was built (or
-//! the first one opened after). An editor from another workspace — a tab left open from
-//! folder A after folder B opens — gets no scopes and no keychain, so its secrets stay
-//! unresolved and the pre-send check warns, rather than resolving B's secrets into a
-//! request to A's host.
+//! `Decision:` (fix 2) a request editor is bound to the open workspace only when that
+//! workspace's snapshot holds its request, or when it was built with no URL (a new
+//! request: whatever host it gets is typed while this workspace is open). Restored tabs
+//! and history entries are saved with no folder, so one from folder A, reopened while B
+//! is open, stays unbound until a snapshot holding its request opens. Once bound, an
+//! editor keeps that workspace: a tab left open from folder A after folder B opens gets
+//! no scopes and no keychain. Either way its secrets stay unresolved and the pre-send
+//! check warns, rather than resolving B's secrets into a request to A's host.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use api_model::{Environment, ItemId, VariableKind};
 use environment_picker::env_editor::{self, EditTarget, EnvEditorInputs};
 use environment_picker::quick_look::{self, QuickLookInputs};
 use environment_picker::secret_values::{self, SecretInputs};
 use environment_picker::selector::{self, SelectorInputs};
-use gpui::{App, Entity, Global, Subscription, Task, WeakEntity};
+use gpui::{App, Entity, EntityId, Global, Subscription, Task, WeakEntity};
 use request_editor::{RequestEditor, SecretSources, scope_kind_of};
-use secrets::{KeyringStore, SecretError, SecretKey, SecretStore};
+use secrets::{KeyringStore, SecretError, SecretKey, SecretStore, SecretValue};
+use sha2::{Digest, Sha256};
 use storage::{LocalStore, LocalValue};
 use variables::{ScopeKind, ScopeStack};
 use workspace::{Workspace, WorkspaceOpen, WorkspaceOpenEvent};
@@ -81,6 +90,19 @@ const FOLDER_FAILURE_MESSAGE: &str = "The workspace folder's location could not 
 const WIRE_FAILURE_MESSAGE: &str =
     "The workspace's variables could not be loaded — requests resolve without them";
 
+/// What a secret variable whose name the keychain cannot hold says, before the name.
+const INVALID_SECRET_PREFIX: &str = "The secret variable ";
+
+/// ... and after it: it stays unresolved, so a send warns before it goes.
+const INVALID_SECRET_SUFFIX: &str =
+    " cannot be kept in the OS keychain — requests leave it unresolved";
+
+/// The longest `pustman.json` id [`workspace_key`] uses as is (a ULID is 26 characters).
+const MAX_PLAIN_WORKSPACE_ID: usize = 32;
+
+/// How many bytes of a SHA-256 digest [`workspace_key`] keeps: 128 bits, hex-encoded.
+const DIGEST_PREFIX_BYTES: usize = 16;
+
 /// One opened workspace as the wire tells them apart: its `pustman.json` id and the
 /// folder it was opened from. Known as soon as the snapshot is.
 #[derive(Clone, PartialEq)]
@@ -89,11 +111,63 @@ struct WorkspaceIdentity {
     root: PathBuf,
 }
 
-/// One request editor and the workspace it belongs to (module docs); `None` until a
-/// workspace is open.
+/// One request editor and the workspace it belongs to (module docs): `None` until a
+/// workspace whose snapshot holds its request opens — or, for an editor built with no
+/// URL (`blank`), until any workspace opens.
 struct WiredEditor {
     editor: WeakEntity<RequestEditor>,
     workspace: Option<WorkspaceIdentity>,
+    blank: bool,
+}
+
+impl WiredEditor {
+    /// Bind this editor to `open` when it may be (module docs); whether it belongs to it.
+    fn bind(&mut self, request_id: ItemId, open: &OpenScopes) -> bool {
+        if self.workspace.is_none() && (self.blank || open.requests.contains(&request_id)) {
+            self.workspace = Some(open.identity.clone());
+        }
+        self.workspace.as_ref() == Some(&open.identity)
+    }
+}
+
+/// The app's keychain as the wire installs it (module docs): every call goes to the
+/// keychain it wraps, and each key a write sets or removes is noted — the key and whether
+/// it now holds an entry, never the value.
+struct TrackedKeychain {
+    inner: Arc<dyn SecretStore>,
+    writes: Mutex<Vec<(SecretKey, bool)>>,
+}
+
+impl TrackedKeychain {
+    fn note(&self, key: &SecretKey, stored: bool) {
+        self.writes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((key.clone(), stored));
+    }
+
+    /// The writes noted since the last call, oldest first.
+    fn take_writes(&self) -> Vec<(SecretKey, bool)> {
+        std::mem::take(&mut *self.writes.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+}
+
+impl SecretStore for TrackedKeychain {
+    fn get(&self, key: &SecretKey) -> Result<SecretValue, SecretError> {
+        self.inner.get(key)
+    }
+
+    fn set(&self, key: &SecretKey, value: &SecretValue) -> Result<(), SecretError> {
+        self.inner.set(key, value)?;
+        self.note(key, true);
+        Ok(())
+    }
+
+    fn delete(&self, key: &SecretKey) -> Result<(), SecretError> {
+        self.inner.delete(key)?;
+        self.note(key, false);
+        Ok(())
+    }
 }
 
 /// The app-wide wire: the editors it pushes scopes into and the open workspace's scopes.
@@ -108,12 +182,20 @@ struct ScopeWiring {
     loading: Option<Task<()>>,
     /// The keychain presence check in flight; a newer check replaces it.
     checking: Option<Task<()>>,
+    /// The secret keys the last presence check started for: the same set is not read
+    /// again (module docs).
+    checked_secrets: Option<HashSet<SecretKey>>,
+    /// The keychain as the wire installed it, whose writes it follows.
+    keychain: Option<Arc<TrackedKeychain>>,
     /// Bumped by every selection the user makes: a stored-state read started before one
     /// does not overwrite it.
     selection_generation: u64,
-    /// Bumped by every environment-editor save that changed local values: a stored-state
-    /// read started before one does not overwrite them.
-    locals_generation: u64,
+    /// Per scope id, bumped by every environment-editor save that changed that scope's
+    /// local values: a stored-state read started before one does not overwrite them, and
+    /// still lands every other scope's.
+    locals_generations: BTreeMap<String, u64>,
+    /// The problems already shown for the open workspace: each is shown once per open.
+    reported: BTreeSet<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -134,6 +216,8 @@ struct OpenScopes {
     collections: BTreeMap<ItemId, EditTarget>,
     /// Which collection each request belongs to, through any folders.
     collection_of: BTreeMap<ItemId, ItemId>,
+    /// Every request the snapshot holds: the editors that may bind to it (module docs).
+    requests: BTreeSet<ItemId>,
     local_values: Vec<LocalValue>,
     active: Option<ItemId>,
     /// The secret keys the keychain holds an entry for (module docs).
@@ -195,12 +279,35 @@ impl OpenScopes {
 /// it was opened from, `canonical_root` (module docs). Two folders never share a key even
 /// when one carries a copy of the other's `pustman.json`.
 ///
-/// The folder is hex-encoded rather than hashed: the encoding is injective, stable
-/// across toolchains, and carries no `/` (a [`SecretKey`] id must not).
+/// The folder is a fixed-length digest (the first 128 bits of its SHA-256, hex): however
+/// deep the path, the keychain account stays within the OS's account-name limits. The
+/// id is untrusted file content: it is used as is only when it is a short run of ASCII
+/// letters, digits, `-` and `_` (a ULID is), and is digested the same way otherwise —
+/// either way the key carries no `/` or NUL (a [`SecretKey`] id must not).
 pub fn workspace_key(workspace_id: &str, canonical_root: &Path) -> String {
+    let plain_id = !workspace_id.is_empty()
+        && workspace_id.len() <= MAX_PLAIN_WORKSPACE_ID
+        && workspace_id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'));
+    let id = if plain_id {
+        workspace_id.to_string()
+    } else {
+        digest_hex(workspace_id.as_bytes())
+    };
     format!(
-        "{workspace_id}.{}",
-        hex::encode(canonical_root.as_os_str().as_encoded_bytes())
+        "{id}.{}",
+        digest_hex(canonical_root.as_os_str().as_encoded_bytes())
+    )
+}
+
+/// The first [`DIGEST_PREFIX_BYTES`] of `bytes`' SHA-256, hex-encoded.
+fn digest_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    hex::encode(
+        digest
+            .get(..DIGEST_PREFIX_BYTES)
+            .unwrap_or(digest.as_slice()),
     )
 }
 
@@ -221,15 +328,21 @@ pub fn init(cx: &mut App) {
     let subscriptions = [
         cx.observe_new::<RequestEditor>(|editor, _window, cx| {
             let entity = cx.entity();
-            let open = cx.global::<ScopeWiring>().open.clone();
-            cx.global_mut::<ScopeWiring>().editors.push(WiredEditor {
+            let request_id = editor.draft().id;
+            let mut wired = WiredEditor {
                 editor: entity.downgrade(),
-                workspace: open.as_ref().map(|open| open.identity.clone()),
-            });
-            let Some(open) = open else {
+                workspace: None,
+                blank: editor.draft().url.trim().is_empty(),
+            };
+            let open = cx.global::<ScopeWiring>().open.clone();
+            let bound = open
+                .as_ref()
+                .is_some_and(|open| wired.bind(request_id, open));
+            cx.global_mut::<ScopeWiring>().editors.push(wired);
+            let Some(open) = open.filter(|_| bound) else {
                 return;
             };
-            let (scopes, sources) = scopes_for(&open, editor.draft().id, cx);
+            let (scopes, sources) = scopes_for(&open, request_id, cx);
             editor.set_scopes(scopes, cx);
             editor.set_secret_sources(sources, cx);
         }),
@@ -241,14 +354,13 @@ pub fn init(cx: &mut App) {
         cx.observe_global::<AppStore>(load_open_workspace),
         cx.observe_global::<SelectorInputs>(follow_selector),
         cx.observe_global::<EnvEditorInputs>(follow_env_editor),
-        cx.observe_global::<SecretInputs>(|cx| {
-            apply(cx);
-            check_stored_secrets(cx);
-        }),
+        cx.observe_global::<SecretInputs>(follow_keychain),
     ];
     cx.global_mut::<ScopeWiring>()
         ._subscriptions
         .extend(subscriptions);
+    // A keychain installed before the wire is put behind it too.
+    follow_keychain(cx);
 }
 
 /// Follow `workspace`'s open folder: every open and snapshot change re-reads its scopes.
@@ -257,24 +369,40 @@ fn watch_workspace(workspace: &Entity<Workspace>, cx: &mut App) {
         StartupProblems::push(cx, WIRE_FAILURE_MESSAGE);
         return;
     };
-    let subscription = cx.subscribe(&opener, |opener, _event: &WorkspaceOpenEvent, cx| {
-        open_changed(&opener, cx);
+    let subscription = cx.subscribe(&opener, |opener, event: &WorkspaceOpenEvent, cx| {
+        let opened = matches!(event, WorkspaceOpenEvent::Opened { .. });
+        open_changed(&opener, opened, cx);
     });
     cx.global_mut::<ScopeWiring>()
         ._subscriptions
         .push(subscription);
-    open_changed(&opener, cx);
+    open_changed(&opener, true, cx);
 }
 
-/// The open workspace or its snapshot changed: rebuild the scopes from the snapshot. A
-/// different workspace starts with no key, no active environment and no local values
-/// until its own are read; the same workspace keeps all three.
-fn open_changed(opener: &Entity<WorkspaceOpen>, cx: &mut App) {
+/// Show `problem` unless it was already shown since the workspace opened.
+fn report(cx: &mut App, problem: String) {
+    if cx
+        .global_mut::<ScopeWiring>()
+        .reported
+        .insert(problem.clone())
+    {
+        StartupProblems::push(cx, problem);
+    }
+}
+
+/// The open workspace or its snapshot changed (`opened`: a folder was opened): rebuild
+/// the scopes from the snapshot. A different workspace starts with no key, no active
+/// environment and no local values until its own are read; the same workspace keeps all
+/// three.
+fn open_changed(opener: &Entity<WorkspaceOpen>, opened: bool, cx: &mut App) {
+    if opened {
+        cx.global_mut::<ScopeWiring>().reported.clear();
+    }
     let Some(snapshot) = opener.read(cx).snapshot() else {
         return;
     };
     let Some(mut scopes) = scopes_of(snapshot) else {
-        StartupProblems::push(cx, WIRE_FAILURE_MESSAGE);
+        report(cx, WIRE_FAILURE_MESSAGE.to_string());
         close_workspace(cx);
         return;
     };
@@ -293,12 +421,13 @@ fn open_changed(opener: &Entity<WorkspaceOpen>, cx: &mut App) {
         _ => {
             // Reported once per open, not on every snapshot change of the same one.
             if globals_unreadable {
-                StartupProblems::push(cx, GLOBALS_FAILURE_MESSAGE);
+                report(cx, GLOBALS_FAILURE_MESSAGE.to_string());
             }
             remove_inputs(cx);
             let wiring = cx.global_mut::<ScopeWiring>();
             wiring.open = Some(scopes);
             wiring.checking = None;
+            wiring.checked_secrets = None;
             apply(cx);
             load_open_workspace(cx);
         }
@@ -313,6 +442,7 @@ fn close_workspace(cx: &mut App) {
     wiring.open = None;
     wiring.loading = None;
     wiring.checking = None;
+    wiring.checked_secrets = None;
     for editor in live_editors(cx) {
         editor.update(cx, |editor, cx| {
             editor.set_scopes(ScopeStack::new(), cx);
@@ -382,6 +512,12 @@ fn scopes_of(snapshot: &WorkspaceSnapshot) -> Option<OpenScopes> {
         environments,
         collections,
         collection_of: collection_of(snapshot),
+        requests: snapshot
+            .items
+            .iter()
+            .filter(|(_, item)| matches!(item.body, ItemBody::Request(_)))
+            .map(|(id, _)| *id)
+            .collect(),
         local_values: Vec::new(),
         active: None,
         stored_secrets: Arc::default(),
@@ -430,8 +566,10 @@ fn load_open_workspace(cx: &mut App) {
     };
     // Taken now, not when the read starts: a choice confirmed before the task first runs
     // is already newer than what it will read.
-    let (selection_generation, locals_generation) =
-        (wiring.selection_generation, wiring.locals_generation);
+    let (selection_generation, locals_generations) = (
+        wiring.selection_generation,
+        wiring.locals_generations.clone(),
+    );
     let store = cx
         .try_global::<AppStore>()
         .map(|store| Arc::clone(&store.0));
@@ -469,7 +607,15 @@ fn load_open_workspace(cx: &mut App) {
         cx.update(|cx| {
             let wiring = cx.global_mut::<ScopeWiring>();
             let take_selection = wiring.selection_generation == selection_generation;
-            let take_locals = wiring.locals_generation == locals_generation;
+            // The scopes whose local values were saved while this read was in flight.
+            let saved_since: BTreeSet<String> = wiring
+                .locals_generations
+                .iter()
+                .filter(|(scope_id, generation)| {
+                    locals_generations.get(*scope_id) != Some(generation)
+                })
+                .map(|(scope_id, _)| scope_id.clone())
+                .collect();
             let Some(open) = wiring.open.as_mut() else {
                 return;
             };
@@ -479,10 +625,19 @@ fn load_open_workspace(cx: &mut App) {
             match state {
                 Ok((local_values, selection)) => {
                     // A choice or a save the user made while this read was in flight is
-                    // newer than what it read: that half of the read is discarded.
-                    if take_locals {
-                        open.local_values = local_values;
-                    }
+                    // newer than what it read: that part of the read is discarded — for
+                    // local values, only the saved scopes'.
+                    let mut merged: Vec<LocalValue> = local_values
+                        .into_iter()
+                        .filter(|value| !saved_since.contains(&value.scope_id))
+                        .collect();
+                    merged.extend(
+                        open.local_values
+                            .iter()
+                            .filter(|value| saved_since.contains(&value.scope_id))
+                            .cloned(),
+                    );
+                    open.local_values = merged;
                     if take_selection {
                         open.active = selection.and_then(|selected| {
                             open.environments
@@ -495,7 +650,7 @@ fn load_open_workspace(cx: &mut App) {
                 }
                 Err(_) => {
                     apply(cx);
-                    StartupProblems::push(cx, LOAD_FAILURE_MESSAGE);
+                    report(cx, LOAD_FAILURE_MESSAGE.to_string());
                 }
             }
         });
@@ -523,7 +678,7 @@ fn install_key(
         }
         Err(_) => {
             // Fixed text: the error quotes the folder's path.
-            StartupProblems::push(cx, FOLDER_FAILURE_MESSAGE);
+            report(cx, FOLDER_FAILURE_MESSAGE.to_string());
             None
         }
     }
@@ -549,8 +704,10 @@ fn read_workspace_state(
 }
 
 /// Check off the foreground which of the open workspace's secret-kind variables the
-/// keychain holds an entry for, and re-resolve when that changed (module docs). Only
-/// whether an entry exists is kept; every value read is dropped on the spot.
+/// keychain holds an entry for, and re-resolve when that changed — only when the set of
+/// secret keys differs from the last check's (module docs). Only whether an entry exists
+/// is kept; every value read is dropped on the spot. A secret whose name the keychain
+/// cannot hold is reported (once per open) and stays unresolved.
 fn check_stored_secrets(cx: &mut App) {
     let Some(open) = cx.global::<ScopeWiring>().open.as_ref() else {
         return;
@@ -559,24 +716,43 @@ fn check_stored_secrets(cx: &mut App) {
         return;
     };
     let identity = open.identity.clone();
-    let mut keys = Vec::new();
+    let mut keys = HashSet::new();
+    let mut unkeyable = BTreeSet::new();
     for target in open.targets() {
         for variable in target.variables() {
             if variable.kind != VariableKind::Secret {
                 continue;
             }
-            if let Ok(key) = SecretKey::new(
+            match SecretKey::new(
                 workspace_key.as_str(),
                 target.scope_id(),
                 variable.key.as_str(),
             ) {
-                keys.push(key);
+                Ok(key) => {
+                    keys.insert(key);
+                }
+                Err(_) => {
+                    unkeyable.insert(variable.key.clone());
+                }
             }
         }
+    }
+    for name in unkeyable {
+        // The name can hold a NUL — the reason it was refused — which no toast shows.
+        let shown = name.replace('\0', "\u{fffd}");
+        report(
+            cx,
+            format!("{INVALID_SECRET_PREFIX}`{shown}`{INVALID_SECRET_SUFFIX}"),
+        );
     }
     let Some(store) = secret_values::store(cx) else {
         return;
     };
+    let wiring = cx.global_mut::<ScopeWiring>();
+    if wiring.checked_secrets.as_ref() == Some(&keys) {
+        return;
+    }
+    wiring.checked_secrets = Some(keys.clone());
     let task = cx.spawn(async move |cx| {
         let stored = cx
             .background_executor()
@@ -660,11 +836,70 @@ fn follow_env_editor(cx: &mut App) {
         if locals_changed {
             open.local_values.retain(|value| value.scope_id != scope_id);
             open.local_values.extend(saved_locals);
-            wiring.locals_generation += 1;
+            *wiring.locals_generations.entry(scope_id).or_default() += 1;
         }
+    }
+    let secrets_changed = take_secret_writes(cx);
+    if variables_changed || locals_changed || secrets_changed {
         apply(cx);
     }
     check_stored_secrets(cx);
+}
+
+/// Another keychain was installed ([`SecretInputs`]): put it behind a [`TrackedKeychain`]
+/// (module docs), then re-check which secrets it holds and re-resolve.
+fn follow_keychain(cx: &mut App) {
+    let Some(store) = secret_values::store(cx) else {
+        return;
+    };
+    let wiring = cx.global_mut::<ScopeWiring>();
+    if wiring
+        .keychain
+        .as_ref()
+        .is_some_and(|tracked| std::ptr::addr_eq(Arc::as_ptr(tracked), Arc::as_ptr(&store)))
+    {
+        // The wire's own install, observed.
+        return;
+    }
+    let tracked = Arc::new(TrackedKeychain {
+        inner: store,
+        writes: Mutex::default(),
+    });
+    wiring.keychain = Some(Arc::clone(&tracked));
+    wiring.checked_secrets = None;
+    let store: Arc<dyn SecretStore> = tracked;
+    secret_values::install_inputs(cx, SecretInputs { store });
+    apply(cx);
+    check_stored_secrets(cx);
+}
+
+/// Fold the keys the app set or removed through the keychain since the last call into
+/// the open workspace's stored secrets; whether that changed them.
+fn take_secret_writes(cx: &mut App) -> bool {
+    let wiring = cx.global::<ScopeWiring>();
+    let Some(tracked) = wiring.keychain.clone().filter(|_| wiring.open.is_some()) else {
+        return false;
+    };
+    let writes = tracked.take_writes();
+    if writes.is_empty() {
+        return false;
+    }
+    let Some(open) = cx.global_mut::<ScopeWiring>().open.as_mut() else {
+        return false;
+    };
+    let mut stored = (*open.stored_secrets).clone();
+    for (key, is_stored) in writes {
+        if is_stored {
+            stored.insert(key);
+        } else {
+            stored.remove(&key);
+        }
+    }
+    if stored == *open.stored_secrets {
+        return false;
+    }
+    open.stored_secrets = Arc::new(stored);
+    true
 }
 
 /// The live request editors, dropping dead handles.
@@ -681,30 +916,31 @@ fn live_editors(cx: &mut App) -> Vec<Entity<RequestEditor>> {
 }
 
 /// Push the open workspace's scopes everywhere: the picker, the quick-look, the
-/// environment editor and every live request editor of this workspace. An editor of
-/// another workspace gets none (module docs).
+/// environment editor and every live request editor of this workspace. An editor not
+/// bound to it gets none (module docs).
 fn apply(cx: &mut App) {
+    take_secret_writes(cx);
     let Some(open) = cx.global::<ScopeWiring>().open.clone() else {
         return;
     };
     install_inputs(&open, cx);
-    let editors: Vec<(Entity<RequestEditor>, bool)> = {
-        let wiring = cx.global_mut::<ScopeWiring>();
-        wiring
-            .editors
-            .retain(|wired| wired.editor.upgrade().is_some());
-        wiring
-            .editors
-            .iter_mut()
-            .filter_map(|wired| {
-                let editor = wired.editor.upgrade()?;
-                // An editor built before any workspace opened belongs to the first one.
-                let workspace = wired.workspace.get_or_insert_with(|| open.identity.clone());
-                Some((editor, *workspace == open.identity))
-            })
-            .collect()
-    };
-    for (editor, of_open_workspace) in editors {
+    let editors = live_editors(cx);
+    let request_ids: HashMap<EntityId, ItemId> = editors
+        .iter()
+        .map(|editor| (editor.entity_id(), editor.read(cx).draft().id))
+        .collect();
+    let bound: HashSet<EntityId> = cx
+        .global_mut::<ScopeWiring>()
+        .editors
+        .iter_mut()
+        .filter_map(|wired| {
+            let entity_id = wired.editor.entity_id();
+            let request_id = request_ids.get(&entity_id)?;
+            wired.bind(*request_id, &open).then_some(entity_id)
+        })
+        .collect();
+    for editor in editors {
+        let of_open_workspace = bound.contains(&editor.entity_id());
         let (scopes, sources) = if of_open_workspace {
             let request_id = editor.read(cx).draft().id;
             scopes_for(&open, request_id, cx)

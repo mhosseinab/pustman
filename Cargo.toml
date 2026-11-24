@@ -71,6 +71,7 @@ reqwest = { version = "0.13.5", default-features = false, features = ["rustls", 
 rusqlite = { version = "0.43.0", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
+sha2 = "0.10.9"
 shlex = "2.0.1"
 similar = "3.2.1"
 smol = "2.0.2"
