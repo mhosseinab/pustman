@@ -18,6 +18,7 @@ mod status_bar;
 mod title_bar;
 mod toast_layer;
 mod welcome;
+mod workspace_open;
 
 pub use autosave::Autosave;
 pub use dock::{Dock, DockPosition};
@@ -30,6 +31,7 @@ pub use status_bar::StatusBar;
 pub use title_bar::TitleBar;
 pub use toast_layer::{TOAST_DURATION, ToastAction, ToastHandler};
 pub use welcome::Welcome;
+pub use workspace_open::{OpenedWorkspace, WorkspaceOpen, WorkspaceOpenEvent};
 
 use gpui::{
     App, Context, Decorations, Entity, FocusHandle, Focusable, ParentElement, Render, WeakEntity,
@@ -253,7 +255,9 @@ impl Render for Workspace {
 /// the root delegate one line each to the `Pane` methods in `pane_tabs`. The hook stays
 /// because the init order calls every UI crate's `init`, and panel registration (a later
 /// step) grows it.
-pub fn init(_cx: &mut App) {}
+pub fn init(cx: &mut App) {
+    workspace_open::init(cx);
+}
 
 #[cfg(test)]
 #[path = "workspace_tests.rs"]

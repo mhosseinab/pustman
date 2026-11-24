@@ -8034,12 +8034,19 @@ name = "workspace"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "api_model",
+ "git",
  "gpui",
+ "log",
  "pustman_actions",
  "serde",
  "serde_json",
  "storage",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
  "ui",
+ "workspace_store",
 ]
 
 [[package]]
