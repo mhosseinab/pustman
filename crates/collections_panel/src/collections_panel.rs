@@ -10,6 +10,7 @@
 //!   panel in its left dock.
 
 pub mod crud;
+pub mod export;
 pub mod navigation;
 pub mod reorder;
 pub mod tree;

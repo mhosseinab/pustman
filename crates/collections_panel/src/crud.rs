@@ -1,5 +1,6 @@
 //! Collection CRUD (S40a): the context menu and the actions that create, rename (inline),
-//! duplicate and delete collections, folders and requests (REQ-UI-03, REQ-WSP-01/03).
+//! duplicate and delete collections, folders and requests (REQ-UI-03, REQ-WSP-01/03) and
+//! export a collection as Postman v2.1 (REQ-IO-03, the verb itself in [`crate::export`]).
 //!
 //! Every change writes through [`workspace_store::save_item`] — the child's file first,
 //! so an `order` array never points at a file that is not there — and the file work runs
@@ -59,6 +60,7 @@ const NEW_FOLDER_ENTRY: &str = "New Folder";
 const NEW_REQUEST_ENTRY: &str = "New Request";
 const RENAME_ENTRY: &str = "Rename";
 const DUPLICATE_ENTRY: &str = "Duplicate";
+const EXPORT_ENTRY: &str = "Export";
 const DELETE_ENTRY: &str = "Delete";
 
 /// The delete confirm modal's Cancel button test hook (the history panel's modal's
@@ -242,6 +244,14 @@ impl CollectionsTree {
             return;
         }
         let container = self.creation_parent(item);
+        // Export (REQ-IO-03) is offered where there is a collection to export: Postman
+        // exports collections, and v2.1 is a collection schema.
+        let exports_collection = item.is_some_and(|id| {
+            matches!(
+                self.snapshot.items.get(&id).map(|item| &item.body),
+                Some(ItemBody::Collection(_))
+            )
+        });
         let tree = cx.weak_entity();
         let menu = cx.new(|cx| {
             let mut menu = ContextMenu::new(cx).entry(NEW_COLLECTION_ENTRY, {
@@ -330,18 +340,31 @@ impl CollectionsTree {
                                     // Handled: the panel went away while the menu was open.
                                 }
                             }
-                        })
-                        .colored_entry(DELETE_ENTRY, Color::Error, {
+                        });
+                    if exports_collection {
+                        menu = menu.entry(EXPORT_ENTRY, {
                             let tree = tree.clone();
                             move |_event, window, cx| {
                                 if tree
-                                    .update(cx, |tree, cx| tree.begin_delete(id, window, cx))
+                                    .update(cx, |tree, cx| tree.begin_export(id, window, cx))
                                     .is_err()
                                 {
                                     // Handled: the panel went away while the menu was open.
                                 }
                             }
                         });
+                    }
+                    menu = menu.colored_entry(DELETE_ENTRY, Color::Error, {
+                        let tree = tree.clone();
+                        move |_event, window, cx| {
+                            if tree
+                                .update(cx, |tree, cx| tree.begin_delete(id, window, cx))
+                                .is_err()
+                            {
+                                // Handled: the panel went away while the menu was open.
+                            }
+                        }
+                    });
                 }
             }
             menu
