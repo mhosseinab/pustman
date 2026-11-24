@@ -42,9 +42,13 @@
 //! is known, the picker's, quick-look's and environment editor's inputs are removed, so
 //! none of them can act on the previous folder's.
 //!
-//! `Decision:` (fix 2) a request editor is bound to the open workspace only when that
-//! workspace's snapshot holds its request, or when it was built with no URL (a new
-//! request: whatever host it gets is typed while this workspace is open). Restored tabs
+//! `Decision:` (fix 2, fix 3) a request editor is bound to the open workspace only when
+//! that workspace's snapshot holds its request with the same URL template its draft has —
+//! an id alone can be reused by a crafted folder or a fork to aim a restored draft at its
+//! own host — or when it was built as a fresh request (nothing but a name and a method,
+//! what New Request builds: whatever host and variables it gets are typed while this
+//! workspace is open). A restored draft with no URL but with headers, a body or auth is
+//! not fresh: those came from wherever it was saved. Restored tabs
 //! and history entries are saved with no folder, so one from folder A, reopened while B
 //! is open, stays unbound until a snapshot holding its request opens. Once bound, an
 //! editor keeps that workspace: a tab left open from folder A after folder B opens gets
@@ -55,7 +59,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use api_model::{Environment, ItemId, VariableKind};
+use api_model::{Auth, Body, Environment, HttpRequest, ItemId, Request, VariableKind};
 use environment_picker::env_editor::{self, EditTarget, EnvEditorInputs};
 use environment_picker::quick_look::{self, QuickLookInputs};
 use environment_picker::secret_values::{self, SecretInputs};
@@ -97,8 +101,12 @@ const INVALID_SECRET_PREFIX: &str = "The secret variable ";
 const INVALID_SECRET_SUFFIX: &str =
     " cannot be kept in the OS keychain — requests leave it unresolved";
 
-/// The longest `pustman.json` id [`workspace_key`] uses as is (a ULID is 26 characters).
-const MAX_PLAIN_WORKSPACE_ID: usize = 32;
+/// The workspace key names are checked against before the real one is known.
+const UNKEYED_WORKSPACE: &str = "unkeyed";
+
+/// The longest `pustman.json` id [`workspace_key`] uses as is (a ULID is 26 characters):
+/// with the `.` and the folder's 32-character digest, the key stays within 64.
+const MAX_PLAIN_WORKSPACE_ID: usize = 31;
 
 /// How many bytes of a SHA-256 digest [`workspace_key`] keeps: 128 bits, hex-encoded.
 const DIGEST_PREFIX_BYTES: usize = 16;
@@ -112,22 +120,40 @@ struct WorkspaceIdentity {
 }
 
 /// One request editor and the workspace it belongs to (module docs): `None` until a
-/// workspace whose snapshot holds its request opens — or, for an editor built with no
-/// URL (`blank`), until any workspace opens.
+/// workspace whose snapshot holds its request at the URL its draft has opens — or, for
+/// an editor built as a fresh request (`fresh`), until any workspace opens.
 struct WiredEditor {
     editor: WeakEntity<RequestEditor>,
     workspace: Option<WorkspaceIdentity>,
-    blank: bool,
+    fresh: bool,
 }
 
 impl WiredEditor {
-    /// Bind this editor to `open` when it may be (module docs); whether it belongs to it.
-    fn bind(&mut self, request_id: ItemId, open: &OpenScopes) -> bool {
-        if self.workspace.is_none() && (self.blank || open.requests.contains(&request_id)) {
+    /// Bind this editor, whose draft is `draft`, to `open` when it may be (module docs);
+    /// whether it belongs to it.
+    fn bind(&mut self, draft: &HttpRequest, open: &OpenScopes) -> bool {
+        if self.workspace.is_none()
+            && (self.fresh || open.requests.get(&draft.id) == Some(&draft.url))
+        {
             self.workspace = Some(open.identity.clone());
         }
         self.workspace.as_ref() == Some(&open.identity)
     }
+}
+
+/// Whether `draft` is what `NewRequest` builds: nothing but a name and a method, so
+/// nothing in it was saved anywhere else — every host and `{{var}}` it ever gets is
+/// typed while a workspace is open.
+fn is_fresh_request(draft: &HttpRequest) -> bool {
+    draft.url.trim().is_empty()
+        && draft.params.is_empty()
+        && draft.path_variables.is_empty()
+        && draft.headers.is_empty()
+        && matches!(draft.body, Body::None)
+        && matches!(draft.auth, Auth::None)
+        && draft.settings.is_none()
+        && draft.examples.is_empty()
+        && draft.extra.is_empty()
 }
 
 /// The app's keychain as the wire installs it (module docs): every call goes to the
@@ -182,7 +208,12 @@ struct ScopeWiring {
     loading: Option<Task<()>>,
     /// The keychain presence check in flight; a newer check replaces it.
     checking: Option<Task<()>>,
-    /// The secret keys the last presence check started for: the same set is not read
+    /// The secret keys the check in flight reads: the same set is not read twice at once.
+    checking_secrets: Option<HashSet<SecretKey>>,
+    /// The keychain writes taken while that check is in flight, oldest first: its landing
+    /// folds them into what it read, which may predate them.
+    writes_during_check: Vec<(SecretKey, bool)>,
+    /// The secret keys the last landed presence check read: the same set is not read
     /// again (module docs).
     checked_secrets: Option<HashSet<SecretKey>>,
     /// The keychain as the wire installed it, whose writes it follows.
@@ -201,6 +232,17 @@ struct ScopeWiring {
 
 impl Global for ScopeWiring {}
 
+impl ScopeWiring {
+    /// Cancel the presence check in flight and forget the last one: the next check reads
+    /// the keychain again.
+    fn forget_secret_checks(&mut self) {
+        self.checking = None;
+        self.checking_secrets = None;
+        self.writes_during_check.clear();
+        self.checked_secrets = None;
+    }
+}
+
 /// One opened workspace's scopes. [`EditTarget`] names each scope's id and variables —
 /// the same ids the environment editor saves local values and keychain entries under.
 #[derive(Clone)]
@@ -216,8 +258,9 @@ struct OpenScopes {
     collections: BTreeMap<ItemId, EditTarget>,
     /// Which collection each request belongs to, through any folders.
     collection_of: BTreeMap<ItemId, ItemId>,
-    /// Every request the snapshot holds: the editors that may bind to it (module docs).
-    requests: BTreeSet<ItemId>,
+    /// Every HTTP request the snapshot holds, with its URL template: the editors that may
+    /// bind to it (module docs).
+    requests: BTreeMap<ItemId, String>,
     local_values: Vec<LocalValue>,
     active: Option<ItemId>,
     /// The secret keys the keychain holds an entry for (module docs).
@@ -282,23 +325,23 @@ impl OpenScopes {
 /// The folder is a fixed-length digest (the first 128 bits of its SHA-256, hex): however
 /// deep the path, the keychain account stays within the OS's account-name limits. The
 /// id is untrusted file content: it is used as is only when it is a short run of ASCII
-/// letters, digits, `-` and `_` (a ULID is), and is digested the same way otherwise —
-/// either way the key carries no `/` or NUL (a [`SecretKey`] id must not).
+/// letters, digits, `-` and `_` (a ULID is), and is digested otherwise — cut to the same
+/// length and joined with `:` instead of `.`, so it never reads as a plain id. Either way
+/// the key is at most 64 characters and carries no `/` or NUL (a [`SecretKey`] id must
+/// not).
 pub fn workspace_key(workspace_id: &str, canonical_root: &Path) -> String {
     let plain_id = !workspace_id.is_empty()
         && workspace_id.len() <= MAX_PLAIN_WORKSPACE_ID
         && workspace_id
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'));
-    let id = if plain_id {
-        workspace_id.to_string()
-    } else {
-        digest_hex(workspace_id.as_bytes())
-    };
-    format!(
-        "{id}.{}",
-        digest_hex(canonical_root.as_os_str().as_encoded_bytes())
-    )
+    let root = digest_hex(canonical_root.as_os_str().as_encoded_bytes());
+    if plain_id {
+        return format!("{workspace_id}.{root}");
+    }
+    let mut id = digest_hex(workspace_id.as_bytes());
+    id.truncate(MAX_PLAIN_WORKSPACE_ID);
+    format!("{id}:{root}")
 }
 
 /// The first [`DIGEST_PREFIX_BYTES`] of `bytes`' SHA-256, hex-encoded.
@@ -332,12 +375,12 @@ pub fn init(cx: &mut App) {
             let mut wired = WiredEditor {
                 editor: entity.downgrade(),
                 workspace: None,
-                blank: editor.draft().url.trim().is_empty(),
+                fresh: is_fresh_request(editor.draft()),
             };
             let open = cx.global::<ScopeWiring>().open.clone();
             let bound = open
                 .as_ref()
-                .is_some_and(|open| wired.bind(request_id, open));
+                .is_some_and(|open| wired.bind(editor.draft(), open));
             cx.global_mut::<ScopeWiring>().editors.push(wired);
             let Some(open) = open.filter(|_| bound) else {
                 return;
@@ -426,8 +469,7 @@ fn open_changed(opener: &Entity<WorkspaceOpen>, opened: bool, cx: &mut App) {
             remove_inputs(cx);
             let wiring = cx.global_mut::<ScopeWiring>();
             wiring.open = Some(scopes);
-            wiring.checking = None;
-            wiring.checked_secrets = None;
+            wiring.forget_secret_checks();
             apply(cx);
             load_open_workspace(cx);
         }
@@ -441,8 +483,7 @@ fn close_workspace(cx: &mut App) {
     let wiring = cx.global_mut::<ScopeWiring>();
     wiring.open = None;
     wiring.loading = None;
-    wiring.checking = None;
-    wiring.checked_secrets = None;
+    wiring.forget_secret_checks();
     for editor in live_editors(cx) {
         editor.update(cx, |editor, cx| {
             editor.set_scopes(ScopeStack::new(), cx);
@@ -515,8 +556,10 @@ fn scopes_of(snapshot: &WorkspaceSnapshot) -> Option<OpenScopes> {
         requests: snapshot
             .items
             .iter()
-            .filter(|(_, item)| matches!(item.body, ItemBody::Request(_)))
-            .map(|(id, _)| *id)
+            .filter_map(|(id, item)| match &item.body {
+                ItemBody::Request(Request::Http(request)) => Some((*id, request.url.clone())),
+                _ => None,
+            })
             .collect(),
         local_values: Vec::new(),
         active: None,
@@ -679,6 +722,9 @@ fn install_key(
         Err(_) => {
             // Fixed text: the error quotes the folder's path.
             report(cx, FOLDER_FAILURE_MESSAGE.to_string());
+            // Its secrets stay unresolved, but one whose name no keychain could hold is
+            // still named.
+            check_stored_secrets(cx);
             None
         }
     }
@@ -712,10 +758,12 @@ fn check_stored_secrets(cx: &mut App) {
     let Some(open) = cx.global::<ScopeWiring>().open.as_ref() else {
         return;
     };
-    let Some(workspace_key) = open.key.clone() else {
-        return;
-    };
+    let workspace_key = open.key.clone();
     let identity = open.identity.clone();
+    // Before the key is known — or when it cannot be — names are checked against a
+    // stand-in: a real key is never empty and carries no `/` or NUL, so whether a name
+    // can be kept does not depend on it, and an unkeyable one is reported either way.
+    let key_for_names = workspace_key.as_deref().unwrap_or(UNKEYED_WORKSPACE);
     let mut keys = HashSet::new();
     let mut unkeyable = BTreeSet::new();
     for target in open.targets() {
@@ -723,11 +771,7 @@ fn check_stored_secrets(cx: &mut App) {
             if variable.kind != VariableKind::Secret {
                 continue;
             }
-            match SecretKey::new(
-                workspace_key.as_str(),
-                target.scope_id(),
-                variable.key.as_str(),
-            ) {
+            match SecretKey::new(key_for_names, target.scope_id(), variable.key.as_str()) {
                 Ok(key) => {
                     keys.insert(key);
                 }
@@ -745,15 +789,22 @@ fn check_stored_secrets(cx: &mut App) {
             format!("{INVALID_SECRET_PREFIX}`{shown}`{INVALID_SECRET_SUFFIX}"),
         );
     }
+    let Some(workspace_key) = workspace_key else {
+        return;
+    };
     let Some(store) = secret_values::store(cx) else {
         return;
     };
     let wiring = cx.global_mut::<ScopeWiring>();
-    if wiring.checked_secrets.as_ref() == Some(&keys) {
+    if wiring.checked_secrets.as_ref() == Some(&keys)
+        || (wiring.checking.is_some() && wiring.checking_secrets.as_ref() == Some(&keys))
+    {
         return;
     }
-    wiring.checked_secrets = Some(keys.clone());
+    wiring.checking_secrets = Some(keys.clone());
+    wiring.writes_during_check.clear();
     let task = cx.spawn(async move |cx| {
+        let checked = keys.clone();
         let stored = cx
             .background_executor()
             .spawn(async move {
@@ -762,23 +813,46 @@ fn check_stored_secrets(cx: &mut App) {
                     .collect::<HashSet<SecretKey>>()
             })
             .await;
-        cx.update(|cx| {
-            let Some(open) = cx.global_mut::<ScopeWiring>().open.as_mut() else {
-                return;
-            };
-            // Only a change re-resolves: re-installing the inputs runs this check again,
-            // and an unchanged answer has to end that loop.
-            if open.identity != identity
-                || !open.is_keyed(&workspace_key)
-                || *open.stored_secrets == stored
-            {
-                return;
-            }
-            open.stored_secrets = Arc::new(stored);
-            apply(cx);
-        });
+        cx.update(|cx| land_secret_check(&identity, &workspace_key, checked, stored, cx));
     });
     cx.global_mut::<ScopeWiring>().checking = Some(task);
+}
+
+/// A presence check of `checked` landed with `stored`, the keys among them the keychain
+/// held: fold in what the app wrote to the keychain since the check started, keep it if
+/// the same workspace is still open, and re-resolve when that changed anything.
+fn land_secret_check(
+    identity: &WorkspaceIdentity,
+    workspace_key: &str,
+    checked: HashSet<SecretKey>,
+    mut stored: HashSet<SecretKey>,
+    cx: &mut App,
+) {
+    take_secret_writes(cx);
+    let wiring = cx.global_mut::<ScopeWiring>();
+    let writes = std::mem::take(&mut wiring.writes_during_check);
+    wiring.checking_secrets = None;
+    let Some(open) = wiring.open.as_mut() else {
+        return;
+    };
+    if &open.identity != identity || !open.is_keyed(workspace_key) {
+        return;
+    }
+    for (key, is_stored) in writes {
+        if is_stored {
+            stored.insert(key);
+        } else {
+            stored.remove(&key);
+        }
+    }
+    wiring.checked_secrets = Some(checked);
+    // Only a change re-resolves: re-installing the inputs runs the check again, and an
+    // unchanged answer has to end that loop.
+    if *open.stored_secrets == stored {
+        return;
+    }
+    open.stored_secrets = Arc::new(stored);
+    apply(cx);
 }
 
 /// The picker's inputs changed: a confirmed choice is the new active environment; inputs
@@ -866,7 +940,7 @@ fn follow_keychain(cx: &mut App) {
         writes: Mutex::default(),
     });
     wiring.keychain = Some(Arc::clone(&tracked));
-    wiring.checked_secrets = None;
+    wiring.forget_secret_checks();
     let store: Arc<dyn SecretStore> = tracked;
     secret_values::install_inputs(cx, SecretInputs { store });
     apply(cx);
@@ -884,7 +958,11 @@ fn take_secret_writes(cx: &mut App) -> bool {
     if writes.is_empty() {
         return false;
     }
-    let Some(open) = cx.global_mut::<ScopeWiring>().open.as_mut() else {
+    let wiring = cx.global_mut::<ScopeWiring>();
+    if wiring.checking_secrets.is_some() {
+        wiring.writes_during_check.extend(writes.iter().cloned());
+    }
+    let Some(open) = wiring.open.as_mut() else {
         return false;
     };
     let mut stored = (*open.stored_secrets).clone();
@@ -925,9 +1003,9 @@ fn apply(cx: &mut App) {
     };
     install_inputs(&open, cx);
     let editors = live_editors(cx);
-    let request_ids: HashMap<EntityId, ItemId> = editors
+    let drafts: HashMap<EntityId, HttpRequest> = editors
         .iter()
-        .map(|editor| (editor.entity_id(), editor.read(cx).draft().id))
+        .map(|editor| (editor.entity_id(), editor.read(cx).draft().clone()))
         .collect();
     let bound: HashSet<EntityId> = cx
         .global_mut::<ScopeWiring>()
@@ -935,8 +1013,8 @@ fn apply(cx: &mut App) {
         .iter_mut()
         .filter_map(|wired| {
             let entity_id = wired.editor.entity_id();
-            let request_id = request_ids.get(&entity_id)?;
-            wired.bind(*request_id, &open).then_some(entity_id)
+            let draft = drafts.get(&entity_id)?;
+            wired.bind(draft, &open).then_some(entity_id)
         })
         .collect();
     for editor in editors {
