@@ -18,7 +18,7 @@ use ui::test_support::{draw_window, init_test, press_key};
 use workspace::Workspace;
 use workspace_store::{Item, ItemBody, WorkspaceSnapshot, save_item};
 
-use super::{DeleteItemModal, DELETE_CANCEL_BUTTON_SELECTOR, DELETE_CONFIRM_BUTTON_SELECTOR};
+use super::{DELETE_CANCEL_BUTTON_SELECTOR, DELETE_CONFIRM_BUTTON_SELECTOR, DeleteItemModal};
 use crate::tree::{CollectionsTree, TreeRow};
 
 /// The collection's file, as the fixture writes it: slug of "Users API" (REQ-WSP-03).
@@ -190,7 +190,10 @@ fn collection_order(snapshot: &WorkspaceSnapshot, collection_id: ItemId) -> Vec<
 fn confirm_modal_is_open(workspace: &Entity<Workspace>, cx: &VisualTestContext) -> bool {
     cx.read(|cx| {
         workspace.read_with(cx, |workspace, _| {
-            workspace.modal_layer().active_modal::<DeleteItemModal>().is_some()
+            workspace
+                .modal_layer()
+                .active_modal::<DeleteItemModal>()
+                .is_some()
         })
     })
 }
@@ -202,6 +205,15 @@ fn new_request_key() -> &'static str {
         "cmd-n"
     } else {
         "ctrl-n"
+    }
+}
+
+/// The platform's select-all keystroke (`ctrl-a` / `cmd-a`).
+fn select_all_keys() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "cmd-a"
+    } else {
+        "ctrl-a"
     }
 }
 
@@ -224,10 +236,20 @@ fn create_request_writes_file_and_appears_in_tree(cx: &mut TestAppContext) {
 
     let snapshot = disk_snapshot(&fixture);
     let order = collection_order(&snapshot, fixture.collection_id);
-    assert_eq!(order.len(), 2, "the collection's order grew by the new request");
-    assert_eq!(order[0], fixture.request_id, "the old child keeps its place");
+    assert_eq!(
+        order.len(),
+        2,
+        "the collection's order grew by the new request"
+    );
+    assert_eq!(
+        order[0], fixture.request_id,
+        "the old child keeps its place"
+    );
     let created = order[1];
-    assert_ne!(created, fixture.request_id, "the new request has its own id");
+    assert_ne!(
+        created, fixture.request_id,
+        "the new request has its own id"
+    );
     assert_eq!(
         snapshot.items.get(&created).map(Item::name).as_deref(),
         Some("New Request"),
@@ -259,19 +281,14 @@ fn rename_keeps_id_and_updates_slug(cx: &mut TestAppContext) {
     draw_window(cx);
     assert_eq!(row_names(&tree, cx), vec!["Users API", "Get user"]);
 
-    // F2 renames inline: the row's name becomes a field with the old name selected, so
-    // typing replaces it and Enter commits.
+    // F2 renames inline: the row's name becomes a field holding the old name, so
+    // select-all plus typing replaces it and Enter commits. The select-all is the
+    // platform keystroke — the field preselects the name itself on the next frame
+    // (`on_next_frame`), which a test window never pumps (`Decision:` below).
     cx.simulate_keystrokes("f2");
     draw_window(cx);
     cx.run_until_parked();
-    let probe = cx.read(|cx| {
-        tree.read_with(cx, |tree, cx| {
-            tree.crud
-                .rename_input(fixture.request_id)
-                .map(|input| input.read(cx).selected_range())
-        })
-    });
-    eprintln!("PROBE selection after f2: {probe:?}");
+    cx.simulate_keystrokes(select_all_keys());
     cx.simulate_input("Fetch all users");
     press_key(cx, "enter");
     cx.run_until_parked();
@@ -347,7 +364,7 @@ fn delete_removes_file_after_confirm(cx: &mut TestAppContext) {
         "the confirmed delete removes the file"
     );
     assert!(
-        snapshot.items.get(&fixture.request_id).is_none(),
+        !snapshot.items.contains_key(&fixture.request_id),
         "the request is gone from the workspace"
     );
     assert!(

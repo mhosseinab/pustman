@@ -104,7 +104,11 @@ pub fn init(cx: &mut App) {
         gpui::KeyBinding::new(duplicate, Duplicate, Some(COLLECTIONS_TREE_CONTEXT)),
         gpui::KeyBinding::new(new_request, NewRequest, Some(COLLECTIONS_TREE_CONTEXT)),
         gpui::KeyBinding::new(new_folder, NewFolder, Some(COLLECTIONS_TREE_CONTEXT)),
-        gpui::KeyBinding::new(new_collection, NewCollection, Some(COLLECTIONS_TREE_CONTEXT)),
+        gpui::KeyBinding::new(
+            new_collection,
+            NewCollection,
+            Some(COLLECTIONS_TREE_CONTEXT),
+        ),
         // Escape backs out of the inline rename without writing it.
         gpui::KeyBinding::new("escape", Cancel, Some(COLLECTIONS_TREE_CONTEXT)),
     ]);
@@ -450,9 +454,9 @@ impl CollectionsTree {
         self.run_write(None, window, cx, move || {
             let failure = match workspace_store::save_item(&root, &item) {
                 Ok(_) => None,
-                Err(error) => {
-                    Some(format!("Could not create “{name}” in {COLLECTIONS_DIR}/: {error}"))
-                }
+                Err(error) => Some(format!(
+                    "Could not create “{name}” in {COLLECTIONS_DIR}/: {error}"
+                )),
             };
             WriteReport::after_write(&root, failure)
         });
@@ -525,7 +529,9 @@ impl CollectionsTree {
             // there (REQ-WSP-01).
             let mut failure = match workspace_store::save_item(&root, &item) {
                 Ok(_) => None,
-                Err(error) => Some(format!("Could not create “{name}” in “{parent_name}”: {error}")),
+                Err(error) => Some(format!(
+                    "Could not create “{name}” in “{parent_name}”: {error}"
+                )),
             };
             if failure.is_none()
                 && let Err(error) = workspace_store::save_item(&root, &parent)
@@ -562,9 +568,7 @@ impl CollectionsTree {
         // action dispatches along the focused element's *rendered* path, and the field
         // is not in last frame's tree yet.
         window.on_next_frame(|window, cx| {
-            eprintln!("PROBE next-frame callback ran");
             window.dispatch_action(Box::new(SelectAll), cx);
-            eprintln!("PROBE dispatch scheduled");
         });
         let subscription = cx.subscribe_in(&input, window, Self::on_rename_event);
         self.crud.renaming = Some(RenameState {
@@ -762,7 +766,9 @@ impl CollectionsTree {
         }
         if self.snapshot.root.as_os_str().is_empty() {
             self.notify_user(
-                SharedString::new_static("No workspace is open — open one to change its collections."),
+                SharedString::new_static(
+                    "No workspace is open — open one to change its collections.",
+                ),
                 Severity::Error,
                 window,
                 cx,
@@ -860,7 +866,10 @@ impl WriteReport {
     fn after_write(root: &Path, failure: Option<String>) -> Self {
         Self {
             refreshed: workspace_store::open(root).map_err(|error| {
-                format!("Could not read {} back after the change: {error}", root.display())
+                format!(
+                    "Could not read {} back after the change: {error}",
+                    root.display()
+                )
             }),
             failure,
         }
@@ -1137,7 +1146,10 @@ fn remove_item_files(root: &Path, item: &Item) -> std::io::Result<()> {
             Ok(metadata) if metadata.is_dir() => std::fs::remove_dir_all(full),
             Ok(_) => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                format!("{} is not a directory this build will remove", full.display()),
+                format!(
+                    "{} is not a directory this build will remove",
+                    full.display()
+                ),
             )),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error),
@@ -1159,7 +1171,10 @@ fn confined_to_root(root: &Path, relative: &Path) -> std::io::Result<()> {
     {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            format!("{} would remove outside the workspace root", relative.display()),
+            format!(
+                "{} would remove outside the workspace root",
+                relative.display()
+            ),
         ));
     }
     let mut walk = root.to_path_buf();
@@ -1171,7 +1186,10 @@ fn confined_to_root(root: &Path, relative: &Path) -> std::io::Result<()> {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    format!("{} is a link; this build removes nothing through one", walk.display()),
+                    format!(
+                        "{} is a link; this build removes nothing through one",
+                        walk.display()
+                    ),
                 ));
             }
             Ok(metadata) if !last && !metadata.is_dir() => {
@@ -1251,9 +1269,7 @@ impl Render for DeleteItemModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div().track_focus(&self.focus_handle).child(
             Modal::new(format!("Delete “{}”?", self.name))
-                .content(
-                    Label::new(self.body.clone()).size(LabelSize::Small),
-                )
+                .content(Label::new(self.body.clone()).size(LabelSize::Small))
                 .footer(
                     h_flex()
                         .justify_end()
@@ -1272,9 +1288,11 @@ impl Render for DeleteItemModal {
                                         SharedString::new_static("Cancel"),
                                     )
                                     .style(ButtonStyle::Subtle)
-                                    .on_click(cx.listener(|this, _event, _window, cx| {
-                                        this.cancel(cx);
-                                    })),
+                                    .on_click(cx.listener(
+                                        |this, _event, _window, cx| {
+                                            this.cancel(cx);
+                                        },
+                                    )),
                                 ),
                         )
                         .child(
@@ -1287,9 +1305,11 @@ impl Render for DeleteItemModal {
                                         SharedString::new_static("Delete"),
                                     )
                                     .style(ButtonStyle::Tinted(TintColor::Error))
-                                    .on_click(cx.listener(|this, _event, window, cx| {
-                                        this.confirm(window, cx);
-                                    })),
+                                    .on_click(cx.listener(
+                                        |this, _event, window, cx| {
+                                            this.confirm(window, cx);
+                                        },
+                                    )),
                                 ),
                         ),
                 ),
