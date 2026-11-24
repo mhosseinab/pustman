@@ -58,7 +58,7 @@ pub enum GitError {
 /// [`GitError::Unreadable`] when `git status` succeeds but its output has no branch
 /// header or is not UTF-8.
 pub async fn status(root: &Path) -> Result<Option<GitStatus>, GitError> {
-    status_in(root, std::env::vars()).await
+    status_in(root, std::env::vars_os()).await
 }
 
 /// [`status`] over a `git status` command whose base environment is `environment`.
