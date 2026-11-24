@@ -11,3 +11,9 @@
 mod status;
 
 pub use status::{GitError, GitStatus, status};
+
+#[cfg(feature = "gpui")]
+mod status_item;
+
+#[cfg(feature = "gpui")]
+pub use status_item::init;
