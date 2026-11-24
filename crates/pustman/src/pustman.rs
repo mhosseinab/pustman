@@ -190,9 +190,13 @@ impl Global for ConsoleWiring {}
 
 /// The id of the one workspace v1 has. Decision: v1 has a single workspace, so a stable
 /// constant is its id; a multi-workspace build would derive this per window instead. It
-/// is both `restore_wiring`'s save key (the tabs and layout one window restores) and the
-/// scope the picker's per-workspace selection and the quick-look's secret keys live
-/// under, so those can never diverge — one value, written once (issue #150).
+/// is `restore_wiring`'s save key (the tabs and layout one window restores), history's
+/// and the cookie jar's, and the scope the picker and the quick-look are installed under
+/// until a workspace folder opens. An opened folder's local values, active-environment
+/// selection and keychain secrets never use it: they live under
+/// [`scope_wiring::workspace_key`] — its `pustman.json` id bound to this installation's
+/// canonical folder, since that id is committed to a shared repo and anyone can copy it
+/// into a folder they control.
 pub const WORKSPACE_ID: &str = "default";
 
 /// `environment_picker` (S34w): the inputs its openers read when `environment::SelectEnvironment`
