@@ -32,6 +32,9 @@ serde_json.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+# Fault injection in `secret_values_failure_tests`: a trigger that aborts one local
+# write, so a save can fail partway through the local values.
+rusqlite.workspace = true
 secrets = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 ui = { workspace = true, features = ["test-support"] }

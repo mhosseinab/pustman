@@ -1791,6 +1791,7 @@ dependencies = [
  "command_palette",
  "gpui",
  "pustman_actions",
+ "rusqlite",
  "secrets",
  "serde_json",
  "storage",
