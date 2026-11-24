@@ -7,7 +7,7 @@ the code disagree, the code is right and this file is a bug.
 > **Target — crates appear as steps land.** The layout below is the v1 target from
 > `docs/pustman-v1-plan.md` §3/§5 and `docs/PRD.md` §9. **Landed (S0–S25):** `api_model`,
 > `variables`, `workspace_store`, `storage`, `secrets`, `http_engine`, `pustman_actions`, `theme`,
-> `settings`, `ui`, `workspace`, `text_input`, `command_palette`, `pustman`, `console` (S32a), `history_panel` (S35a), `request_editor` (S26a), `environment_picker` (S34a), `response_viewer` (S29a), `integration_tests` (S37), `collections_panel` (S39a: the virtualized tree). **Pending (S26–S48):**
+> `settings`, `ui`, `workspace`, `text_input`, `command_palette`, `pustman`, `console` (S32a), `history_panel` (S35a), `request_editor` (S26a), `environment_picker` (S34a), `response_viewer` (S29a), `integration_tests` (S37), `collections_panel` (S39a: the virtualized tree), `git` (S44a). **Pending (S26–S48):**
 > every other v1 crate below (rows marked *(S26–S48)*). **Later milestones:** `websocket_client` (M4), `grpc_client` (M5), `mqtt_client` (M6).
 > Each step updates this file in the same commit as the code it adds.
 
@@ -21,7 +21,7 @@ the code disagree, the code is right and this file is a bug.
 | `workspace_store` | on-disk workspace format (PRD §6.1), deterministic atomic writes, file watcher, conflict detection, item ↔ file mapping | `gpui`, UI crates | `workspace_store::{open, save_item, watch}` |
 | `storage` | SQLite local store (rusqlite, D6): history, tabs, layout, local values, cookies, kv | `gpui`, UI crates | `storage::LocalStore` |
 | `secrets` | OS keychain via `SecretStore` (`KeyringStore`, `MemorySecretStore` for tests) | `gpui`, UI crates | `secrets::SecretStore` |
-| `git` *(S26–S48)* | thin `git` CLI wrapper (`smol::process`): status, diff, commit, pull, push, branch | `gpui` | `git::*` |
+| `git` | thin `git` CLI wrapper (`smol::process`): `status` (S44a: branch + dirty count; `Ok(None)` only outside a repository or without `git`, any other failure is `GitError`; inherited `GIT_DIR`-style variables removed, `LC_ALL=C`, no optional locks); diff, commit, pull, push, branch *(S44b–S48)* | `gpui` | `git::*` |
 | `console` [GPUI] | console entries in a memory-only ring buffer (`ConsoleStore` global, cap from `console_max_entries`, pause, clear); the send feed (`console::{record_outcome, record_error, watch}`: one redacted entry per send, S32b); text export (`console::export_text`, re-redacted, S32c); the bottom-dock panel (`ConsolePanel`: level/protocol/text filters, clear, pause, keyboard-expandable raw rows, S32d) | other feature UI crates (coordinate through `workspace`) | `console::init`, `console::ConsoleStore`, `console::record_outcome`, `console::ConsolePanel` |
 | `http_engine` [GPUI] | HTTP/GraphQL/SSE transport (reqwest on `gpui_tokio`), auth helpers, cookies, TLS, redirects, timing | — | `http_engine::Transport` |
 | `pustman_actions` | every PRD action + default keymaps (D10); feature crates implement handlers | UI implementation crates | `pustman_actions::*` |
