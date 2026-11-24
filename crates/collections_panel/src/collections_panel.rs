@@ -10,6 +10,7 @@
 //!   panel in its left dock.
 
 pub mod crud;
+pub mod external;
 pub mod navigation;
 pub mod reorder;
 pub mod tree;
@@ -88,6 +89,7 @@ pub fn init(cx: &mut App) {
     navigation::init(cx);
     crud::init(cx);
     reorder::init(cx);
+    external::init(cx);
 }
 
 /// The tree's content before a workspace is open (`workspace_open` is S41a): nothing to
