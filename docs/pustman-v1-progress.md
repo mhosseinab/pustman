@@ -118,7 +118,7 @@ Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub p
 | S33o | Fix the M1 workspace, console, history and timeline major bugs (driver-added, S38 prereq; #199 #202 #205) | passed | 3 | 6cca305 | [S33o](progress/pustman-v1/steps/S33o.md) | 2 review cycles, 3 fixes; LOW #270 |
 | S33p | Wire the app's cookie jar: send, persist, Manage Cookies (driver-added, S38 prereq; #286) | passed | 2 | 475bee6 | [S33p](progress/pustman-v1/steps/S33p.md) | review 2 rounds; LOW #287 |
 | S38 | M1 SIGN-OFF (HUMAN) | passed | 1 | 924e953 | [S38](progress/pustman-v1/steps/S38.md) | human "M1 GO" 2026-11-23 after the headless pre-check and S33p |
-| S39 | `collections_panel`: tree | in_progress | 0 | | | S39a, S39b merged |
+| S39 | `collections_panel`: tree | done | 0 | | | S39a, S39b, S39w merged |
 | S40 | Collection CRUD, save, ordering, dirty state | in_progress | 0 | | | S40c merged (Ctrl-S) |
 | S41 | Open, create and recent workspaces; format-version banner | pending | 0 | | |  |
 | S42 | External change bar and problem badges | pending | 0 | | |  |

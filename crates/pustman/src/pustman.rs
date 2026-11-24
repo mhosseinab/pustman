@@ -103,7 +103,7 @@ impl StartupProblems {
 
 /// The app's init order (AGENTS.md): `settings → theme → ui → text_input → pustman_actions keymap →
 /// storage → workspace → console → command_palette → http client → response viewer → request editor →
-/// environment picker → history panel → status bar readouts → restore wiring`, one line per crate or wire step so later
+/// environment picker → history panel → status bar readouts → restore wiring → collections panel`, one line per crate or wire step so later
 /// ones append their own.
 /// This is the binary's entry point: its local store is the one in the platform config dir.
 pub fn init(cx: &mut App) {
@@ -130,6 +130,10 @@ pub fn init_with_store(cx: &mut App, store: StoreLocation) {
     init_history_panel_wiring(cx);
     status_items::init(cx);
     restore_wiring::init(cx);
+    // `collections_panel` (S39w): every workspace window gets the Collections tree in its
+    // left dock (REQ-UI-01) — `collections_panel::init` owns the wiring, the same shape
+    // `console::init` registers the bottom-dock panel with.
+    collections_panel::init(cx);
 }
 
 /// `http_engine`: the client every request tab sends through, built on `ReqwestTransport`
