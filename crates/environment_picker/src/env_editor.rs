@@ -123,6 +123,14 @@
 //! key: an untrusted file can carry duplicate keys and `scope:key` would then collide
 //! across two rows. The position is stable here — rows never move in this editor — and
 //! lookups by key (`set_shared_value` and friends) address the row that opened with it.
+//!
+//! `Decision:` a read-only workspace (REQ-WSP-04, `workspace::read_only`) disables this
+//! editor at both ends of a save: the fields take no typing (`set_row_read_only`, the
+//! `request_editor` read-only wiring's counterpart here) and `save` refuses with
+//! [`workspace::read_only::SAVE_REFUSED_MESSAGE`] **before** anything is written — no
+//! local values, no keychain entries, no file — so the three stores cannot end up
+//! disagreeing about a scope whose file never moves. The press is answered, not lost:
+//! the message is inline where the rows are.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -162,6 +170,10 @@ mod globals_tests;
 #[cfg(test)]
 #[path = "env_editor_stale_read_tests.rs"]
 mod stale_read_tests;
+
+#[cfg(test)]
+#[path = "env_editor_read_only_tests.rs"]
+mod env_editor_read_only_tests;
 
 gpui::actions!(
     env_editor,
@@ -653,6 +665,12 @@ impl EnvEditor {
                 )
             })
             .collect();
+        // A read-only workspace takes no typing anywhere in the dialog (REQ-WSP-04).
+        if workspace::read_only::is_read_only(cx) {
+            for row in &rows {
+                set_row_read_only(row, true, cx);
+            }
+        }
         Self {
             focus_handle: cx.focus_handle(),
             workspace,
@@ -819,6 +837,10 @@ impl EnvEditor {
             row.secret_input = None;
             row.secret_draft = draft;
         }
+        // The fields a flip just built follow the workspace too (REQ-WSP-04).
+        if workspace::read_only::is_read_only(cx) {
+            set_row_read_only(row, true, cx);
+        }
         cx.notify();
     }
 
@@ -836,6 +858,16 @@ impl EnvEditor {
     /// the shared file (the commit point) and the keychain's removals, all off the
     /// foreground thread, then close.
     fn save(&mut self, cx: &mut Context<Self>) {
+        // A read-only workspace refuses before anything is written anywhere (REQ-WSP-04):
+        // no local values, no keychain entries, no file (module docs). The press is
+        // answered with the message every other read-only save press gets.
+        if workspace::read_only::is_read_only(cx) {
+            self.show_error(
+                SharedString::new_static(workspace::read_only::SAVE_REFUSED_MESSAGE),
+                cx,
+            );
+            return;
+        }
         // A scope with no current copy on disk is never saved from the wire's last one
         // (module docs): the banner already says why.
         if self.saving || self.save_blocked {
@@ -1366,6 +1398,20 @@ fn build_row(
             cx,
         ),
         extra: variable.extra.clone(),
+    }
+}
+
+/// Set read-only on every field one row holds — the key and description fields and
+/// whichever value fields its kind keeps (REQ-WSP-04): a read-only workspace takes no
+/// typing, so nothing accumulates behind the save it refuses anyway. The fields are
+/// built (and re-built on a kind flip) wherever rows are, so the push runs there too.
+fn set_row_read_only(row: &Row, read_only: bool, cx: &mut App) {
+    let mut fields = vec![row.key_input.clone(), row.description_input.clone()];
+    fields.extend(row.shared_input.clone());
+    fields.extend(row.local_input.clone());
+    fields.extend(row.secret_input.clone());
+    for field in fields {
+        field.update(cx, |field, cx| field.set_read_only(read_only, cx));
     }
 }
 
