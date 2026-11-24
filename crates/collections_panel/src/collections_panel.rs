@@ -9,6 +9,7 @@
 //! - [`init`] — the app-level wiring this crate owns: every workspace window gets the
 //!   panel in its left dock.
 
+pub mod crud;
 pub mod navigation;
 pub mod tree;
 
@@ -67,6 +68,7 @@ pub fn init(cx: &mut App) {
         ._subscriptions
         .push(subscription);
     navigation::init(cx);
+    crud::init(cx);
 }
 
 /// The tree's content before a workspace is open (`workspace_open` is S41a): nothing to
