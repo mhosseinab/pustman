@@ -31,3 +31,5 @@ pub fn init(cx: &mut App) {
     quick_look::init(cx);
     env_editor::init(cx);
 }
+
+pub mod secret_values;

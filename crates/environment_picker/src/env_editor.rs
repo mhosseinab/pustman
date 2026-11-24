@@ -2,16 +2,19 @@
 //! variables — an environment, a collection's variables or the workspace's globals —
 //! showing key, shared value, local value, kind (Default/Secret), enabled and
 //! description. Saving writes the shared values to the scope's own file through
-//! [`workspace_store::save_item`] and the local values to `storage`'s `local_values`
-//! table, both on one background task; a save that fails is a toast on the workspace and
-//! leaves the editor open on the rows it failed on.
+//! [`workspace_store::save_item`], the local values to `storage`'s `local_values` table
+//! and the secret values to the OS keychain through [`secret_values`], all on one
+//! background task; a save that fails is a toast on the workspace and leaves the editor
+//! open on the rows it failed on.
 //!
-//! A secret row renders **no shared-value field and no local-value field** (REQ-VAR-SHARE-02):
-//! a secret never has a shared value — the file records its key, kind and description
-//! only, and [`workspace_store`] strips a smuggled value again on the way out — and its
-//! value belongs to the OS keychain, never to the plain local store. A value a hand edit
-//! or an import leaves on a secret is dropped when the rows are built: it reaches neither
-//! a field nor the display. The keychain side of a secret's value is a later step's work.
+//! A secret row renders **no shared-value field and no local-value field**
+//! (REQ-VAR-SHARE-02): a secret never has a shared value — the file records its key, kind
+//! and description only, and [`workspace_store`] strips a smuggled value again on the way
+//! out — and its value belongs to the OS keychain, never to the plain local store. A value
+//! a hand edit or an import leaves on a secret is dropped when the rows are built: it
+//! reaches neither a field nor the display. The row's one value cell is
+//! [`secret_values`]'s masked field — the keychain read fills it at open and one save sets
+//! what it holds back through [`secret_values`], never the file and never `storage`.
 //!
 //! `Decision:` the surface is the workspace's modal ([`Workspace::toggle_modal`]), the
 //! same shape [`super::quick_look`] and `response_viewer::cookie_dialog` open theirs
@@ -45,6 +48,24 @@
 //! it around would only wait to be written back if the row were flipped again
 //! (REQ-VAR-SHARE-02). Flipping back gives empty fields.
 //!
+//! `Decision:` a secret row's masked field is the truth about its keychain value at save
+//! time ([`secret_values`] for the keychain side). It opens on what the open-time read
+//! found (masked); a non-empty field is set under the row's key; an empty field removes
+//! the entry this editor *knows* about — one its open read found, or one its own row
+//! renamed away from — and leaves alone an entry it could not read: an unknown entry is
+//! never deleted blind and never copied anywhere else. A row that stops being secret
+//! takes its known keychain entry away with its local value, so a value never outlives
+//! the kind flip (the decision above).
+//!
+//! `Decision:` the keychain is touched on background tasks only — the open snapshot's
+//! read and one save's writes ([`secret_values`]) — and a keychain failure is a visible
+//! one: the open read says what it could not read inline, a save that must write a secret
+//! with no keychain connected is refused before anything is written, and a save whose
+//! keychain write fails lands nothing new. There is no fallback: a secret value is never
+//! parked in the file or in `storage` because the keychain said no. Save order is the
+//! local values, then the keychain, then the file — the file stays the commit point
+//! (above), so every failure message still says exactly which part landed.
+//!
 //! `Decision:` the editor reads the scope as it is *now* when it opens — the item
 //! through [`workspace_store`] and the local values through `storage`, both off the
 //! foreground — instead of saving from the copy [`EnvEditorInputs`] was installed with:
@@ -71,7 +92,8 @@
 //! `Decision:` Save writes the whole scope as the editor shows it — every variable to
 //! the file, each row's local value to storage, a cleared local field as a deletion
 //! ("reset to shared") and every secret row's key as one too (a secret keeps no local
-//! value at all) — and then closes the editor. The save is detached rather than stored
+//! value at all), with its masked field's value going to the keychain instead — and then
+//! closes the editor. The save is detached rather than stored
 //! in a field (closing the editor right after Save must not cancel a write that has not
 //! run — the file would keep the old values while the user believes they were saved),
 //! which is only sound with the task carrying its own error report: the other half of
@@ -99,11 +121,14 @@ use gpui::{
     Action, App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Global,
     Render, WeakEntity, Window,
 };
+use secrets::{SecretError, SecretStore};
 use storage::{LocalStore, LocalValue};
 use text_input::TextInput;
 use ui::prelude::*;
 use workspace::{ModalView, Workspace};
 use workspace_store::{Item, ItemBody, ItemProblem, ItemProblemKind};
+
+use crate::secret_values::{self, SecretChange, SecretSnapshot, SecretState};
 
 #[cfg(test)]
 #[path = "env_editor_tests.rs"]
@@ -158,9 +183,15 @@ const NO_VARIABLES_LABEL: &str = "No variables yet.";
 const SECRET_SHARED_TOOLTIP: &str =
     "A secret never has a shared value — the file records its key and description only.";
 
-/// Why a secret row's local cell has no field: its value is the OS keychain's.
+/// Why a row with neither value field has no local field: both kinds get one — the
+/// ordinary row's local field, the secret row's masked keychain field.
 const SECRET_LOCAL_TOOLTIP: &str =
     "A secret's value lives in the OS keychain, never in the local store.";
+
+/// Why a secret row's value cell is a masked field, and where that value lives. A
+/// tooltip on a value cell never carries the value itself (module docs).
+const SECRET_KEYCHAIN_TOOLTIP: &str =
+    "The value is kept in the OS keychain — never in the file or the local store.";
 
 /// The fields' placeholders — the same "an example, not a value" shape
 /// `response_viewer::cookie_form` uses.
@@ -209,6 +240,19 @@ const UNREADABLE_SCOPE_PREFIX: &str = "These variables could not be re-read from
 /// docs): the column shows the wire's last-known values and says so.
 const LOCALS_UNVERIFIED_PREFIX: &str =
     "The local values could not be read — the Local value column may be out of date: ";
+
+/// What every "the secret values could not be read at open" message opens with (module
+/// docs), before the per-key causes.
+const SECRET_READ_PREFIX: &str = "The saved secret values could not be read from the OS keychain — those fields start empty and an empty field saves nothing: ";
+
+/// What a save whose keychain write failed is shown with: the local values have landed
+/// and the file — the commit point (module docs) — has not, so the message says which
+/// part was saved before it quotes the reason.
+const SECRETS_FAILED_MESSAGE: &str = "The local values were saved but the shared file is unchanged — the secret values could not be saved to the OS keychain: ";
+
+/// What a save that must write a secret with no keychain connected is refused with,
+/// before anything at all is written (module docs).
+const NO_KEYCHAIN_MESSAGE: &str = "Nothing was saved — a secret value can only be kept in the OS keychain, and it is not connected";
 
 /// The dialog's width: room for six columns to read.
 const EDITOR_WIDTH_PX: f32 = 1024.;
@@ -398,6 +442,13 @@ struct Row {
     /// The local-value field. `None` on a secret row: a secret's value lives in the OS
     /// keychain and never in the local store.
     local_input: Option<Entity<TextInput>>,
+    /// The secret row's masked value field ([`secret_values`]). `None` on a non-secret
+    /// row: only a secret has a keychain value to type into.
+    secret_input: Option<Entity<TextInput>>,
+    /// The key a keychain entry is known to live under — the key the open read found it
+    /// under. What one save removes or replaces (module docs); `None` when no entry was
+    /// found, so an entry this editor could not read is never deleted blind.
+    secret_entry_key: Option<String>,
     kind: VariableKind,
     enabled: bool,
     description_input: Entity<TextInput>,
@@ -408,11 +459,16 @@ struct Row {
 /// One row as the user sees it: exactly the strings [`Render`] puts in its cells, so a
 /// test can assert on the display without re-deriving it. The value columns are
 /// [`Option`] on purpose — `None` is a secret row rendering no field at all (the "unset"
-/// of REQ-VAR-SHARE-02), not an empty cell.
+/// of REQ-VAR-SHARE-02), not an empty cell. [`DisplayedRow::secret`] is the mirror image:
+/// `Some` on a secret row only, and always the masked stand-ins — it can never carry the
+/// value (module docs).
 pub struct DisplayedRow {
     pub key: String,
     pub shared: Option<String>,
     pub local: Option<String>,
+    /// The secret row's masked field as its cell paints it: one stand-in per character of
+    /// the value, never the value itself (`TextInput::display_text`).
+    pub secret: Option<String>,
     /// The kind word: "Default" or "Secret".
     pub kind: String,
     pub enabled: bool,
@@ -429,6 +485,9 @@ struct Collected {
     /// (REQ-VAR-SHARE-01) — a secret row's key (a secret keeps no local value at all),
     /// or the old key of a renamed row.
     local_clears: Vec<String>,
+    /// The keychain writes one save performs ([`secret_values`]), in row order: a secret's
+    /// value set under its key, entries removed where a row no longer has one.
+    secret_changes: Vec<SecretChange>,
 }
 
 /// What [`read_scope`] hands the editor when it opens (module docs): the scope as it is
@@ -445,6 +504,8 @@ pub struct OpenedScope {
     /// No current copy of the scope could be read (module docs): the rows are the
     /// wire's last copy and nothing may be saved over the file they describe.
     save_blocked: bool,
+    /// The secret rows' keychain state as the open-time read found it (module docs).
+    secrets: Vec<SecretSnapshot>,
 }
 
 /// What one save writes and re-checks first, gathered on the foreground before the task
@@ -459,6 +520,9 @@ struct SavePlan {
     collected: Collected,
     workspace_id: String,
     scope_id: String,
+    /// The keychain the secret changes go to. [`None`] means none connected, which a save
+    /// that has secret changes refuses before it writes (module docs).
+    secret_store: Option<Arc<dyn SecretStore>>,
 }
 
 /// Why a save did not write everything.
@@ -496,6 +560,9 @@ pub struct EnvEditor {
     /// No current copy of the scope could be read (module docs): the rows shown are the
     /// wire's last copy and saving is refused.
     save_blocked: bool,
+    /// The keychain the secret rows' values live in ([`secret_values`]), when one is
+    /// connected.
+    secret_store: Option<Arc<dyn SecretStore>>,
     /// A save is in flight: the button says so and a second save waits for it.
     saving: bool,
     /// Why the last save did not happen (or why the local values may be out of date),
@@ -525,6 +592,7 @@ impl EnvEditor {
             fingerprint,
             notice,
             save_blocked,
+            secrets,
         } = opened;
         let scope_id = target.scope_id().to_owned();
         let rows = target
@@ -532,7 +600,15 @@ impl EnvEditor {
             .iter()
             .enumerate()
             .map(|(index, variable)| {
-                build_row(variable, index, &scope_id, &local_values, window, cx)
+                build_row(
+                    variable,
+                    index,
+                    &scope_id,
+                    &local_values,
+                    &secrets,
+                    window,
+                    cx,
+                )
             })
             .collect();
         Self {
@@ -543,6 +619,7 @@ impl EnvEditor {
             target,
             rows,
             store,
+            secret_store: secret_values::store(cx),
             fingerprint,
             save_blocked,
             saving: false,
@@ -563,6 +640,10 @@ impl EnvEditor {
                 key: row.key_input.read(cx).text(),
                 shared: row.shared_input.as_ref().map(|field| field.read(cx).text()),
                 local: row.local_input.as_ref().map(|field| field.read(cx).text()),
+                secret: row
+                    .secret_input
+                    .as_ref()
+                    .map(|field| field.read(cx).display_text()),
                 kind: kind_word(row.kind).to_string(),
                 enabled: row.enabled,
                 description: row.description_input.read(cx).text(),
@@ -580,6 +661,25 @@ impl EnvEditor {
     /// row, whose value lives in the OS keychain.
     pub fn local_value_field(&self, key: &str) -> Option<Entity<TextInput>> {
         self.row_by_key(key)?.local_input.clone()
+    }
+
+    /// The masked value field of the row that opened with `key` ([`secret_values`]) —
+    /// [`Some`] on a secret row only.
+    pub fn secret_value_field(&self, key: &str) -> Option<Entity<TextInput>> {
+        self.row_by_key(key)?.secret_input.clone()
+    }
+
+    /// Fill the masked value field of `key`'s row as keystrokes would. `false` when the
+    /// row has no such field.
+    pub fn set_secret_value(&mut self, key: &str, text: &str, cx: &mut Context<Self>) -> bool {
+        let Some(field) = self
+            .row_by_key(key)
+            .and_then(|row| row.secret_input.clone())
+        else {
+            return false;
+        };
+        field.update(cx, |field, cx| field.set_text(text, cx));
+        true
     }
 
     /// Fill the shared-value field of `key`'s row as keystrokes would. `false` when the
@@ -646,6 +746,7 @@ impl EnvEditor {
         row.kind = kind;
         row.shared_input = (!secret).then(|| make_field(VALUE_PLACEHOLDER, "", window, cx));
         row.local_input = (!secret).then(|| make_field(VALUE_PLACEHOLDER, "", window, cx));
+        row.secret_input = secret.then(|| secret_values::make_secret_field("", window, cx));
         cx.notify();
     }
 
@@ -682,6 +783,13 @@ impl EnvEditor {
                 return;
             }
         };
+        // A secret value has exactly one home (module docs): with no keychain connected
+        // the save is refused before anything is written — never dropped, never written
+        // somewhere else.
+        if !collected.secret_changes.is_empty() && self.secret_store.is_none() {
+            self.show_error(SharedString::new_static(NO_KEYCHAIN_MESSAGE), cx);
+            return;
+        }
         self.error = None;
         self.saving = true;
         cx.notify();
@@ -693,6 +801,7 @@ impl EnvEditor {
             collected,
             workspace_id: self.workspace_id.clone(),
             scope_id: self.target.scope_id().to_owned(),
+            secret_store: self.secret_store.clone(),
         };
         // What the installed inputs are refreshed to once this lands (module docs).
         let saved_item = plan.item.clone();
@@ -776,6 +885,7 @@ impl EnvEditor {
         let mut variables = Vec::with_capacity(self.rows.len());
         let mut local_writes = Vec::new();
         let mut local_clears = Vec::new();
+        let mut secret_changes = Vec::new();
         let mut seen = BTreeSet::new();
         for row in &self.rows {
             let key = row.key_input.read(cx).text().trim().to_owned();
@@ -813,7 +923,51 @@ impl EnvEditor {
                 // A secret keeps no local value at all (its value is the OS keychain's):
                 // whatever a previous session or this row's own kind flip left under
                 // this key goes, or the plaintext outlives the flip (REQ-VAR-SHARE-02).
-                local_clears.push(key);
+                local_clears.push(key.clone());
+                // The keychain side (module docs): the masked field's text is the truth.
+                let text = row
+                    .secret_input
+                    .as_ref()
+                    .map(|field| field.read(cx).text())
+                    .unwrap_or_default();
+                if text.is_empty() {
+                    // An empty field removes the entry this editor knows about and
+                    // nothing else (module docs).
+                    if let Some(entry_key) = &row.secret_entry_key {
+                        secret_changes.push(
+                            SecretChange::remove(
+                                &self.workspace_id,
+                                self.target.scope_id(),
+                                entry_key,
+                            )
+                            .map_err(secret_write_failure)?,
+                        );
+                    }
+                } else {
+                    secret_changes.push(
+                        SecretChange::set(
+                            &self.workspace_id,
+                            self.target.scope_id(),
+                            &key,
+                            // Kept exact and untrimmed, like any password
+                            // (`secret_values`'s contract).
+                            &text,
+                        )
+                        .map_err(secret_write_failure)?,
+                    );
+                    if let Some(entry_key) = &row.secret_entry_key
+                        && entry_key != &key
+                    {
+                        secret_changes.push(
+                            SecretChange::remove(
+                                &self.workspace_id,
+                                self.target.scope_id(),
+                                entry_key,
+                            )
+                            .map_err(secret_write_failure)?,
+                        );
+                    }
+                }
                 continue;
             }
             match row.local_input.as_ref().map(|field| field.read(cx).text()) {
@@ -825,11 +979,20 @@ impl EnvEditor {
                 }),
                 _ => local_clears.push(key),
             }
+            // A row that is no longer a secret takes its known keychain entry away with
+            // it (module docs): the value must not outlive the kind flip.
+            if let Some(entry_key) = &row.secret_entry_key {
+                secret_changes.push(
+                    SecretChange::remove(&self.workspace_id, self.target.scope_id(), entry_key)
+                        .map_err(secret_write_failure)?,
+                );
+            }
         }
         Ok(Collected {
             variables,
             local_writes,
             local_clears,
+            secret_changes,
         })
     }
 
@@ -876,12 +1039,21 @@ impl EnvEditor {
         let base = ElementId::from(row.id.clone());
         let secret = row.kind == VariableKind::Secret;
         let shared_cell = match &row.shared_input {
-            Some(field) => field_cell(child_id(&base, "shared"), field, cx),
+            Some(field) => field_cell(child_id(&base, "shared"), field, None, cx),
             None => absent_value_cell(child_id(&base, "shared"), SECRET_SHARED_TOOLTIP, cx),
         };
         let local_cell = match &row.local_input {
-            Some(field) => field_cell(child_id(&base, "local"), field, cx),
-            None => absent_value_cell(child_id(&base, "local"), SECRET_LOCAL_TOOLTIP, cx),
+            Some(field) => field_cell(child_id(&base, "local"), field, None, cx),
+            None => match &row.secret_input {
+                // A secret row's value cell is the masked keychain field (module docs).
+                Some(field) => field_cell(
+                    child_id(&base, "secret"),
+                    field,
+                    Some(SECRET_KEYCHAIN_TOOLTIP),
+                    cx,
+                ),
+                None => absent_value_cell(child_id(&base, "local"), SECRET_LOCAL_TOOLTIP, cx),
+            },
         };
         let kind_row_id = row.id.clone();
         let kind_weak = cx.weak_entity();
@@ -929,7 +1101,7 @@ impl EnvEditor {
             }
         });
         TableRow::new(base.clone())
-            .cell(field_cell(child_id(&base, "key"), &row.key_input, cx))
+            .cell(field_cell(child_id(&base, "key"), &row.key_input, None, cx))
             .cell(shared_cell)
             .cell(local_cell)
             .cell(kind_cell)
@@ -937,6 +1109,7 @@ impl EnvEditor {
             .cell(field_cell(
                 child_id(&base, "description"),
                 &row.description_input,
+                None,
                 cx,
             ))
     }
@@ -1016,13 +1189,15 @@ impl EnvEditor {
 }
 
 /// One row of the table: the variable's fields, prefilled from the file and the local
-/// store, with the two value fields a secret row never gets. `index` is the row's
-/// position at load — its stable identity (module docs).
+/// store, with the two value fields a secret row never gets and the masked keychain field
+/// it gets instead. `index` is the row's position at load — its stable identity (module
+/// docs); `secrets` is the open-time keychain read (module docs).
 fn build_row(
     variable: &Variable,
     index: usize,
     scope_id: &str,
     local_values: &[LocalValue],
+    secrets: &[SecretSnapshot],
     window: &mut Window,
     cx: &mut Context<EnvEditor>,
 ) -> Row {
@@ -1031,6 +1206,16 @@ fn build_row(
         .iter()
         .find(|value| value.scope_id == scope_id && value.key == variable.key)
         .map(|value| value.value.clone());
+    // What the keychain read found — never the value a hand edit or an import may have
+    // smuggled into the file, which is dropped here (REQ-VAR-SHARE-02).
+    let (secret_text, secret_entry_key) = match secrets
+        .iter()
+        .find(|snapshot| snapshot.key == variable.key)
+        .map(|snapshot| &snapshot.state)
+    {
+        Some(SecretState::Found(value)) => (value.expose().to_string(), Some(variable.key.clone())),
+        _ => (String::new(), None),
+    };
     Row {
         id: format!("{scope_id}:row:{index}"),
         original_key: variable.key.clone(),
@@ -1053,6 +1238,8 @@ fn build_row(
                 cx,
             )
         }),
+        secret_input: secret.then(|| secret_values::make_secret_field(&secret_text, window, cx)),
+        secret_entry_key,
         kind: variable.kind,
         enabled: variable.enabled,
         description_input: make_field(
@@ -1085,18 +1272,28 @@ fn make_field(
     field
 }
 
-/// A field's cell: the boxed shape `response_viewer::cookie_form` draws fields with.
-fn field_cell(id: ElementId, field: &Entity<TextInput>, cx: &App) -> AnyElement {
-    div()
+/// A field's cell: the boxed shape `response_viewer::cookie_form` draws fields with. The
+/// tooltip is a static explanation of the cell, never the field's text — a secret cell's
+/// tooltip must outlive its value without leaking it (module docs).
+fn field_cell(
+    id: ElementId,
+    field: &Entity<TextInput>,
+    tooltip: Option<&'static str>,
+    cx: &App,
+) -> AnyElement {
+    let cell = div()
         .id(id)
         .min_w_0()
         .flex_1()
         .px(DynamicSpacing::Base03.rems(cx))
         .border_1()
         .border_color(cx.theme().colors().border)
-        .rounded_sm()
-        .child(field.clone())
-        .into_any_element()
+        .rounded_sm();
+    let cell = match tooltip {
+        Some(text) => cell.tooltip(Tooltip::text(text).builder()),
+        None => cell,
+    };
+    cell.child(field.clone()).into_any_element()
 }
 
 /// A value cell with no field in it: a secret row's shared or local cell. The tooltip
@@ -1143,6 +1340,7 @@ fn read_scope(
     workspace_id: &str,
     captured_locals: Vec<LocalValue>,
     store: &Mutex<LocalStore>,
+    secret_store: Option<&Arc<dyn SecretStore>>,
 ) -> OpenedScope {
     let (local_values, locals_notice) = match read_local_values(store, workspace_id) {
         Ok(local_values) => (local_values, None),
@@ -1153,13 +1351,14 @@ fn read_scope(
             ))),
         ),
     };
-    match read_current(workspace_root, captured) {
+    let mut opened = match read_current(workspace_root, captured) {
         Ok((target, fingerprint)) => OpenedScope {
             target,
             local_values,
             fingerprint,
             notice: locals_notice,
             save_blocked: false,
+            secrets: Vec::new(),
         },
         Err(reason) => {
             // The captured rows are shown as a reference only (module docs): for an item
@@ -1179,9 +1378,67 @@ fn read_scope(
                 fingerprint: None,
                 notice: Some(notice),
                 save_blocked,
+                secrets: Vec::new(),
             }
         }
+    };
+    // The secret rows' keychain state (module docs): read for whichever scope the editor
+    // opens on — the fresh copy or, when there is none, the captured one.
+    let (secrets, secret_notice) = read_secrets(
+        secret_store,
+        workspace_id,
+        opened.target.scope_id(),
+        opened.target.variables(),
+    );
+    opened.secrets = secrets;
+    opened.notice = match (opened.notice.take(), secret_notice) {
+        (Some(notice), Some(secret_notice)) => {
+            Some(SharedString::from(format!("{notice} {secret_notice}")))
+        }
+        (notice, secret_notice) => notice.or(secret_notice),
+    };
+    opened
+}
+
+/// The secret rows' keychain state as the open-time read found it (module docs), and why
+/// any of it could not be read — one inline message naming every key that failed. Runs
+/// where the caller runs: off the foreground.
+fn read_secrets(
+    secret_store: Option<&Arc<dyn SecretStore>>,
+    workspace_id: &str,
+    scope_id: &str,
+    variables: &[Variable],
+) -> (Vec<SecretSnapshot>, Option<SharedString>) {
+    let mut snapshots = Vec::new();
+    let mut failures = Vec::new();
+    for variable in variables
+        .iter()
+        .filter(|variable| variable.kind == VariableKind::Secret)
+    {
+        let snapshot =
+            secret_values::read_secret(secret_store, workspace_id, scope_id, &variable.key);
+        if let SecretState::Unreadable(reason) = &snapshot.state {
+            failures.push(format!("`{}`: {reason}", variable.key));
+        }
+        snapshots.push(snapshot);
     }
+    if failures.is_empty() {
+        (snapshots, None)
+    } else {
+        (
+            snapshots,
+            Some(SharedString::from(format!(
+                "{SECRET_READ_PREFIX}{}",
+                failures.join("; ")
+            ))),
+        )
+    }
+}
+
+/// A key that cannot be named in the OS keychain is a refused save, said the way every
+/// other refusal is (the reason names the key, never a value).
+fn secret_write_failure(error: SecretError) -> SharedString {
+    SharedString::from(format!("{SAVE_FAILURE_PREFIX}{error}"))
 }
 
 /// The scope's current copy and the file bytes a save re-checks (module docs), or why
@@ -1305,6 +1562,20 @@ fn persist_scope(plan: SavePlan, store: Arc<Mutex<LocalStore>>) -> Result<PathBu
                 .map_err(|error| SaveFailure::Failed(format!("{LOCALS_FAILED_MESSAGE}{error}")))?;
         }
     }
+    // The secret values and removals go to the OS keychain — never to the file and never
+    // to storage (module docs). This runs before the file write, so a keychain failure
+    // leaves the commit point untouched and nothing falls back to another home.
+    if !plan.collected.secret_changes.is_empty() {
+        let secret_store = plan.secret_store.as_ref().ok_or_else(|| {
+            let reason = secret_values::NOT_CONNECTED;
+            SaveFailure::Failed(format!("{SECRETS_FAILED_MESSAGE}{reason}"))
+        })?;
+        for change in &plan.collected.secret_changes {
+            change
+                .apply(secret_store)
+                .map_err(|error| SaveFailure::Failed(format!("{SECRETS_FAILED_MESSAGE}{error}")))?;
+        }
+    }
     workspace_store::save_item(&plan.root, &plan.item)
         .map_err(|error| SaveFailure::Failed(format!("{FILE_FAILED_MESSAGE}{error}")))
 }
@@ -1363,6 +1634,9 @@ fn open_env_editor(_: &Open, cx: &mut App) {
             return;
         };
         let workspace = workspace_handle.downgrade();
+        // The keychain the secret rows' values live in (module docs), read on the
+        // foreground and carried into the read that runs off it.
+        let secret_store = secret_values::store(cx);
         // Shadowed into the task so the read runs against its own copies.
         let workspace_root = inputs.workspace_root.clone();
         let target = inputs.target.clone();
@@ -1378,6 +1652,7 @@ fn open_env_editor(_: &Open, cx: &mut App) {
                         &workspace_id,
                         captured_locals,
                         &store,
+                        secret_store.as_ref(),
                     )
                 })
                 .await;
