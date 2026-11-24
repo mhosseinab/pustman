@@ -168,8 +168,8 @@ impl WorkspaceOpen {
         }
     }
 
-    /// The installed local store, when there is one.
-    fn local_store(cx: &App) -> Option<Arc<Mutex<LocalStore>>> {
+    /// The store the app installed, `None` before it lands.
+    pub fn local_store(cx: &App) -> Option<Arc<Mutex<LocalStore>>> {
         cx.try_global::<OpenStore>()
             .map(|store| Arc::clone(&store.0))
     }

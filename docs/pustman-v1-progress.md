@@ -120,7 +120,7 @@ Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub p
 | S38 | M1 SIGN-OFF (HUMAN) | passed | 1 | 924e953 | [S38](progress/pustman-v1/steps/S38.md) | human "M1 GO" 2026-11-23 after the headless pre-check and S33p |
 | S39 | `collections_panel`: tree | done | 0 | | | S39a, S39b, S39w merged |
 | S40 | Collection CRUD, save, ordering, dirty state | in_progress | 0 | | | S40a, S40c merged |
-| S41 | Open, create and recent workspaces; format-version banner | in_progress | 0 | | | S41a merged (open/create) |
+| S41 | Open, create and recent workspaces; format-version banner | in_progress | 0 | | | S41a, S41b merged |
 | S42 | External change bar and problem badges | pending | 0 | | |  |
 | S43 | Environment editor: shared, local and secret values; set-secret prompt on send | in_progress | 0 | | | S43a, S43b merged |
 | S43w | Wire the active environment and globals into open editors (driver-added, S48 prereq; after S41, S43) | pending | 0 | | |  |

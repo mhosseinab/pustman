@@ -20,6 +20,7 @@
 pub mod fuzzy;
 pub mod palette;
 pub mod picker;
+pub mod recent;
 
 pub use picker::{PICKER_CONTEXT, Picker, PickerDelegate};
 
@@ -43,4 +44,9 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("escape", Cancel, Some(PICKER_CONTEXT)),
     ]);
     palette::init(cx);
+    recent::init(cx);
 }
+
+#[cfg(test)]
+#[path = "recent_open_tests.rs"]
+mod recent_open_tests;

@@ -1157,9 +1157,14 @@ dependencies = [
 name = "command_palette"
 version = "0.1.0"
 dependencies = [
+ "api_model",
  "gpui",
  "pustman_actions",
+ "serde_json",
+ "storage",
+ "tempfile",
  "text_input",
+ "time",
  "ui",
  "workspace",
 ]
