@@ -5020,6 +5020,7 @@ dependencies = [
  "url",
  "variables",
  "workspace",
+ "workspace_store",
 ]
 
 [[package]]
