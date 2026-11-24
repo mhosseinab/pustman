@@ -8035,7 +8035,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "api_model",
- "git",
  "gpui",
  "log",
  "pustman_actions",

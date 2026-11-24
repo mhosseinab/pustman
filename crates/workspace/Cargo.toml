@@ -20,7 +20,6 @@ path = "src/workspace.rs"
 [dependencies]
 anyhow.workspace = true
 api_model.workspace = true
-git.workspace = true
 gpui.workspace = true
 log.workspace = true
 pustman_actions.workspace = true

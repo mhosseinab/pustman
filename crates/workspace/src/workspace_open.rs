@@ -31,10 +31,12 @@
 //! overwritten: creating is not an accidental reset of an existing workspace.
 //!
 //! `Decision:` creating a workspace inside a Git repository shows REQ-COLLAB-06's note —
-//! nothing to add to `.gitignore`, and no secrets in the folder (REQ-WSP-06). Whether the
-//! folder sits in a repository is a git question and `git::status` answers it (it also
-//! reports a repository Pustman cannot read, which is shown instead of being guessed
-//! around), so the check runs through the `git` crate on the create's task.
+//! nothing to add to `.gitignore`, and no secrets in the folder (REQ-WSP-06). "Inside a
+//! repository" is answered by the synchronous [`inside_git_repository`] probe rather
+//! than `git::status`: that one needs a `smol::process` child, whose future is woken by
+//! the async-io reactor's thread — non-determinism GPUI's test scheduler refuses, so the
+//! create flow's tests flaked on it. The `git` crate keeps the jobs where git is the
+//! point (the branch and dirty count of S44b's status item).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -156,7 +158,7 @@ impl WorkspaceOpen {
             .map(|openers| openers.by_window.values().cloned().collect())
             .unwrap_or_default();
         for opener in openers {
-            // RED-CHECK: launch reopen disabled
+            opener.update(cx, |opener, cx| opener.reopen_last(cx));
         }
     }
 
@@ -269,11 +271,13 @@ impl WorkspaceOpen {
     pub fn create_folder(&mut self, root: PathBuf, cx: &mut Context<Self>) {
         let store = Self::local_store(cx);
         let name = workspace_name(&root);
-        let root_for_note = root.clone();
         self.opening = Some(cx.spawn(async move |this, cx| {
-            let outcome = cx
+            let (outcome, in_repository) = cx
                 .background_executor()
-                .spawn(async move { create_off_foreground(root, name, store) })
+                .spawn(async move {
+                    let in_repository = inside_git_repository(&root);
+                    (create_off_foreground(root, name, store), in_repository)
+                })
                 .await;
             let created = matches!(outcome, Outcome::Landed { .. });
             if let Err(_released) = this.update(cx, |opener, cx| opener.land(outcome, cx)) {
@@ -282,26 +286,11 @@ impl WorkspaceOpen {
             if !created {
                 return;
             }
-            // REQ-COLLAB-06's note is a git question about the folder. `git::status`'s
-            // future is not `Send` (the `git` crate scrubs the environment it inherits
-            // through an iterator), so it cannot ride the background executor; it never
-            // blocks this thread either — `smol::process` runs the child on its own
-            // threads and the wait is an async one.
-            let in_repository = git::status(&root_for_note).await;
-            let note = match in_repository {
-                Ok(Some(_)) => Some((COLLABORATION_NOTE.to_owned(), Severity::Info)),
-                // Outside a repository there is nothing to say (REQ-COLLAB-06 speaks
-                // about repositories only).
-                Ok(None) => None,
-                // A repository Pustman cannot read must reach the user, not vanish.
-                Err(error) => Some((
-                    format!("Could not check whether this folder is in a Git repository — {error}"),
-                    Severity::Warning,
-                )),
-            };
-            if let Some((message, level)) = note
+            // REQ-COLLAB-06's note, for a workspace created inside a repository. The
+            // probe ran with the create's own disk work (see [`inside_git_repository`]).
+            if in_repository
                 && let Err(_released) = this.update(cx, |opener, cx| {
-                    opener.report(message, level, cx);
+                    opener.report(COLLABORATION_NOTE, Severity::Info, cx);
                 })
             {
                 // Handled: the window closed before the note could be shown.
@@ -421,10 +410,8 @@ fn attach(workspace: &Entity<Workspace>, cx: &mut App) {
     cx.default_global::<Openers>()
         .by_window
         .insert(workspace_id, opener.clone());
-    cx.default_global::<Openers>()
-        ._subscriptions
-        .push(release);
-    // RED-CHECK: launch reopen disabled
+    cx.default_global::<Openers>()._subscriptions.push(release);
+    opener.update(cx, |opener, cx| opener.reopen_last(cx));
 }
 
 /// The `OpenWorkspace` answer in the active window.
@@ -506,10 +493,11 @@ pub fn create_workspace(root: &Path, name: &str) -> Result<OpenedWorkspace, Crea
             }
         })?;
     }
-    let snapshot = workspace_store::open(root).map_err(|error| CreateWorkspaceError::Unreadable {
-        root: root.to_path_buf(),
-        reason: error.to_string(),
-    })?;
+    let snapshot =
+        workspace_store::open(root).map_err(|error| CreateWorkspaceError::Unreadable {
+            root: root.to_path_buf(),
+            reason: error.to_string(),
+        })?;
     Ok(OpenedWorkspace {
         root: root.to_path_buf(),
         snapshot,
@@ -661,4 +649,12 @@ fn workspace_name(root: &Path) -> String {
     root.file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| String::from("Workspace"))
+}
+
+/// Whether `root` sits inside a Git repository: a `.git` entry — the directory of a
+/// repository or the file a worktree or submodule keeps — in the folder or one of its
+/// ancestors. See the module docs for why this is not `git::status`.
+fn inside_git_repository(root: &Path) -> bool {
+    root.ancestors()
+        .any(|directory| directory.join(".git").exists())
 }
