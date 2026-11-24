@@ -122,7 +122,7 @@ Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub p
 | S40 | Collection CRUD, save, ordering, dirty state | done | 0 | | | S40a, S40b, S40c merged |
 | S41 | Open, create and recent workspaces; format-version banner | done | 0 | | | S41a, S41b, S41c, S41d merged |
 | S41d | Read-only workspace disables editing in the request and environment editors; the env editor refuses before any write (driver-added, from the S41c review) | done | 0 | | | S41d merged |
-| S42 | External change bar and problem badges | pending | 0 | | |  |
+| S42 | External change bar and problem badges | in_progress | 0 | | | S42b merged |
 | S43 | Environment editor: shared, local and secret values; set-secret prompt on send | in_progress | 0 | | | S43a, S43b merged |
 | S43w | Wire the active environment and globals into open editors (driver-added, S48 prereq; after S41, S43) | in_progress | 0 | | |  |
 | S44 | `git` crate + status bar branch and dirty count | done | 0 | | | S44a, S44b, S44w merged |
