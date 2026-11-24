@@ -105,3 +105,11 @@ expect_used = "deny"
 dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
+
+# Full DWARF made each GPUI test binary ~420 MB and one worktree's target/ 24 GB.
+# Line tables keep file:line in panics and backtraces at a fraction of the size.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
