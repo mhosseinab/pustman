@@ -4977,6 +4977,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "api_model",
+ "collections_panel",
  "command_palette",
  "console",
  "environment_picker",
