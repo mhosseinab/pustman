@@ -39,7 +39,7 @@ Init order in `pustman::init_with_store` (`crates/pustman/src/pustman.rs`): `set
    `response_viewer` + a `console` entry via `api_model::{redact_text, redact_headers, redact_url}`. Failure: typed `TransportError`
    (plan §5) → toast + Console row. Idempotency: one `pending_send` Task per tab; replacing it
    cancels the previous request.
-2. **Save:** edit → `workspace_store::save_item` (temp file + fsync + rename; deterministic JSON)
+2. **Save:** edit → `workspace::Save` (Ctrl/Cmd-S; `request_editor::save`, S40c: only from a focused request editor, one write at a time per editor, a press during a write re-saves after it) → `workspace_store::save_item` (temp file + fsync + rename; deterministic JSON)
    → `git diff` shows exactly one changed file (REQ-WSP-02).
 3. **External change:** `workspace_store::watch` → tree/tab update within 1 s; unsaved edits kept
    and a "Changed on disk" bar appears (REQ-COLLAB-01).

@@ -19,6 +19,7 @@ api_model.workspace = true
 console.workspace = true
 gpui.workspace = true
 http_engine.workspace = true
+log.workspace = true
 pustman_actions.workspace = true
 response_viewer.workspace = true
 secrets.workspace = true
@@ -27,9 +28,11 @@ text_input.workspace = true
 ui.workspace = true
 variables.workspace = true
 workspace.workspace = true
+workspace_store.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
 http_engine = { workspace = true, features = ["test-support"] }
 secrets = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true
 ui = { workspace = true, features = ["test-support"] }
