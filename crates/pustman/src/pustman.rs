@@ -5,6 +5,7 @@
 
 pub mod app_icon;
 pub mod restore_wiring;
+pub mod scope_wiring;
 pub mod status_items;
 
 #[cfg(test)]
@@ -103,7 +104,7 @@ impl StartupProblems {
 
 /// The app's init order (AGENTS.md): `settings → theme → ui → text_input → pustman_actions keymap →
 /// storage → workspace → console → command_palette → http client → response viewer → request editor →
-/// environment picker → history panel → status bar readouts → restore wiring → collections panel → git branch item`, one line per crate or wire
+/// environment picker → history panel → status bar readouts → restore wiring → collections panel → git branch item → variable scopes`, one line per crate or wire
 /// step so later ones append their own.
 /// This is the binary's entry point: its local store is the one in the platform config dir.
 pub fn init(cx: &mut App) {
@@ -136,6 +137,8 @@ pub fn init_with_store(cx: &mut App, store: StoreLocation) {
     collections_panel::init(cx);
     // `git` (S44w): the status bar's branch item in every workspace window (REQ-COLLAB-03).
     git::init(cx);
+    // `scope_wiring` (S43w): the opened workspace's variables and the keychain in every editor.
+    scope_wiring::init(cx);
 }
 
 /// `http_engine`: the client every request tab sends through, built on `ReqwestTransport`
@@ -666,12 +669,14 @@ fn open_local_store(cx: &mut App, location: StoreLocation) {
                 install_environment_picker_inputs(cx, &store);
                 install_cookie_wiring(cx, &store);
                 workspace::WorkspaceOpen::install_local_store(Arc::clone(&store), cx);
+                scope_wiring::install_keychain(cx);
             }
             StoreStartup::Fallback { store, reason } => {
                 cx.set_global(AppStore(Arc::clone(&store)));
                 install_environment_picker_inputs(cx, &store);
                 install_cookie_wiring(cx, &store);
                 workspace::WorkspaceOpen::install_local_store(Arc::clone(&store), cx);
+                scope_wiring::install_keychain(cx);
                 StartupProblems::push(
                     cx,
                     format!(

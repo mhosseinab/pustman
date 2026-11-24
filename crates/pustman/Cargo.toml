@@ -42,6 +42,9 @@ text_input.workspace = true
 theme.workspace = true
 ui.workspace = true
 workspace.workspace = true
+api_model.workspace = true
+variables.workspace = true
+workspace_store.workspace = true
 
 [dev-dependencies]
 api_model.workspace = true
