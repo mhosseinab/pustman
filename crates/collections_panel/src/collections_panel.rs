@@ -10,6 +10,7 @@
 //!   panel in its left dock.
 
 pub mod crud;
+pub mod external;
 pub mod navigation;
 pub mod problems;
 pub mod reorder;
@@ -40,6 +41,12 @@ mod crud_queue_tests;
 #[cfg(test)]
 #[path = "reorder_move_tests.rs"]
 mod reorder_move_tests;
+
+// And the feed's lifecycle tests (S42a fix 1/2), same shape again: outside `external::`,
+// so the step's `external::` filter still reports PASS 1.
+#[cfg(test)]
+#[path = "external_lifecycle_tests.rs"]
+mod external_lifecycle_tests;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -89,6 +96,7 @@ pub fn init(cx: &mut App) {
     navigation::init(cx);
     crud::init(cx);
     reorder::init(cx);
+    external::init(cx);
 }
 
 /// The tree's content before a workspace is open (`workspace_open` is S41a): nothing to
