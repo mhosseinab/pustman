@@ -292,3 +292,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-24 — S44w merged (git branch item wired into the app; VERIFY OK on `b4c5996`). The worker blocked on the read-only `status_items_tests.rs:46` (exactly one left status item); the human authorized editing it to two — recorded for promote-check item 4. S44 done.
 - 2026-11-24 — S41b merged (Open recent; HIGH wiring gap closed by making WorkspaceOpen::local_store pub; re-review PASS; VERIFY OK on `442e0e6`; LOW #312).
 - 2026-11-24 — S41c merged (newer-format read-only banner; VERIFY OK on `ff049d0`; LOW #314). Review MEDIUM outside the Edits (env editor writes locals/keychain before save_item refuses a read-only workspace; request inputs stay editable). Decision: driver-added step S41d owns it.
+- 2026-11-24 — S46 merged (quick open; MEDIUM duplicate-editor gap fixed in one cycle; re-review PASS_WITH_ISSUES; VERIFY OK on `f388703`; LOW #315).

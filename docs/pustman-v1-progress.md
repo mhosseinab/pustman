@@ -127,7 +127,7 @@ Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub p
 | S43w | Wire the active environment and globals into open editors (driver-added, S48 prereq; after S41, S43) | pending | 0 | | |  |
 | S44 | `git` crate + status bar branch and dirty count | done | 0 | | | S44a, S44b, S44w merged |
 | S45 | Import/export UI (Postman collection, environment, globals) | pending | 0 | | |  |
-| S46 | Quick open (`Ctrl/Cmd-P`) | pending | 0 | | |  |
+| S46 | Quick open (`Ctrl/Cmd-P`) | done | 0 | | | S46 merged |
 | S47 | Sharing AC: two clones of one Git repository | pending | 0 | | |  |
 | S48 | M2 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off |
 | S49 | Declare the M3–M5 dependencies | pending | 0 | | |  |
