@@ -18,11 +18,13 @@ use std::sync::Arc;
 use api_model::{ItemId, Request};
 use gpui::{
     AnyElement, ClickEvent, Context, Div, ElementId, FocusHandle, Focusable, InteractiveText,
-    Render, SharedString, Styled, StyledText, Window,
+    Render, Role, SharedString, Stateful, Styled, StyledText, Window,
 };
 use ui::prelude::*;
 use workspace::{DockPosition, Panel};
 use workspace_store::{ItemBody, ItemProblem, ItemProblemKind, WorkspaceSnapshot};
+
+use crate::navigation::{COLLECTIONS_TREE_CONTEXT, Navigation};
 
 #[cfg(test)]
 #[path = "tree_tests.rs"]
@@ -129,13 +131,18 @@ fn problem_element_id(path: &str) -> ElementId {
 
 /// The left-dock Collections panel: the virtualized tree over one workspace snapshot.
 pub struct CollectionsTree {
-    snapshot: WorkspaceSnapshot,
+    /// The snapshot the rows were flattened from — crate-visible, because
+    /// [`crate::navigation`] opens the request a selected row names out of it.
+    pub(crate) snapshot: WorkspaceSnapshot,
     /// The containers the user has opened. Keyed by [`ItemId`] and kept across snapshot
     /// updates, so an external change never collapses the tree under the pointer (S42a).
     expanded: BTreeSet<ItemId>,
     /// The rows the last flatten produced. Read-only until the next flatten, so drawing
     /// clones the handle instead of re-walking the snapshot.
     rows: Arc<Vec<TreeRow>>,
+    /// The keyboard state: the selection, its scroll and the tabs Enter has opened
+    /// ([`crate::navigation`]).
+    pub(crate) navigation: Navigation,
     focus_handle: FocusHandle,
 }
 
@@ -151,6 +158,7 @@ impl CollectionsTree {
             snapshot,
             expanded: BTreeSet::new(),
             rows,
+            navigation: Navigation::new(),
             focus_handle,
         }
     }
@@ -193,50 +201,85 @@ impl CollectionsTree {
     /// One row's content — the wrapper `VirtualList` draws around it carries the row's
     /// stable key and test selector.
     fn render_row(&mut self, index: usize, cx: &mut Context<Self>) -> AnyElement {
-        match self.rows.get(index) {
-            Some(TreeRow::Collection {
+        let row = match self.rows.get(index) {
+            Some(row) => row.clone(),
+            // The list is told the row count of the same flatten it draws keys from, so
+            // an out-of-range index cannot occur — and must not panic if it ever does.
+            None => return div().into_any_element(),
+        };
+        let row_key = row.element_id();
+        match row {
+            TreeRow::Collection {
                 id,
                 name,
                 is_expanded,
-            }) => self.render_branch(*id, 0, name.clone(), *is_expanded, cx),
-            Some(TreeRow::Folder {
+            } => self.render_branch(id, 0, name, is_expanded, &row_key, cx),
+            TreeRow::Folder {
                 id,
                 depth,
                 name,
                 is_expanded,
-            }) => self.render_branch(*id, *depth, name.clone(), *is_expanded, cx),
-            Some(TreeRow::Request {
+            } => self.render_branch(id, depth, name, is_expanded, &row_key, cx),
+            TreeRow::Request {
                 id,
                 depth,
                 name,
                 method,
-            }) => self.render_request(*id, *depth, name.clone(), method.clone(), cx),
-            Some(TreeRow::Problem {
+            } => self.render_request(id, depth, name, method, &row_key, cx),
+            TreeRow::Problem {
                 path,
                 summary,
                 detail,
-            }) => self.render_problem(path.clone(), summary.clone(), detail.clone(), cx),
-            // The list is told the row count of the same flatten it draws keys from, so
-            // an out-of-range index cannot occur — and must not panic if it ever does.
-            None => div().into_any_element(),
+            } => self.render_problem(path, summary, detail, &row_key, cx),
         }
     }
 
     /// The frame every item row shares: one row's height, one indent per depth, and the
-    /// columns' fixed widths so the names line up down the tree. The row's element id and
-    /// test selector are the wrapper `VirtualList` draws around it.
-    fn row_frame(&self, depth: usize, cx: &App) -> Div {
+    /// columns' fixed widths so the names line up down the tree. The frame is the row's
+    /// selectable, clickable surface (the tree-item accessibility node and the selection
+    /// highlight live here); the row's stable key and test selector are the wrapper
+    /// `VirtualList` draws around it, so this one is that key's `row` child.
+    fn row_frame(
+        &self,
+        depth: usize,
+        row_key: &ElementId,
+        request: Option<ItemId>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         // The indent follows the nesting depth, clamped explicitly: the depth derives
         // from user data (`order` arrays), so the conversion must never wrap
         // (`.agents/rules/rust-code.md`).
         let indent = INDENT_PX * f32::from(u16::try_from(depth).unwrap_or(u16::MAX));
+        let selected = self.navigation.selected_key() == Some(row_key);
+        // The selection's test hook, on the frame that draws the highlight.
+        let selected_selector = selected.then(|| format!("{row_key}-selected"));
+        let click_key = row_key.clone();
         h_flex()
+            .id(ElementId::NamedChild(
+                Arc::new(row_key.clone()),
+                SharedString::new_static("row"),
+            ))
+            .role(Role::TreeItem)
+            .aria_level(depth + 1)
+            .aria_selected(selected)
             .w_full()
             .h(px_to_rems(ROW_HEIGHT_PX))
             .min_w_0()
             .items_center()
             .gap(DynamicSpacing::Base01.rems(cx))
             .pl(px_to_rems(indent))
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.click_row(click_key.clone(), request, window, cx);
+            }))
+            .when(selected, |row| row.bg(cx.theme().colors().element_selected))
+            .when(!selected, |row| {
+                row.hover(|row| row.bg(cx.theme().colors().ghost_element_hover))
+            })
+            .map(|frame| match selected_selector {
+                Some(selector) => frame.debug_selector(move || selector.clone()),
+                None => frame,
+            })
     }
 
     /// A collection's or folder's row: the disclosure, the name, and no method badge.
@@ -246,15 +289,16 @@ impl CollectionsTree {
         depth: usize,
         name: SharedString,
         is_expanded: bool,
+        row_key: &ElementId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let row_id = item_element_id(id);
-        self.row_frame(depth, cx)
+        self.row_frame(depth, row_key, None, cx)
+            .aria_expanded(is_expanded)
             .child(self.disclosure(id, is_expanded, name.clone(), cx))
-            .child(self.method_column(&row_id, None, cx))
+            .child(self.method_column(row_key, None, cx))
             .child(row_label(
                 name,
-                ElementId::from(format!("{row_id}-name")),
+                ElementId::from(format!("{row_key}-name")),
                 LabelFont::Ui,
                 TextSize::Small,
                 Color::Default,
@@ -271,15 +315,15 @@ impl CollectionsTree {
         depth: usize,
         name: SharedString,
         method: SharedString,
+        row_key: &ElementId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let row_id = item_element_id(id);
-        self.row_frame(depth, cx)
+        self.row_frame(depth, row_key, Some(id), cx)
             .child(div().flex_none().w(px_to_rems(DISCLOSURE_COLUMN_PX)))
-            .child(self.method_column(&row_id, Some(method), cx))
+            .child(self.method_column(row_key, Some(method), cx))
             .child(row_label(
                 name,
-                ElementId::from(format!("{row_id}-name")),
+                ElementId::from(format!("{row_key}-name")),
                 LabelFont::Ui,
                 TextSize::Small,
                 Color::Default,
@@ -288,21 +332,18 @@ impl CollectionsTree {
             .into_any_element()
     }
 
-    /// A problem row: the error badge and what is wrong with which file.
+    /// A problem row: the error badge and what is wrong with which file — in the same
+    /// row frame as the items, so the selection walks over it too.
     fn render_problem(
         &self,
         path: SharedString,
         summary: SharedString,
         detail: SharedString,
-        cx: &App,
+        row_key: &ElementId,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
-        let row_id = problem_element_id(&path);
-        let badge_selector = format!("{row_id}-badge");
-        h_flex()
-            .w_full()
-            .h(px_to_rems(ROW_HEIGHT_PX))
-            .min_w_0()
-            .items_center()
+        let badge_selector = format!("{row_key}-badge");
+        self.row_frame(0, row_key, None, cx)
             .gap(DynamicSpacing::Base03.rems(cx))
             .px(DynamicSpacing::Base04.rems(cx))
             .child(
@@ -313,7 +354,7 @@ impl CollectionsTree {
             )
             .child(row_label(
                 format!("{path} — {detail}").into(),
-                ElementId::from(format!("{row_id}-name")),
+                ElementId::from(format!("{row_key}-name")),
                 LabelFont::Ui,
                 TextSize::Small,
                 Color::Muted,
@@ -380,6 +421,21 @@ impl CollectionsTree {
             None => column.into_any_element(),
         }
     }
+
+    /// The panel's root element: its identity, its key context and the five navigation
+    /// handlers. Both render branches start here, so the keyboard answers the same way
+    /// over the empty tree as over a full one.
+    fn panel_root(&self, panel_element_id: ElementId, cx: &mut Context<Self>) -> Stateful<Div> {
+        v_flex()
+            .id(panel_element_id)
+            .key_context(COLLECTIONS_TREE_CONTEXT)
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(Self::select_previous))
+            .on_action(cx.listener(Self::select_next))
+            .on_action(cx.listener(Self::collapse_or_parent))
+            .on_action(cx.listener(Self::expand_or_child))
+            .on_action(cx.listener(Self::activate))
+    }
 }
 
 impl Render for CollectionsTree {
@@ -389,8 +445,8 @@ impl Render for CollectionsTree {
         // `command_palette::Picker` builds its ids with).
         let panel_element_id = ElementId::from(&self.focus_handle);
         if self.rows.is_empty() {
-            return v_flex()
-                .id(panel_element_id)
+            return self
+                .panel_root(panel_element_id, cx)
                 .size_full()
                 .font_ui(cx)
                 .child(
@@ -418,11 +474,12 @@ impl Render for CollectionsTree {
                 )
             },
             cx.processor(|this, index: usize, _window, cx| this.render_row(index, cx)),
-        );
+        )
+        // The scroll state the selection's moves go through (`navigation`).
+        .track_scroll(self.navigation.scroll_handle().clone());
         let list_focused = self.focus_handle.contains_focused(window, cx);
 
-        v_flex()
-            .id(panel_element_id)
+        self.panel_root(panel_element_id, cx)
             .size_full()
             .font_ui(cx)
             .p(DynamicSpacing::Base08.rems(cx))

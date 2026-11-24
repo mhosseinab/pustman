@@ -18,6 +18,7 @@ path = "src/collections_panel.rs"
 [dependencies]
 api_model.workspace = true
 gpui.workspace = true
+request_editor.workspace = true
 ui.workspace = true
 workspace.workspace = true
 workspace_store.workspace = true
