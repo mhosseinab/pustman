@@ -1,5 +1,8 @@
 # crates/git — thin wrapper over the user's own `git` CLI (REQ-COLLAB-03/04). Domain
 # crate: no GPUI. Every git command runs through `smol::process` so the UI never blocks.
+# The status-bar branch item (S44b) lives behind the default `gpui` feature, so
+# `--no-default-features` keeps the domain API — `status`, `GitStatus`, `GitError` —
+# GPUI-free.
 
 [package]
 name = "git"
@@ -13,9 +16,29 @@ workspace = true
 [lib]
 path = "src/git.rs"
 
+[features]
+default = ["gpui"]
+# The status-bar branch item (S44b): `init` wires the readout into every workspace
+# window's status bar. The domain API does not change shape when this is off.
+gpui = ["dep:gpui", "dep:ui", "dep:workspace"]
+# Tests only: GPUI's test context and `ui`'s test support. The forwards are weak
+# (`gpui?/…`), so requesting this while the `gpui` feature is off turns nothing on and
+# `cargo tree -p git --no-default-features` stays free of GPUI.
+test-support = ["gpui?/test-support", "ui?/test-support"]
+
 [dependencies]
+gpui = { workspace = true, optional = true }
 smol.workspace = true
 thiserror.workspace = true
+ui = { workspace = true, optional = true }
+workspace = { workspace = true, optional = true }
 
 [dev-dependencies]
+# Turns `test-support` on for the test build — dev-dependencies unify features with the
+# build under test — without a plain `gpui` dev-dependency, which `cargo tree -p git
+# --no-default-features` would report and a real leak would hide among (the self
+# dev-dependency shape `http_engine` already uses). `default-features = false` keeps this
+# edge from re-enabling the `gpui` feature — and with it GPUI itself — when the tree is
+# asked for the domain-only build.
+git = { path = ".", default-features = false, features = ["test-support"] }
 tempfile.workspace = true
