@@ -11,6 +11,7 @@
 
 pub mod crud;
 pub mod navigation;
+pub mod reorder;
 pub mod tree;
 
 pub use tree::{CollectionsTree, PANEL_ID, TreeRow};
@@ -80,6 +81,7 @@ pub fn init(cx: &mut App) {
         .push(subscription);
     navigation::init(cx);
     crud::init(cx);
+    reorder::init(cx);
 }
 
 /// The tree's content before a workspace is open (`workspace_open` is S41a): nothing to

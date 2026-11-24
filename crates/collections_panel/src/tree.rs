@@ -26,6 +26,7 @@ use workspace_store::{ItemBody, ItemProblem, ItemProblemKind, WorkspaceSnapshot}
 
 use crate::crud::Crud;
 use crate::navigation::{COLLECTIONS_TREE_CONTEXT, Navigation};
+use crate::reorder::Reorder;
 
 #[cfg(test)]
 #[path = "tree_tests.rs"]
@@ -146,6 +147,9 @@ pub struct CollectionsTree {
     pub(crate) navigation: Navigation,
     /// The CRUD surface: the row menu and the inline rename field ([`crate::crud`]).
     pub(crate) crud: Crud,
+    /// The drag state: where a drop lands while a row drag hovers the tree
+    /// ([`crate::reorder`]).
+    pub(crate) reorder: Reorder,
     focus_handle: FocusHandle,
 }
 
@@ -163,6 +167,7 @@ impl CollectionsTree {
             rows,
             navigation: Navigation::new(),
             crud: Crud::new(),
+            reorder: Reorder::new(),
             focus_handle,
         }
     }
@@ -308,9 +313,13 @@ impl CollectionsTree {
     ) -> AnyElement {
         self.row_frame(depth, row_key, None, cx)
             .aria_expanded(is_expanded)
+            // The row is a drag source and a drop target (`crate::reorder`), and the
+            // insertion line rides over its content.
+            .map(|frame| self.row_drag(frame, id, name.clone(), cx))
             .child(self.disclosure(id, is_expanded, name.clone(), cx))
             .child(self.method_column(row_key, None, cx))
             .child(self.name_element(id, name, row_key, cx))
+            .children(self.drop_indicator(id, cx))
             .into_any_element()
     }
 
@@ -326,9 +335,11 @@ impl CollectionsTree {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.row_frame(depth, row_key, Some(id), cx)
+            .map(|frame| self.row_drag(frame, id, name.clone(), cx))
             .child(div().flex_none().w(px_to_rems(DISCLOSURE_COLUMN_PX)))
             .child(self.method_column(row_key, Some(method), cx))
             .child(self.name_element(id, name, row_key, cx))
+            .children(self.drop_indicator(id, cx))
             .into_any_element()
     }
 
@@ -467,6 +478,11 @@ impl CollectionsTree {
             .on_action(cx.listener(Self::duplicate))
             .on_action(cx.listener(Self::delete))
             .on_action(cx.listener(Self::cancel))
+            // The move keys (S40b): the keyboard twins of dragging a row around.
+            .on_action(cx.listener(Self::move_up))
+            .on_action(cx.listener(Self::move_down))
+            .on_action(cx.listener(Self::move_into))
+            .on_action(cx.listener(Self::move_out))
             // A right-click off the rows opens the one menu that needs no row: the
             // workspace-level create (S40a).
             .on_mouse_down(
