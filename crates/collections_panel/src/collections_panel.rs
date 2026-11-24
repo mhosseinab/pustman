@@ -13,6 +13,13 @@ pub mod tree;
 
 pub use tree::{CollectionsTree, PANEL_ID, TreeRow};
 
+// The tree's merge-artifact tests live in their own file beside `tree.rs` and are wired
+// here rather than inside `tree::`, so the step's `tree::` test filter still selects
+// exactly the two tests it is pinned to.
+#[cfg(test)]
+#[path = "tree_orphans_tests.rs"]
+mod tree_orphans_tests;
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 

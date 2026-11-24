@@ -226,13 +226,17 @@ impl CollectionsTree {
     /// columns' fixed widths so the names line up down the tree. The row's element id and
     /// test selector are the wrapper `VirtualList` draws around it.
     fn row_frame(&self, depth: usize, cx: &App) -> Div {
+        // The indent follows the nesting depth, clamped explicitly: the depth derives
+        // from user data (`order` arrays), so the conversion must never wrap
+        // (`.agents/rules/rust-code.md`).
+        let indent = INDENT_PX * f32::from(u16::try_from(depth).unwrap_or(u16::MAX));
         h_flex()
             .w_full()
             .h(px_to_rems(ROW_HEIGHT_PX))
             .min_w_0()
             .items_center()
             .gap(DynamicSpacing::Base01.rems(cx))
-            .pl(px_to_rems(INDENT_PX * depth as f32))
+            .pl(px_to_rems(indent))
     }
 
     /// A collection's or folder's row: the disclosure, the name, and no method badge.
@@ -527,31 +531,19 @@ fn visible_rows(snapshot: &WorkspaceSnapshot, expanded: &BTreeSet<ItemId>) -> Ve
         }
     }
 
-    // The roots: every collection — a workspace has no root `order` array to follow, so
-    // they sort by name — plus any folder or request no parent's `order` claims. Those
-    // orphans are a merge or hand-placement artifact (REQ-COLLAB-02) and drawing them at
-    // the root keeps every file on disk reachable (`Decision:`).
-    let mut roots: Vec<(String, ItemId)> = snapshot
-        .items
-        .iter()
-        .filter(|(id, item)| {
-            matches!(item.body, ItemBody::Collection(_))
-                || (matches!(item.body, ItemBody::Folder(_) | ItemBody::Request(_))
-                    && !has_parent.contains(id))
-        })
-        .map(|(id, item)| (item.name(), *id))
-        .collect();
-    roots.sort_by(|(left_name, left_id), (right_name, right_id)| {
-        left_name
-            .to_lowercase()
-            .cmp(&right_name.to_lowercase())
-            .then_with(|| left_name.cmp(right_name))
-            .then_with(|| left_id.cmp(right_id))
-    });
-
     let mut rows = Vec::new();
     let mut visited: BTreeSet<ItemId> = BTreeSet::new();
-    for (_, id) in roots {
+
+    // The root walk: every collection, once, in name order — a workspace has no root
+    // `order` array to follow. A collection is always drawn here and never nested inside
+    // another row; see [`push_rows`] for the `order` entries that claim one.
+    let collections: Vec<(String, ItemId)> = snapshot
+        .items
+        .iter()
+        .filter(|(_, item)| matches!(item.body, ItemBody::Collection(_)))
+        .map(|(id, item)| (item.name(), *id))
+        .collect();
+    for (_, id) in in_name_order(collections) {
         push_rows(
             snapshot,
             &children_in_order,
@@ -562,8 +554,80 @@ fn visible_rows(snapshot: &WorkspaceSnapshot, expanded: &BTreeSet<ItemId>) -> Ve
             &mut rows,
         );
     }
+
+    // The orphan roots: every folder or request no root's `order` chain can reach — a
+    // file no parent claims, or one only a cycle claims (a rename/rename merge artifact,
+    // REQ-COLLAB-02). A root can hold such an item back by being collapsed; an orphan
+    // has no root to hold it, so it draws here and every parsed item stays visible
+    // exactly once (`Decision:`).
+    let reachable = reachable_from_roots(snapshot, &children_in_order, &has_parent);
+    let orphans: Vec<(String, ItemId)> = snapshot
+        .items
+        .iter()
+        .filter(|(id, item)| {
+            matches!(item.body, ItemBody::Folder(_) | ItemBody::Request(_))
+                && !reachable.contains(id)
+        })
+        .map(|(id, item)| (item.name(), *id))
+        .collect();
+    for (_, id) in in_name_order(orphans) {
+        push_rows(
+            snapshot,
+            &children_in_order,
+            expanded,
+            &mut visited,
+            id,
+            0,
+            &mut rows,
+        );
+    }
+
     rows.extend(snapshot.problems.iter().map(problem_row));
     rows
+}
+
+/// Every item a root's `order` chain can reach — what the tree draws under a root once
+/// the user opens it, as opposed to what a collapsed root holds back. Seeded from the
+/// collections (always roots) and from any item no `order` claims (nothing to hold it
+/// back): only items trapped in a cycle with no entrance stay outside, and those become
+/// [`visible_rows`]' orphan roots.
+fn reachable_from_roots(
+    snapshot: &WorkspaceSnapshot,
+    children_in_order: &BTreeMap<ItemId, Vec<ItemId>>,
+    has_parent: &BTreeSet<ItemId>,
+) -> BTreeSet<ItemId> {
+    let mut frontier: Vec<ItemId> = snapshot
+        .items
+        .iter()
+        .filter(|(id, item)| {
+            matches!(item.body, ItemBody::Collection(_)) || !has_parent.contains(id)
+        })
+        .map(|(id, _)| *id)
+        .collect();
+    let mut reachable = BTreeSet::new();
+    while let Some(id) = frontier.pop() {
+        if !reachable.insert(id) {
+            // Already reached along another `order` chain — and a cycle must not spin.
+            continue;
+        }
+        if let Some(children) = children_in_order.get(&id) {
+            frontier.extend(children.iter().copied());
+        }
+    }
+    reachable
+}
+
+/// Root rows in their stable order: by name (case-insensitively first), then by id, so
+/// two runs over the same snapshot draw the same tree.
+fn in_name_order(mut named: Vec<(String, ItemId)>) -> Vec<(String, ItemId)> {
+    named.sort_by(|(left_name, left_id), (right_name, right_id)| {
+        left_name
+            .to_lowercase()
+            .cmp(&right_name.to_lowercase())
+            .then_with(|| left_name.cmp(right_name))
+            .then_with(|| left_id.cmp(right_id))
+    });
+    named
 }
 
 /// One item's row, and — while it is expanded — its children's, depth first in `order`.
@@ -578,14 +642,20 @@ fn push_rows(
     depth: usize,
     rows: &mut Vec<TreeRow>,
 ) {
-    if !visited.insert(id) {
-        return;
-    }
     let Some(item) = snapshot.items.get(&id) else {
         // An `order` entry whose file is gone: there is nothing to draw. The missing
         // file's story belongs to the watcher (S42a).
         return;
     };
+    if depth > 0 && matches!(item.body, ItemBody::Collection(_)) {
+        // A collection is always a root row, drawn once by the root walk. A merge
+        // artifact can claim one inside an `order`, and nesting it here would draw it
+        // in the wrong place and twice — so the walk skips it (`Decision:`).
+        return;
+    }
+    if !visited.insert(id) {
+        return;
+    }
     let name = SharedString::from(item.name());
     let is_expanded = expanded.contains(&id);
     match &item.body {
