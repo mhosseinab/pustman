@@ -7,7 +7,7 @@ the code disagree, the code is right and this file is a bug.
 > **Target — crates appear as steps land.** The layout below is the v1 target from
 > `docs/pustman-v1-plan.md` §3/§5 and `docs/PRD.md` §9. **Landed (S0–S25):** `api_model`,
 > `variables`, `workspace_store`, `storage`, `secrets`, `http_engine`, `pustman_actions`, `theme`,
-> `settings`, `ui`, `workspace`, `text_input`, `command_palette`, `pustman`, `console` (S32a), `history_panel` (S35a), `request_editor` (S26a), `environment_picker` (S34a), `response_viewer` (S29a), `integration_tests` (S37). **Pending (S26–S48):**
+> `settings`, `ui`, `workspace`, `text_input`, `command_palette`, `pustman`, `console` (S32a), `history_panel` (S35a), `request_editor` (S26a), `environment_picker` (S34a), `response_viewer` (S29a), `integration_tests` (S37), `collections_panel` (S39a: the virtualized tree). **Pending (S26–S48):**
 > every other v1 crate below (rows marked *(S26–S48)*). **Later milestones:** `websocket_client` (M4), `grpc_client` (M5), `mqtt_client` (M6).
 > Each step updates this file in the same commit as the code it adds.
 
@@ -26,7 +26,7 @@ the code disagree, the code is right and this file is a bug.
 | `http_engine` [GPUI] | HTTP/GraphQL/SSE transport (reqwest on `gpui_tokio`), auth helpers, cookies, TLS, redirects, timing | — | `http_engine::Transport` |
 | `pustman_actions` | every PRD action + default keymaps (D10); feature crates implement handlers | UI implementation crates | `pustman_actions::*` |
 | `theme`, `settings`, `ui`, `workspace`, `text_input` | design system, theming, typed settings, shell (Pane/Dock/ModalLayer, status bar, toasts, client-side title bar and resize frame, restore/autosave), text editing | domain crates never import these | `pub fn init(cx: &mut App)` (`ui`, `workspace`, `text_input`); `theme::init(cx) -> Result`; `settings::SettingsStore::init(cx, user_json) -> Result` |
-| `request_editor`, `response_viewer`, `environment_picker`, `history_panel`; `collections_panel` *(S39–S48)* | the Postman screens | each other, except along these edges (no cycles): `request_editor → response_viewer` (the response pane is part of a request tab), `history_panel → request_editor` (opening an entry restores a request tab); anything else coordinates through `workspace` | `init(cx)` |
+| `request_editor`, `response_viewer`, `environment_picker`, `history_panel`, `collections_panel` (S39a: virtualized tree from the `WorkspaceSnapshot` following `order`, method badges, expand/collapse, unreachable items drawn as orphan roots; navigation and opening tabs S39b) | the Postman screens | each other, except along these edges (no cycles): `request_editor → response_viewer` (the response pane is part of a request tab), `history_panel → request_editor` (opening an entry restores a request tab); anything else coordinates through `workspace` | `init(cx)` |
 | `command_palette` | the reusable modal picker (`Picker<D: PickerDelegate>`) and the fuzzy scorer (`fuzzy::score`/`fuzzy::rank`) that S34a, S41b and S46 build their pickers on; the command palette modal (`palette.rs`, S24b) | the feature crates that depend on it (it imports `workspace` only for `ModalView`/`toggle_modal`) | `command_palette::init` |
 | `integration_tests` *(S37, S47)* | end-to-end proofs (redaction test S37, sharing AC S47) | — | `crates/integration_tests/tests/` |
 | later milestones | `websocket_client` (M4), `grpc_client` (M5), `mqtt_client` (M6) — same `SessionEvent` shape (PRD §9) | UI crates | `connect()` per crate |
