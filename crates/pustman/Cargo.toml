@@ -24,6 +24,7 @@ collections_panel.workspace = true
 command_palette.workspace = true
 console.workspace = true
 environment_picker.workspace = true
+git = { workspace = true, features = ["gpui"] }
 gpui.workspace = true
 gpui_platform.workspace = true
 gpui_tokio.workspace = true
