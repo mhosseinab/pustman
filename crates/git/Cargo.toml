@@ -1,0 +1,21 @@
+# crates/git — thin wrapper over the user's own `git` CLI (REQ-COLLAB-03/04). Domain
+# crate: no GPUI. Every git command runs through `smol::process` so the UI never blocks.
+
+[package]
+name = "git"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/git.rs"
+
+[dependencies]
+smol.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
