@@ -4995,6 +4995,7 @@ dependencies = [
  "settings",
  "smol",
  "storage",
+ "tempfile",
  "text_input",
  "theme",
  "time",
@@ -8036,12 +8037,18 @@ name = "workspace"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "api_model",
  "gpui",
+ "log",
  "pustman_actions",
  "serde",
  "serde_json",
  "storage",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
  "ui",
+ "workspace_store",
 ]
 
 [[package]]

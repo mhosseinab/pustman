@@ -648,10 +648,11 @@ fn init_keymap(cx: &mut App) {
 }
 
 /// `storage`: the local store opened and migrated off the foreground thread (REQ-NFR-02),
-/// installed as [`AppStore`] when it lands, with [`install_environment_picker_inputs`] and
-/// [`install_cookie_wiring`] right behind it. A store that will not open falls back to an
-/// in-memory one so the app still runs — with an error toast, because nothing is saved
-/// then.
+/// installed as [`AppStore`] when it lands, with [`install_environment_picker_inputs`],
+/// [`install_cookie_wiring`] and `workspace::WorkspaceOpen::install_local_store` (the
+/// recent list and the launch reopen, REQ-WSP-05) right behind it. A store that will not
+/// open falls back to an in-memory one so the app still runs — with an error toast,
+/// because nothing is saved then.
 fn open_local_store(cx: &mut App, location: StoreLocation) {
     cx.spawn(async move |cx| {
         let startup = cx
@@ -662,11 +663,13 @@ fn open_local_store(cx: &mut App, location: StoreLocation) {
                 cx.set_global(AppStore(Arc::clone(&store)));
                 install_environment_picker_inputs(cx, &store);
                 install_cookie_wiring(cx, &store);
+                workspace::WorkspaceOpen::install_local_store(Arc::clone(&store), cx);
             }
             StoreStartup::Fallback { store, reason } => {
                 cx.set_global(AppStore(Arc::clone(&store)));
                 install_environment_picker_inputs(cx, &store);
                 install_cookie_wiring(cx, &store);
+                workspace::WorkspaceOpen::install_local_store(Arc::clone(&store), cx);
                 StartupProblems::push(
                     cx,
                     format!(
