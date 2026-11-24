@@ -18,6 +18,7 @@ mod key_value_table;
 mod method;
 mod new_request;
 mod params;
+mod read_only_wiring;
 mod response_split;
 pub mod save;
 pub mod send;
@@ -679,6 +680,7 @@ pub(crate) fn section_title(title: &'static str, selector: &'static str) -> impl
 /// `workspace::Save` handler that writes the active request to its file (`save`).
 pub fn init(cx: &mut App) {
     new_request::init(cx);
+    read_only_wiring::init(cx);
     save::init(cx);
 }
 
