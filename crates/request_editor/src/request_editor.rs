@@ -19,6 +19,7 @@ mod method;
 mod new_request;
 mod params;
 mod response_split;
+pub mod save;
 pub mod send;
 mod settings_tab;
 mod unresolved_warning;
@@ -674,9 +675,11 @@ pub(crate) fn section_title(title: &'static str, selector: &'static str) -> impl
 }
 
 /// Wire the request editor into the app: the app-level handlers behind
-/// `workspace::NewRequest` and `request::FocusUrlBar` (`new_request`).
+/// `workspace::NewRequest` and `request::FocusUrlBar` (`new_request`), and the
+/// `workspace::Save` handler that writes the active request to its file (`save`).
 pub fn init(cx: &mut App) {
     new_request::init(cx);
+    save::init(cx);
 }
 
 #[cfg(test)]

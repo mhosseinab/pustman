@@ -5438,10 +5438,12 @@ dependencies = [
  "response_viewer",
  "secrets",
  "serde_json",
+ "tempfile",
  "text_input",
  "ui",
  "variables",
  "workspace",
+ "workspace_store",
 ]
 
 [[package]]

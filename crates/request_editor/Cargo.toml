@@ -27,9 +27,11 @@ text_input.workspace = true
 ui.workspace = true
 variables.workspace = true
 workspace.workspace = true
+workspace_store.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
 http_engine = { workspace = true, features = ["test-support"] }
 secrets = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true
 ui = { workspace = true, features = ["test-support"] }
