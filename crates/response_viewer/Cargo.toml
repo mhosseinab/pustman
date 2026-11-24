@@ -18,6 +18,9 @@ path = "src/response_viewer.rs"
 anyhow.workspace = true
 api_model.workspace = true
 cookie_store.workspace = true
+# The "Set <name>" flow opens `environment_picker`'s variables editor on the secret's own
+# row and re-reads the keychain through its `secret_values` — the one keychain path.
+environment_picker.workspace = true
 gpui.workspace = true
 hex.workspace = true
 http_engine.workspace = true
@@ -49,4 +52,7 @@ tokio.workspace = true
 tempfile.workspace = true
 ui = { workspace = true, features = ["test-support"] }
 url.workspace = true
+# The set-secret test builds the variables editor's inputs from a real workspace item
+# (`EditTarget::new`), the shape `workspace_store::open` hands the app.
+workspace_store.workspace = true
 variables.workspace = true

@@ -5522,6 +5522,7 @@ dependencies = [
  "anyhow",
  "api_model",
  "cookie_store",
+ "environment_picker",
  "gpui",
  "hex",
  "http_engine",
@@ -5542,6 +5543,7 @@ dependencies = [
  "url",
  "variables",
  "workspace",
+ "workspace_store",
 ]
 
 [[package]]
