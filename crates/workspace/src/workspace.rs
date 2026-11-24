@@ -13,6 +13,7 @@ mod modal_layer;
 mod pane;
 mod pane_tabs;
 mod panel;
+pub mod read_only;
 mod restore;
 mod status_bar;
 mod title_bar;
@@ -34,8 +35,8 @@ pub use welcome::Welcome;
 pub use workspace_open::{OpenedWorkspace, WorkspaceOpen, WorkspaceOpenEvent};
 
 use gpui::{
-    App, Context, Decorations, Entity, FocusHandle, Focusable, ParentElement, Render, WeakEntity,
-    Window,
+    App, Context, Decorations, Entity, FocusHandle, Focusable, ParentElement, Render, Subscription,
+    WeakEntity, Window,
 };
 use pustman_actions::workspace::{
     CloseTab, NewRequest, NewTab, NextTab, PreviousTab, ToggleConsole, ToggleSidebar,
@@ -68,6 +69,10 @@ pub struct Workspace {
     title_bar: Entity<TitleBar>,
     toasts: Entity<ui::Toasts>,
     modal_layer: ModalLayer,
+    /// The subscriptions that keep this window's state in step with the world outside —
+    /// the read-only watch on its [`crate::workspace_open::WorkspaceOpen`] today. Dropped
+    /// with the workspace, so no watch outlives its window.
+    _subscriptions: Vec<Subscription>,
     /// The window's tab restore, once [`crate::Restore::attach`] hands it over: closing
     /// the window — including the title-bar Close control this shell draws itself —
     /// flushes its pending save through it before the window goes (issue #85).
@@ -92,6 +97,7 @@ impl Workspace {
             title_bar: cx.new(TitleBar::new),
             toasts: cx.new(Toasts::new),
             modal_layer: ModalLayer::default(),
+            _subscriptions: Vec::new(),
             restore: None,
         }
     }
@@ -208,6 +214,8 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::close_tab))
             .on_action(cx.listener(Self::next_tab))
             .on_action(cx.listener(Self::previous_tab))
+            .on_action(cx.listener(Self::save))
+            .on_action(cx.listener(Self::save_all))
             .on_action(cx.listener(Self::close_window))
             .bg(cx.theme().colors().background)
             // Only a client-decorated window draws its own title bar; the compositor draws
@@ -215,6 +223,9 @@ impl Render for Workspace {
             .when(matches!(decorations, Decorations::Client { .. }), |shell| {
                 shell.child(self.title_bar.clone())
             })
+            // The read-only banner states the workspace's one caveat at the top of the
+            // shell (REQ-WSP-04), above the docks where the user looks for it.
+            .children(read_only::is_read_only(cx).then(read_only::banner))
             // The docks and the pane share the rows above the console.
             .child(
                 h_flex()
@@ -257,6 +268,7 @@ impl Render for Workspace {
 /// step) grows it.
 pub fn init(cx: &mut App) {
     workspace_open::init(cx);
+    read_only::init(cx);
 }
 
 #[cfg(test)]
