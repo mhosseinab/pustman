@@ -13,6 +13,7 @@
 mod auth_tab;
 mod body_tab;
 mod curl_paste;
+pub mod disk_change;
 mod headers;
 mod key_value_table;
 mod method;
@@ -81,6 +82,18 @@ pub struct RequestEditor {
     /// The request as of the last save. The dirty dot compares against it, so an edit
     /// and then its undo leave the tab clean.
     saved: HttpRequest,
+    /// The "Changed on disk" bar's state while the file behind this tab changed under a
+    /// dirty draft (`disk_change`, REQ-COLLAB-01).
+    disk_change: Option<disk_change::DiskChange>,
+    /// The banner's message while this tab's file is gone from disk or cannot be read
+    /// (`disk_change`, #308, REQ-COLLAB-02).
+    file_gone: Option<SharedString>,
+    /// The watcher over this tab's workspace folder and the pump that turns its file
+    /// changes into this tab's reloads and bars (`disk_change`). Dropping the tab drops
+    /// the watcher and cancels the pump.
+    disk_watch: Option<disk_change::DiskWatch>,
+    /// Kept so this tab's watcher follows its window's workspace opens (`disk_change`).
+    _disk_open_subscription: Option<Subscription>,
     url_bar: Entity<UrlBar>,
     /// The request tab strip (Params, Headers and Body; later tabs append).
     tab_bar: Entity<TabBar>,
@@ -272,6 +285,10 @@ impl RequestEditor {
             focus_handle: cx.focus_handle().tab_stop(true),
             saved: request.clone(),
             draft: request,
+            disk_change: None,
+            file_gone: None,
+            disk_watch: None,
+            _disk_open_subscription: None,
             url_bar,
             tab_bar,
             active_tab: PARAMS_TAB_INDEX,
@@ -601,6 +618,10 @@ impl Render for RequestEditor {
             .px(DynamicSpacing::Base12.rems(cx))
             .pt(DynamicSpacing::Base12.rems(cx))
             .gap(DynamicSpacing::Base06.rems(cx))
+            // The changed-on-disk bar and its file-gone banner, above everything else
+            // in the tab: they are about the tab's content as a whole (`disk_change`).
+            .children(self.render_file_gone(cx))
+            .children(self.render_disk_change(cx))
             // The pre-send unresolved-variable warning bar, above the URL bar
             // (REQ-VAR-07).
             .children(self.render_unresolved_warning(cx))
@@ -640,12 +661,20 @@ impl Render for RequestEditor {
                     .flex_1()
                     .min_h_0()
                     .min_w_0()
-                    .map(|this| match self.active_tab {
-                        HEADERS_TAB_INDEX => this.child(self.headers.clone()),
-                        BODY_TAB_INDEX => this.child(self.body_tab.clone()),
-                        AUTH_TAB_INDEX => this.child(self.auth_tab.clone()),
-                        SETTINGS_TAB_INDEX => this.child(self.settings_tab.clone()),
-                        _ => this.child(self.params.clone()),
+                    .map(|this| {
+                        // Compare's side-by-side field diff takes the content region
+                        // while it is open (`disk_change`).
+                        if let Some(compare) = self.render_compare(cx) {
+                            this.child(compare)
+                        } else {
+                            match self.active_tab {
+                                HEADERS_TAB_INDEX => this.child(self.headers.clone()),
+                                BODY_TAB_INDEX => this.child(self.body_tab.clone()),
+                                AUTH_TAB_INDEX => this.child(self.auth_tab.clone()),
+                                SETTINGS_TAB_INDEX => this.child(self.settings_tab.clone()),
+                                _ => this.child(self.params.clone()),
+                            }
+                        }
                     }),
             )
             .into_any_element();
@@ -682,6 +711,7 @@ pub fn init(cx: &mut App) {
     new_request::init(cx);
     read_only_wiring::init(cx);
     save::init(cx);
+    disk_change::init(cx);
 }
 
 #[cfg(test)]
@@ -711,3 +741,7 @@ mod section_title_tests;
 #[cfg(test)]
 #[path = "save_order_tests.rs"]
 mod save_order_tests;
+
+#[cfg(test)]
+#[path = "file_follow_tests.rs"]
+mod file_follow_tests;

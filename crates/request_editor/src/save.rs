@@ -107,9 +107,10 @@ pub fn file_for(id: &ItemId, cx: &App) -> Option<RequestFile> {
     })
 }
 
-/// Keep [`RequestFiles`]' copy of `item` in step with the file a save just wrote, so a
-/// later save or failure toast speaks about where the request lives now.
-fn record_placement(root: &Path, item: Item, cx: &mut App) {
+/// Keep [`RequestFiles`]' copy of `item` in step with the file a save just wrote — or
+/// that a rename on disk moved (`disk_change`) — so a later save or failure toast
+/// speaks about where the request lives now.
+pub(super) fn record_placement(root: &Path, item: Item, cx: &mut App) {
     let Some(files) = cx.try_global::<RequestFiles>() else {
         return;
     };
@@ -119,6 +120,22 @@ fn record_placement(root: &Path, item: Item, cx: &mut App) {
             file.item = item.clone();
         }
     }
+    cx.set_global(RequestFiles(files));
+}
+
+/// Drop `id`'s save target under `root` — the request's file is gone from the workspace
+/// (`disk_change`'s delete case, #308), so the next save reports "no file in a workspace
+/// yet" instead of resurrecting the file the workspace no longer has.
+pub(super) fn forget_placement(root: &Path, id: &ItemId, cx: &mut App) {
+    let Some(files) = cx.try_global::<RequestFiles>() else {
+        return;
+    };
+    let files = files
+        .0
+        .iter()
+        .filter(|file| !(file.root == root && file.item.id() == Some(*id)))
+        .cloned()
+        .collect::<Vec<_>>();
     cx.set_global(RequestFiles(files));
 }
 
@@ -322,7 +339,9 @@ fn target_name(root: &Path, item: &Item) -> String {
 /// or its root is not a [`Workspace`] (a bare test window) — is logged instead, so a
 /// failure is never dropped without a trace (AGENTS.md › errors reach the user). The
 /// message names the file and the reason only: never a request body, headers or secrets.
-fn show_toast(
+/// The message a toast shows; `pub(super)` so `disk_change` reports its watch failures
+/// through this one reach-through too (the module docs' "third wants it").
+pub(super) fn show_toast(
     window_handle: AnyWindowHandle,
     message: impl Into<SharedString>,
     level: Severity,
