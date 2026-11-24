@@ -1127,7 +1127,11 @@ version = "0.1.0"
 dependencies = [
  "api_model",
  "gpui",
+ "log",
  "request_editor",
+ "serde_json",
+ "tempfile",
+ "text_input",
  "ui",
  "workspace",
  "workspace_store",

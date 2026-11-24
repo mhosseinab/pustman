@@ -9,6 +9,7 @@
 //! - [`init`] — the app-level wiring this crate owns: every workspace window gets the
 //!   panel in its left dock.
 
+pub mod crud;
 pub mod navigation;
 pub mod tree;
 
@@ -20,6 +21,17 @@ pub use tree::{CollectionsTree, PANEL_ID, TreeRow};
 #[cfg(test)]
 #[path = "tree_orphans_tests.rs"]
 mod tree_orphans_tests;
+
+// The CRUD write-integrity tests (S40a fix 1) are wired here too, for the same reason:
+// outside `crud::`, so the step's `crud::` filter still selects exactly three.
+#[cfg(test)]
+#[path = "crud_integrity_tests.rs"]
+mod crud_integrity_tests;
+
+// And the queue's fresh-state tests (S40a fix 2), same shape again.
+#[cfg(test)]
+#[path = "crud_queue_tests.rs"]
+mod crud_queue_tests;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -67,6 +79,7 @@ pub fn init(cx: &mut App) {
         ._subscriptions
         .push(subscription);
     navigation::init(cx);
+    crud::init(cx);
 }
 
 /// The tree's content before a workspace is open (`workspace_open` is S41a): nothing to

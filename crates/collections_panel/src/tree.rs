@@ -18,12 +18,13 @@ use std::sync::Arc;
 use api_model::{ItemId, Request};
 use gpui::{
     AnyElement, ClickEvent, Context, Div, ElementId, FocusHandle, Focusable, InteractiveText,
-    Render, Role, SharedString, Stateful, Styled, StyledText, Window,
+    MouseButton, MouseDownEvent, Render, Role, SharedString, Stateful, Styled, StyledText, Window,
 };
 use ui::prelude::*;
 use workspace::{DockPosition, Panel};
 use workspace_store::{ItemBody, ItemProblem, ItemProblemKind, WorkspaceSnapshot};
 
+use crate::crud::Crud;
 use crate::navigation::{COLLECTIONS_TREE_CONTEXT, Navigation};
 
 #[cfg(test)]
@@ -143,6 +144,8 @@ pub struct CollectionsTree {
     /// The keyboard state: the selection, its scroll and the tabs Enter has opened
     /// ([`crate::navigation`]).
     pub(crate) navigation: Navigation,
+    /// The CRUD surface: the row menu and the inline rename field ([`crate::crud`]).
+    pub(crate) crud: Crud,
     focus_handle: FocusHandle,
 }
 
@@ -159,6 +162,7 @@ impl CollectionsTree {
             expanded: BTreeSet::new(),
             rows,
             navigation: Navigation::new(),
+            crud: Crud::new(),
             focus_handle,
         }
     }
@@ -254,6 +258,7 @@ impl CollectionsTree {
         // The selection's test hook, on the frame that draws the highlight.
         let selected_selector = selected.then(|| format!("{row_key}-selected"));
         let click_key = row_key.clone();
+        let menu_key = row_key.clone();
         h_flex()
             .id(ElementId::NamedChild(
                 Arc::new(row_key.clone()),
@@ -272,6 +277,15 @@ impl CollectionsTree {
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.click_row(click_key.clone(), request, window, cx);
             }))
+            // A right-click is this row's action menu, and only this row's: it stops the
+            // panel's own menu from opening behind it (S40a).
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.row_context_menu(menu_key.clone(), event.position, window, cx);
+                }),
+            )
             .when(selected, |row| row.bg(cx.theme().colors().element_selected))
             .when(!selected, |row| {
                 row.hover(|row| row.bg(cx.theme().colors().ghost_element_hover))
@@ -296,14 +310,7 @@ impl CollectionsTree {
             .aria_expanded(is_expanded)
             .child(self.disclosure(id, is_expanded, name.clone(), cx))
             .child(self.method_column(row_key, None, cx))
-            .child(row_label(
-                name,
-                ElementId::from(format!("{row_key}-name")),
-                LabelFont::Ui,
-                TextSize::Small,
-                Color::Default,
-                cx,
-            ))
+            .child(self.name_element(id, name, row_key, cx))
             .into_any_element()
     }
 
@@ -321,15 +328,30 @@ impl CollectionsTree {
         self.row_frame(depth, row_key, Some(id), cx)
             .child(div().flex_none().w(px_to_rems(DISCLOSURE_COLUMN_PX)))
             .child(self.method_column(row_key, Some(method), cx))
-            .child(row_label(
-                name,
-                ElementId::from(format!("{row_key}-name")),
-                LabelFont::Ui,
-                TextSize::Small,
-                Color::Default,
-                cx,
-            ))
+            .child(self.name_element(id, name, row_key, cx))
             .into_any_element()
+    }
+
+    /// The row's name: the inline rename field while this row is the one being renamed
+    /// (S40a), the plain truncated label otherwise.
+    fn name_element(
+        &self,
+        id: ItemId,
+        name: SharedString,
+        row_key: &ElementId,
+        cx: &App,
+    ) -> AnyElement {
+        if let Some(input) = self.crud.rename_input(id) {
+            return div().flex_1().min_w_0().child(input).into_any_element();
+        }
+        row_label(
+            name,
+            ElementId::from(format!("{row_key}-name")),
+            LabelFont::Ui,
+            TextSize::Small,
+            Color::Default,
+            cx,
+        )
     }
 
     /// A problem row: the error badge and what is wrong with which file — in the same
@@ -435,6 +457,26 @@ impl CollectionsTree {
             .on_action(cx.listener(Self::collapse_or_parent))
             .on_action(cx.listener(Self::expand_or_child))
             .on_action(cx.listener(Self::activate))
+            // The CRUD verbs (S40a): the row menu and its creates, and the rename,
+            // duplicate and delete the file-manager keys name.
+            .on_action(cx.listener(Self::show_row_actions))
+            .on_action(cx.listener(Self::new_collection))
+            .on_action(cx.listener(Self::new_folder))
+            .on_action(cx.listener(Self::new_request))
+            .on_action(cx.listener(Self::rename))
+            .on_action(cx.listener(Self::duplicate))
+            .on_action(cx.listener(Self::delete))
+            .on_action(cx.listener(Self::cancel))
+            // A right-click off the rows opens the one menu that needs no row: the
+            // workspace-level create (S40a).
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    this.open_row_menu(None, event.position, window, cx);
+                }),
+            )
+            // The open row menu floats above everything the panel draws.
+            .children(self.crud.menu_overlay(cx))
     }
 }
 
@@ -753,7 +795,7 @@ fn push_rows(
 }
 
 /// The child ids a container orders, if the item is a container at all.
-fn container_order(body: &ItemBody) -> Option<&Vec<ItemId>> {
+pub(crate) fn container_order(body: &ItemBody) -> Option<&Vec<ItemId>> {
     match body {
         ItemBody::Collection(collection) => Some(&collection.order),
         ItemBody::Folder(folder) => Some(&folder.order),
