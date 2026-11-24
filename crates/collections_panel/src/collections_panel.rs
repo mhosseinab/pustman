@@ -11,6 +11,7 @@
 
 pub mod crud;
 pub mod external;
+pub mod import;
 pub mod navigation;
 pub mod problems;
 pub mod reorder;
@@ -95,6 +96,7 @@ pub fn init(cx: &mut App) {
         .push(subscription);
     navigation::init(cx);
     crud::init(cx);
+    import::init(cx);
     reorder::init(cx);
     external::init(cx);
 }

@@ -1128,6 +1128,7 @@ dependencies = [
  "api_model",
  "gpui",
  "log",
+ "pustman_actions",
  "request_editor",
  "serde_json",
  "tempfile",
