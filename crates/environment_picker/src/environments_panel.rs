@@ -278,6 +278,7 @@ impl Render for EnvironmentsPanel {
                             .debug_selector(|| EMPTY_NEW_ID.to_owned())
                             .child(
                                 Button::new(EMPTY_NEW_ID, "New environment…")
+                                    .size(ButtonSize::Medium)
                                     .style(ButtonStyle::Outlined)
                                     .full_width()
                                     .start_icon(Icon::new(IconName::Plus))
@@ -317,6 +318,7 @@ impl Render for EnvironmentsPanel {
                     .child(
                         div().debug_selector(|| NEW_BUTTON_ID.to_owned()).child(
                             Button::new(NEW_BUTTON_ID, "New")
+                                .size(ButtonSize::Medium)
                                 .style(ButtonStyle::Tinted(TintColor::Accent))
                                 .start_icon(Icon::new(IconName::Plus))
                                 .tooltip(Tooltip::text("New environment"))
@@ -406,6 +408,7 @@ fn dispatch_button(
     let action = action.boxed_clone();
     div().debug_selector(move || id.to_owned()).child(
         Button::new(id, label)
+            .size(ButtonSize::Medium)
             .style(ButtonStyle::Outlined)
             .full_width()
             .start_icon(Icon::new(icon))

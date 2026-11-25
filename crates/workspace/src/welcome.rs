@@ -137,6 +137,7 @@ impl Welcome {
                     .child(
                         div().debug_selector(|| IMPORT_ID.to_owned()).child(
                             Button::new(IMPORT_ID, "Import from Postman…")
+                                .size(ButtonSize::Large)
                                 .style(ButtonStyle::Outlined)
                                 .disabled(true)
                                 .tooltip(Tooltip::text(
@@ -158,6 +159,7 @@ impl Welcome {
                     row.child(
                         div().debug_selector(|| NEW_COLLECTION_ID.to_owned()).child(
                             Button::new(NEW_COLLECTION_ID, "New collection…")
+                                .size(ButtonSize::Large)
                                 .style(ButtonStyle::Outlined)
                                 .start_icon(Icon::new(IconName::Folder))
                                 .on_click(|_, window, cx| {
@@ -252,6 +254,15 @@ impl Render for Welcome {
         let open_root = opener
             .as_ref()
             .and_then(|opener| opener.read(cx).root().map(Path::to_path_buf));
+        // The name the workspace file gives itself, falling back to the folder's.
+        let opened_name = opener.as_ref().and_then(|opener| {
+            opener.read(cx).snapshot().and_then(|snapshot| {
+                snapshot.items.values().find_map(|item| match &item.body {
+                    workspace_store::ItemBody::Workspace(document) => Some(document.name.clone()),
+                    _ => None,
+                })
+            })
+        });
         let offers_new_collection = workspace.as_ref().is_some_and(|workspace| {
             workspace
                 .read(cx)
@@ -261,7 +272,10 @@ impl Render for Welcome {
 
         let (title, description): (SharedString, SharedString) = match &open_root {
             Some(root) => (
-                workspace_name(root).into(),
+                opened_name
+                    .clone()
+                    .unwrap_or_else(|| workspace_name(root))
+                    .into(),
                 SharedString::new_static(
                     "Its collections and environments are in the sidebar. Start a request, \
                      or add a collection to keep requests together.",
@@ -361,6 +375,7 @@ fn action_button(
     let action = action.boxed_clone();
     div().debug_selector(move || id.to_owned()).child(
         Button::new(id, label)
+            .size(ButtonSize::Large)
             .style(style)
             .map(|button| match icon {
                 Some(icon) => button.start_icon(Icon::new(icon)),
@@ -378,6 +393,7 @@ fn new_request_row(cx: &App) -> impl IntoElement {
         .child(
             div().debug_selector(|| NEW_REQUEST_ID.to_owned()).child(
                 Button::new(NEW_REQUEST_ID, "New Request")
+                    .size(ButtonSize::Large)
                     .style(ButtonStyle::Outlined)
                     .start_icon(Icon::new(IconName::Plus))
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(NewTab), cx)),
