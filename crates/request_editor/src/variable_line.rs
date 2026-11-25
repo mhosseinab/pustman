@@ -35,6 +35,9 @@ use crate::variable_hover::{scope_kind_of, scope_label};
 /// Test hook: the variable line.
 pub const VARIABLE_LINE_SELECTOR: &str = "variable-line";
 
+/// The tallest the line grows (about three wrapped lines) before it scrolls.
+const VARIABLE_LINE_MAX_HEIGHT_PX: f32 = 72.;
+
 /// The variables editor's open action, owned by `environment_picker` (module docs).
 pub const OPEN_VARIABLES_EDITOR: &str = "env_editor::Open";
 
@@ -217,6 +220,10 @@ impl RequestEditor {
             .debug_selector(|| VARIABLE_LINE_SELECTOR.to_string())
             .flex_wrap()
             .min_w_0()
+            .flex_none()
+            // Capped and scrolling: many variables never push the tab out of view.
+            .max_h(px_to_rems(VARIABLE_LINE_MAX_HEIGHT_PX))
+            .overflow_y_scroll()
             .gap_x(DynamicSpacing::Base12.rems(cx))
             .gap_y(DynamicSpacing::Base02.rems(cx))
             .py(DynamicSpacing::Base04.rems(cx));
