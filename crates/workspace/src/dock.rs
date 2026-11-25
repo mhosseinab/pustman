@@ -11,6 +11,7 @@ use gpui::{AnyView, Context, FocusHandle, IntoElement, ParentElement, Render, Ro
 use pustman_actions::palette;
 use std::cmp::Ordering;
 use ui::prelude::*;
+use ui::{SelectNext, SelectPrevious};
 
 use crate::panel::PanelHandle;
 
@@ -23,6 +24,18 @@ const RAIL_WIDTH_PX: f32 = 48.;
 /// One rail entry's box: the blueprint's 38 × 40 px item.
 const RAIL_ITEM_WIDTH_PX: f32 = 38.;
 const RAIL_ITEM_HEIGHT_PX: f32 = 40.;
+
+/// The key context the rail answers Up and Down in ([`init`]).
+const RAIL_CONTEXT: &str = "DockRail";
+
+/// Bind the rail's arrows: Up and Down move the keyboard between its entries (#333);
+/// Enter and Space on the focused entry activate it, as a click does.
+pub(crate) fn init(cx: &mut App) {
+    cx.bind_keys([
+        gpui::KeyBinding::new("up", SelectPrevious, Some(RAIL_CONTEXT)),
+        gpui::KeyBinding::new("down", SelectNext, Some(RAIL_CONTEXT)),
+    ]);
+}
 
 /// The rail's Help entry: its element id and test selector.
 pub(crate) const RAIL_HELP_ID: &str = "dock-rail-help";
@@ -219,6 +232,41 @@ impl Dock {
             .map(|(_, handle)| handle)
     }
 
+    /// Up/Down on the rail: move the keyboard to the entry above or below the focused
+    /// one, wrapping at the ends. Focus only — Enter or Space then switches the view, so
+    /// walking the rail never yanks the sidebar around.
+    fn step_rail_focus(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let count = self.rail_focus.len();
+        let Some(current) = self
+            .rail_focus
+            .iter()
+            .position(|(_, handle)| handle.is_focused(window))
+        else {
+            return;
+        };
+        let next = if forward {
+            (current + 1) % count
+        } else {
+            (current + count - 1) % count
+        };
+        if let Some((_, handle)) = self.rail_focus.get(next) {
+            window.focus(handle, cx);
+        }
+    }
+
+    fn rail_select_next(&mut self, _: &SelectNext, window: &mut Window, cx: &mut Context<Self>) {
+        self.step_rail_focus(true, window, cx);
+    }
+
+    fn rail_select_previous(
+        &mut self,
+        _: &SelectPrevious,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.step_rail_focus(false, window, cx);
+    }
+
     /// The active panel's id, if this dock holds a panel.
     pub fn active_panel_id(&self, cx: &App) -> Option<&'static str> {
         self.active_panel
@@ -244,6 +292,9 @@ impl Dock {
         v_flex()
             .id("dock-rail")
             .debug_selector(|| "dock-rail".to_owned())
+            .key_context(RAIL_CONTEXT)
+            .on_action(cx.listener(Self::rail_select_next))
+            .on_action(cx.listener(Self::rail_select_previous))
             .role(Role::TabList)
             .aria_label(SharedString::new_static("Sidebar views"))
             .flex_none()
@@ -546,3 +597,7 @@ mod header_tests;
 #[cfg(test)]
 #[path = "dock_rail_tests.rs"]
 mod rail_tests;
+
+#[cfg(test)]
+#[path = "dock_rail_keys_tests.rs"]
+mod rail_keys_tests;

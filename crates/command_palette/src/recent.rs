@@ -1,16 +1,13 @@
 //! `OpenRecent` (PRD REQ-WSP-05): a picker over the recent workspaces, newest first —
 //! Enter opens the chosen folder in this window.
 //!
-//! The rows are `storage`'s `recent_workspaces` — the rows [`WorkspaceOpen`] records on
-//! every open and the launch reopen reads. `Decision:` they are read on a background
-//! task and offered newest first ([`storage`] orders them by `opened_at` descending): a
-//! database read is IO and never belongs on the foreground thread (AGENTS.md › async).
-//!
-//! `Decision:` the list is read from the app's one local store through
-//! [`WorkspaceOpen::local_store`] — the store [`WorkspaceOpen`] already holds (S41a's
-//! `install_local_store`), so the shipped app lists recents with no further wiring. A
-//! picker opened before the store lands says so in a toast (AGENTS.md › errors reach the
-//! user) instead of silently listing nothing.
+//! The rows are the app's one recent list, `workspace::recent_workspaces` (#332/#333) —
+//! the list the title bar's switcher, File › Open recent and the welcome pane read too.
+//! `Decision:` opening the picker re-reads that list first
+//! ([`reload_recent_workspaces`], a background read of `storage`'s rows, newest first)
+//! so a row recorded since the last open is offered; the picker then lists the global
+//! the read installed. A picker opened before the store lands says so in a toast
+//! (AGENTS.md › errors reach the user) instead of silently listing nothing.
 //!
 //! `Decision:` a recent folder that no longer exists is left out of the list rather than
 //! offered and then refused (issues #304/#305: the store neither canonicalizes its paths
@@ -31,6 +28,7 @@ use gpui::{AnyElement, App, Context, DismissEvent, ElementId, Entity, SharedStri
 use pustman_actions::workspace::OpenRecent;
 use storage::LocalStore;
 use ui::prelude::*;
+use workspace::recent_workspaces::{RecentReadError, recent_workspaces, reload_recent_workspaces};
 use workspace::{Workspace, WorkspaceOpen};
 
 use crate::fuzzy;
@@ -73,17 +71,6 @@ pub struct RecentInputs {
 /// through [`WorkspaceOpen::local_store`] either way.
 pub fn install_inputs(cx: &mut App, inputs: RecentInputs) {
     WorkspaceOpen::install_local_store(inputs.store, cx);
-}
-
-/// What one background read of the recent list produced.
-enum Listing {
-    /// The recorded folders that still exist, newest first.
-    Folders(Vec<PathBuf>),
-    /// The list could not be read (see [`READ_FAILURE_MESSAGE`]).
-    Failed,
-    /// No store is installed yet ([`WorkspaceOpen::local_store`] is [`None`]; see
-    /// [`NOT_WIRED_MESSAGE`]).
-    NotWired,
 }
 
 /// The delegate behind the picker: the recent workspaces newest first, fuzzy-filtered by
@@ -212,24 +199,22 @@ pub fn init(cx: &mut App) {
     cx.on_action(open_recent);
 }
 
-/// Open the picker in the active window. The list is read on a background task first
-/// (AGENTS.md › async), so this only starts the read; the picker opens from its
-/// continuation, and every outcome that is not a list reaches the user as a toast.
+/// Open the picker in the active window. The app's recent list is re-read on a
+/// background task first (AGENTS.md › async), so this only starts the read; the picker
+/// opens from its continuation over the list the read installed, and every outcome that
+/// is not a list reaches the user as a toast.
 fn open_recent(_: &OpenRecent, cx: &mut App) {
     let Some(window_handle) = cx.active_window() else {
         return;
     };
-    let store = WorkspaceOpen::local_store(cx);
+    let reload = reload_recent_workspaces(cx);
     cx.spawn(async move |cx| {
-        let listing = match store {
-            Some(store) => {
-                cx.background_executor()
-                    .spawn(async move { recent_folders(&store) })
-                    .await
-            }
-            None => Listing::NotWired,
-        };
+        let read = reload.await;
         let shown = cx.update(|cx| {
+            let folders: Vec<PathBuf> = recent_workspaces(cx)
+                .iter()
+                .map(|entry| entry.path.clone())
+                .collect();
             window_handle.update(cx, |root, window, cx| {
                 let Ok(workspace_handle) = root.downcast::<Workspace>() else {
                     return;
@@ -240,19 +225,19 @@ fn open_recent(_: &OpenRecent, cx: &mut App) {
                         workspace.show_toast(NO_WORKSPACE_MESSAGE, Severity::Error, None, cx);
                         return;
                     };
-                    match listing {
-                        Listing::Folders(folders) if !folders.is_empty() => {
+                    match read {
+                        Ok(()) if !folders.is_empty() => {
                             workspace.toggle_modal(window, cx, |window, cx| {
                                 Picker::new(RecentDelegate::new(opener, folders), window, cx)
                             });
                         }
-                        Listing::Folders(_) => {
+                        Ok(()) => {
                             workspace.show_toast(EMPTY_MESSAGE, Severity::Info, None, cx);
                         }
-                        Listing::Failed => {
+                        Err(RecentReadError::Unreadable) => {
                             workspace.show_toast(READ_FAILURE_MESSAGE, Severity::Error, None, cx);
                         }
-                        Listing::NotWired => {
+                        Err(RecentReadError::NotConnected) => {
                             workspace.show_toast(NOT_WIRED_MESSAGE, Severity::Error, None, cx);
                         }
                     }
@@ -267,29 +252,6 @@ fn open_recent(_: &OpenRecent, cx: &mut App) {
     .detach();
 }
 
-/// The recent workspaces to offer, off the foreground thread (AGENTS.md › async): the
-/// rows `storage` records, newest first, minus the folders that no longer exist (the
-/// module docs on issues #304/#305). The rows are read under the store's lock and the
-/// folders statted after it is released: a stat per row is IO the store's other users
-/// must not wait on (the review's LOW).
-fn recent_folders(store: &Mutex<LocalStore>) -> Listing {
-    let recorded = {
-        let Ok(store) = store.lock() else {
-            // A poisoned lock means another writer panicked mid-row; the list is unreadable.
-            return Listing::Failed;
-        };
-        let Ok(recents) = store.recent_workspaces().list() else {
-            return Listing::Failed;
-        };
-        recents
-            .into_iter()
-            .map(|recent| PathBuf::from(recent.path))
-            .collect::<Vec<_>>()
-    };
-    Listing::Folders(
-        recorded
-            .into_iter()
-            .filter(|folder| folder.is_dir())
-            .collect(),
-    )
-}
+#[cfg(test)]
+#[path = "recent_single_source_tests.rs"]
+mod single_source_tests;

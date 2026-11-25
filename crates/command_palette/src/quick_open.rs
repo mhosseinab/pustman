@@ -257,34 +257,13 @@ fn open_request(id: ItemId, display: String, window: &mut Window, cx: &mut App) 
 
 /// The [`RequestEditor`] tab already showing `id`'s request, with its tab made active —
 /// or [`None`] when no tab holds it. One request owns one tab however it was opened
-/// (REQ-UI-02), so the search covers the tree's opens, a restored session's and a
-/// history open's just the same.
-///
-/// `Decision:` the search walks the tabs by activating each one and reading
-/// [`workspace::Pane::active_item`]: `Pane`'s public API hands out tab entity ids and
-/// the active tab only and GPUI has no entity lookup by id. The walk ends on the found
-/// tab — where the confirm wants it anyway — or restores the tab the user had, and it
-/// runs inside one update, so it draws no intermediate frame. S50e's
-/// `request_editor::open_item` registry — or a `Pane` accessor that hands out its
-/// [`workspace::ItemHandle`]s — replaces this walk.
+/// (REQ-UI-02), so the match is by the item id a request tab persists under: the tree's
+/// opens, a restored session's and a history open's alike.
 fn find_editor(pane: &Entity<Pane>, id: ItemId, cx: &mut App) -> Option<Entity<RequestEditor>> {
-    let tab_count = pane.read(cx).item_ids().len();
-    let original = pane.read(cx).active_index();
-    for index in 0..tab_count {
-        pane.update(cx, |pane, cx| pane.set_active_index(index, cx));
-        let candidate = pane
-            .read(cx)
-            .active_item()
-            .map(|item| item.to_any_view())
-            .and_then(|view| view.downcast::<RequestEditor>().ok());
-        if let Some(editor) = candidate
-            && editor.read(cx).draft().id == id
-        {
-            return Some(editor);
-        }
-    }
-    pane.update(cx, |pane, cx| pane.set_active_index(original, cx));
-    None
+    pane.update(cx, |pane, cx| {
+        pane.activate_item_with_persistent_id(&id.to_string(), cx)
+    })
+    .and_then(|view| view.downcast::<RequestEditor>().ok())
 }
 
 /// The workspace's requests as quick open's rows: every request the snapshot holds, with

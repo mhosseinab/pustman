@@ -21,12 +21,17 @@ use pustman_actions::workspace as shell;
 use pustman_actions::{environment, import_export, palette, quick_open, request};
 use text_input::input as edit;
 use workspace::recent_workspaces::{
-    OpenRecentWorkspace, RecentEntry, RecentWorkspaces, disambiguation, recent_workspaces,
+    OpenRecentWorkspace, RECENT_READ_FAILED_LABEL, RecentEntry, RecentWorkspaces, disambiguation,
+    recent_workspaces, recent_workspaces_failed,
 };
 
 #[cfg(test)]
 #[path = "app_menus_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "app_menus_failure_tests.rs"]
+mod failure_tests;
 
 /// File › Open recent: the recent workspaces, newest first, and the picker over them.
 pub const OPEN_RECENT_MENU: &str = "Open recent";
@@ -35,6 +40,12 @@ pub const OPEN_RECENT_MENU: &str = "Open recent";
 /// names — the names the title bar's switcher shows — with the folder added only where
 /// two share a name.
 pub fn app_menus(recents: &[RecentEntry]) -> Vec<Menu> {
+    app_menus_for(recents, false)
+}
+
+/// The model as [`app_menus`] builds it, with File › Open recent saying so when the last
+/// read of the recent list failed (`read_failed`, #332): a disabled row at its top.
+pub fn app_menus_for(recents: &[RecentEntry], read_failed: bool) -> Vec<Menu> {
     let mut open_recent: Vec<MenuItem> = recents
         .iter()
         .enumerate()
@@ -43,10 +54,16 @@ pub fn app_menus(recents: &[RecentEntry]) -> Vec<Menu> {
                 Some(path) => format!("{} — {path}", recent.name),
                 None => recent.name.clone(),
             };
-            let path = recent.path.to_string_lossy().into_owned();
-            MenuItem::action(label, OpenRecentWorkspace { path })
+            MenuItem::action(label, OpenRecentWorkspace::for_folder(&recent.path))
         })
         .collect();
+    if read_failed {
+        // Disabled, so it never runs: the action only gives the row a native form.
+        open_recent.insert(
+            0,
+            MenuItem::action(RECENT_READ_FAILED_LABEL, shell::OpenRecent).disabled(true),
+        );
+    }
     if !open_recent.is_empty() {
         open_recent.push(MenuItem::separator());
     }
@@ -119,6 +136,6 @@ pub fn init(cx: &mut App) {
 }
 
 fn install(cx: &mut App) {
-    let menus = app_menus(recent_workspaces(cx));
+    let menus = app_menus_for(recent_workspaces(cx), recent_workspaces_failed(cx));
     workspace::install_app_menus(menus, cx);
 }

@@ -7,10 +7,8 @@
 //! actions (`pustman_actions`), while these are one component's navigation gestures —
 //! the same split `ui::init` draws for its `TabBar` and menus.
 
-use std::collections::BTreeMap;
-
 use api_model::{ItemId, Request};
-use gpui::{Entity, ScrollStrategy, UniformListScrollHandle, WeakEntity};
+use gpui::{ScrollStrategy, UniformListScrollHandle};
 use request_editor::RequestEditor;
 use ui::prelude::*;
 use workspace::Workspace;
@@ -55,18 +53,14 @@ pub(crate) struct Navigation {
     /// The list's scroll state, so a selection that moves off screen scrolls back into
     /// view ([`ui::VirtualList::track_scroll`]).
     scroll_handle: UniformListScrollHandle,
-    /// The tabs Enter has opened, keyed by request id. A weak handle per tab: closing the
-    /// tab releases its editor and the next Enter opens a fresh one.
-    open_tabs: BTreeMap<ItemId, WeakEntity<RequestEditor>>,
 }
 
 impl Navigation {
-    /// No selection yet, and no tabs opened.
+    /// No selection yet.
     pub(crate) fn new() -> Self {
         Self {
             selected: None,
             scroll_handle: UniformListScrollHandle::new(),
-            open_tabs: BTreeMap::new(),
         }
     }
 
@@ -100,18 +94,6 @@ impl Navigation {
         self.selected = Some(key);
         self.scroll_handle
             .scroll_to_item(index, ScrollStrategy::Nearest);
-    }
-
-    /// The [`RequestEditor`] Enter opened for `id`, if its tab is still alive.
-    fn open_tab(&self, id: &ItemId) -> Option<Entity<RequestEditor>> {
-        self.open_tabs.get(id).and_then(WeakEntity::upgrade)
-    }
-
-    /// Remember `editor` as `id`'s tab, dropping the entries whose tabs are gone so the
-    /// map cannot grow past the requests the user has opened.
-    fn remember_open_tab(&mut self, id: ItemId, editor: &Entity<RequestEditor>) {
-        self.open_tabs.retain(|_, open| open.upgrade().is_some());
-        self.open_tabs.insert(id, editor.downgrade());
     }
 }
 
@@ -292,14 +274,10 @@ impl CollectionsTree {
     }
 
     /// Enter's open: the request's tab in the workspace's center pane. One tab per
-    /// request (REQ-UI-02): a request that already has a tab gets that tab activated and
-    /// focused instead of a second one.
-    ///
-    /// `Decision:` the panel tracks the tabs it opens itself, keyed by [`ItemId`].
-    /// `Pane`'s public API hands out the tabs' entity ids and the active tab only, so a
-    /// tab another opener created — a restored session's — cannot be found by request id
-    /// from here; the pane itself tolerates two tabs naming one item (its `Restore`
-    /// says so), and the panel's own opens never make a second one.
+    /// request (REQ-UI-02): a request that already has a tab — whoever opened it, a
+    /// restored session included (#333) — gets that tab activated and focused instead of
+    /// a second one. Tabs are matched by the request's item id, the id a request tab
+    /// persists under.
     pub(crate) fn open_request(&mut self, id: ItemId, window: &mut Window, cx: &mut Context<Self>) {
         // The request the row names, straight out of the snapshot the rows came from.
         let request = match self.snapshot.items.get(&id).map(|item| &item.body) {
@@ -319,21 +297,14 @@ impl CollectionsTree {
             return;
         };
         let pane = workspace.read(cx).center_pane().clone();
-        if let Some(editor) = self.navigation.open_tab(&id) {
-            let entity_id = editor.entity_id();
-            let open_at = pane
-                .read(cx)
-                .item_ids()
-                .iter()
-                .position(|tab| *tab == entity_id);
-            if let Some(index) = open_at {
-                pane.update(cx, |pane, cx| pane.set_active_index(index, cx));
-                editor.update(cx, |editor, cx| editor.focus_url_bar(window, cx));
-                return;
-            }
+        let open = pane.update(cx, |pane, cx| {
+            pane.activate_item_with_persistent_id(&id.to_string(), cx)
+        });
+        if let Some(editor) = open.and_then(|view| view.downcast::<RequestEditor>().ok()) {
+            editor.update(cx, |editor, cx| editor.focus_url_bar(window, cx));
+            return;
         }
         let editor = cx.new(|cx| RequestEditor::new(request, window, cx));
-        self.navigation.remember_open_tab(id, &editor);
         pane.update(cx, |pane, cx| pane.add_tab_item(editor.clone(), cx));
         editor.update(cx, |editor, cx| editor.focus_url_bar(window, cx));
     }
@@ -364,3 +335,7 @@ impl CollectionsTree {
 #[cfg(test)]
 #[path = "navigation_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "navigation_restored_tab_tests.rs"]
+mod restored_tab_tests;
