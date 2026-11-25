@@ -239,3 +239,30 @@ fn test_no_text_the_line_renders_carries_a_secret_value(cx: &mut TestAppContext)
     });
     assert_eq!(secret_tooltip, None, "a masked secret has no value tooltip");
 }
+
+/// After "Set it…" stores the secret, the app's scope wire hands the editor sources
+/// whose lookup now names the keychain entry; the line flips to the mask with no edit.
+#[gpui::test]
+fn test_a_stored_secret_flips_the_line_to_resolved_without_an_edit(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx);
+    assert!(matches!(
+        state_of(&editor, cx, "token"),
+        EntryState::Unresolved { .. }
+    ));
+
+    let sources = crate::SecretSources {
+        store: std::sync::Arc::new(secrets::MemorySecretStore::new()),
+        key_of: std::sync::Arc::new(|_kind, name| {
+            secrets::SecretKey::new("workspace-example", "scope-example", name).ok()
+        }),
+    };
+    cx.update(|_, cx| editor.update(cx, |editor, cx| editor.set_secret_sources(sources, cx)));
+
+    assert!(
+        matches!(
+            state_of(&editor, cx, "token"),
+            EntryState::Resolved { secret: true, .. }
+        ),
+        "the stored secret now resolves, shown as the mask"
+    );
+}
