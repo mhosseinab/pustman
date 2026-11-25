@@ -155,7 +155,10 @@ fn save_response_button(id: ElementId) -> impl IntoElement {
             Button::new(id, "Save response")
                 .style(ButtonStyle::Subtle)
                 .start_icon(Icon::new(IconName::Download).size(IconSize::Small))
-                .tooltip(Tooltip::for_action("Save the response body to a file", &SaveBody))
+                .tooltip(Tooltip::for_action(
+                    "Save the response body to a file",
+                    &SaveBody,
+                ))
                 .on_click(|_event, window, cx| window.dispatch_action(Box::new(SaveBody), cx)),
         )
 }
@@ -296,3 +299,7 @@ mod tests;
 #[cfg(test)]
 #[path = "response_header_tests.rs"]
 mod response_header_tests;
+
+#[cfg(test)]
+#[path = "response_area_tests.rs"]
+mod response_area_tests;

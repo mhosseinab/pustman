@@ -407,7 +407,8 @@ impl BodyView {
             .item
             .height;
         let first = ((scroll_top / row_height).floor().max(0.) as usize).min(total - 1);
-        let last = (((scroll_top + viewport) / row_height).floor() as usize).clamp(first + 1, total);
+        let last =
+            (((scroll_top + viewport) / row_height).floor() as usize).clamp(first + 1, total);
         Some((first + 1, last, total))
     }
 

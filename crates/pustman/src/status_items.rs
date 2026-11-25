@@ -24,11 +24,11 @@
 //! ([`collapse_console`]): a saved layout, restored after, wins.
 
 use console::ConsoleStore;
-use pustman_actions::cookies::Manage;
-use pustman_actions::workspace::{ToggleConsole, ToggleSidebar};
 use environment_picker::SelectorInputs;
 use environment_picker::selector::NO_ENVIRONMENT_LABEL;
 use gpui::{App, Context, EntityId, Global, Subscription, WeakEntity};
+use pustman_actions::cookies::Manage;
+use pustman_actions::workspace::{ToggleConsole, ToggleSidebar};
 use ui::prelude::*;
 use workspace::Workspace;
 
@@ -264,3 +264,7 @@ fn add_status_items(workspace: &WeakEntity<Workspace>, cx: &mut App) {
 #[cfg(test)]
 #[path = "status_items_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "status_controls_tests.rs"]
+mod status_controls_tests;

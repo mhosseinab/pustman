@@ -467,7 +467,11 @@ impl Dock {
                     .border_color(colors.border_variant),
             })
             .children(header)
-            .children(active_panel.filter(|_| !self.shows_strip()).map(|panel| div().flex_1().min_h_0().child(panel)))
+            .children(
+                active_panel
+                    .filter(|_| !self.shows_strip())
+                    .map(|panel| div().flex_1().min_h_0().child(panel)),
+            )
             .into_any_element()
     }
 }
@@ -606,3 +610,7 @@ mod header_tests;
 #[cfg(test)]
 #[path = "dock_rail_tests.rs"]
 mod rail_tests;
+
+#[cfg(test)]
+#[path = "dock_collapsed_tests.rs"]
+mod collapsed_tests;
