@@ -375,9 +375,15 @@ fn scan_literal_auth(name: &str, auth: &Auth, carrying: &mut Vec<String>) {
         Auth::Bearer { token, .. } => is_literal_credential(token),
         Auth::ApiKey { value, .. } => is_literal_credential(value),
         // `api_model`'s one list: the export writes the unmodelled fields back verbatim.
-        Auth::Digest(_) | Auth::OAuth2(_) | Auth::AwsSigV4(_) | Auth::JwtBearer(_) => auth
-            .extended_credentials()
-            .is_some_and(|values| values.iter().any(|value| is_literal_text(value))),
+        // OAuth 2.0 parameter rows are judged by name, with the import's row check.
+        Auth::Digest(_) | Auth::OAuth2(_) | Auth::AwsSigV4(_) | Auth::JwtBearer(_) => {
+            auth.extended_credentials()
+                .is_some_and(|values| values.iter().any(|value| is_literal_text(value)))
+                || auth
+                    .extended_parameter_rows()
+                    .iter()
+                    .any(|(key, value)| crate::import::row_carries_credential(key, value))
+        }
         Auth::Inherit | Auth::None | Auth::Unsupported(_) => false,
     };
     if literal {

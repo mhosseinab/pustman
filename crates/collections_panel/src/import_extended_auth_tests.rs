@@ -45,3 +45,36 @@ fn import_reports_literal_credentials_in_unmodelled_auth_fields() {
     )]));
     assert!(!auth_carries_credential(&clean));
 }
+
+/// An OAuth 2.0 auth whose secrets are all references, with Postman's usual literal
+/// companions and one token request parameter.
+fn oauth2_with_token_param(key: &str, value: &str) -> Auth {
+    Auth::OAuth2(OAuth2Auth {
+        grant: OAuth2Grant::ClientCredentials,
+        client_secret: "{{client_secret}}".to_owned(),
+        extra: BTreeMap::from([
+            ("state".to_owned(), json!("state-1234")),
+            (
+                "refreshTokenUrl".to_owned(),
+                json!("https://auth.example.test/refresh"),
+            ),
+            (
+                "tokenRequestParams".to_owned(),
+                json!([{ "key": key, "value": value, "send_as": "request_body" }]),
+            ),
+        ]),
+        ..OAuth2Auth::default()
+    })
+}
+
+#[test]
+fn import_judges_oauth2_request_parameters_by_their_name() {
+    assert!(!auth_carries_credential(&oauth2_with_token_param(
+        "resource",
+        "https://api.example.test"
+    )));
+    assert!(auth_carries_credential(&oauth2_with_token_param(
+        "client_secret",
+        "token-REDACTED-param-secret"
+    )));
+}

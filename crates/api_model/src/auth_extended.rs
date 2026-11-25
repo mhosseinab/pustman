@@ -295,13 +295,19 @@ pub(crate) trait ExtendedKind: Serialize {
 
     /// The typed secret fields, and `extra`.
     fn credentials_mut(&mut self) -> (Vec<&mut String>, &mut BTreeMap<String, serde_json::Value>);
+
+    /// The typed identity fields: not a secret, so the import report and the export warning
+    /// ignore them, but history masks them like Basic's username.
+    fn identities_mut(&mut self) -> Vec<&mut String> {
+        Vec::new()
+    }
 }
 
 impl ExtendedKind for DigestAuth {
     const FIELDS: &'static [&'static str] =
         &["username", "password", "realm", "nonce", "algorithm", "qop"];
     const HARMLESS_EXTRA: &'static [&'static str] =
-        &["opaque", "nc", "cnonce", "disableRetryRequest"];
+        &["opaque", "nonceCount", "clientNonce", "disableRetryRequest"];
 
     fn extra(&self) -> &BTreeMap<String, serde_json::Value> {
         &self.extra
@@ -309,6 +315,10 @@ impl ExtendedKind for DigestAuth {
 
     fn credentials_mut(&mut self) -> (Vec<&mut String>, &mut BTreeMap<String, serde_json::Value>) {
         (vec![&mut self.password], &mut self.extra)
+    }
+
+    fn identities_mut(&mut self) -> Vec<&mut String> {
+        vec![&mut self.username]
     }
 }
 
@@ -331,6 +341,8 @@ impl ExtendedKind for OAuth2Auth {
         "redirect_uri",
         "useBrowser",
         "tokenType",
+        "state",
+        "refreshTokenUrl",
     ];
 
     fn extra(&self) -> &BTreeMap<String, serde_json::Value> {
@@ -343,6 +355,15 @@ impl ExtendedKind for OAuth2Auth {
             secrets.push(password);
         }
         (secrets, &mut self.extra)
+    }
+
+    fn identities_mut(&mut self) -> Vec<&mut String> {
+        match &mut self.grant {
+            OAuth2Grant::Password { username, .. } => vec![username],
+            OAuth2Grant::AuthorizationCode { .. }
+            | OAuth2Grant::ClientCredentials
+            | OAuth2Grant::Implicit { .. } => Vec::new(),
+        }
     }
 }
 
@@ -364,6 +385,10 @@ impl ExtendedKind for AwsSigV4Auth {
         let mut secrets = vec![&mut self.secret_key];
         secrets.extend(self.session_token.as_mut());
         (secrets, &mut self.extra)
+    }
+
+    fn identities_mut(&mut self) -> Vec<&mut String> {
+        vec![&mut self.access_key]
     }
 }
 
@@ -418,13 +443,35 @@ fn visit_strings(value: &mut serde_json::Value, visit: &mut dyn FnMut(&mut Strin
     }
 }
 
+/// Postman's OAuth 2.0 extra-parameter lists: `{key, value}` rows the user adds to the
+/// authorization, token and refresh requests. A row is a credential by its name, the way a
+/// header row is, so the import report and the export warning judge it by its key.
+const OAUTH2_PARAMETER_LISTS: [&str; 3] = [
+    "authRequestParams",
+    "tokenRequestParams",
+    "refreshRequestParams",
+];
+
+/// One extra-parameter row as `(key, value)`, when it has that shape: a string key and a
+/// scalar or absent value. Any other entry is not a row and is scanned string by string.
+fn parameter_row(entry: &serde_json::Value) -> Option<(String, Option<String>)> {
+    let row = entry.as_object()?;
+    let key = row.get("key")?.as_str()?.to_owned();
+    let value = match row.get("value") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(text)) => Some(text.clone()),
+        Some(serde_json::Value::Number(number)) => Some(number.to_string()),
+        Some(serde_json::Value::Bool(flag)) => Some(flag.to_string()),
+        Some(serde_json::Value::Array(_) | serde_json::Value::Object(_)) => return None,
+    };
+    Some((key, value))
+}
+
 impl Auth {
     /// Visit every credential string of a Digest, OAuth 2.0, AWS SigV4 or JWT Bearer auth:
     /// its secret fields and, conservatively, every string under an `extra` entry not known
-    /// to be harmless. History masks through this, and the import report and the export
-    /// warning check [`Auth::extended_credentials`]: one list for all three. Returns
-    /// `false`, having visited nothing, for the other kinds, whose callers check their own
-    /// fields.
+    /// to be harmless. History masks through this. Returns `false`, having visited nothing,
+    /// for the other kinds, whose callers check their own fields.
     pub fn visit_extended_credentials(&mut self, mut visit: impl FnMut(&mut String)) -> bool {
         match self {
             Auth::Digest(kind) => visit_credentials(kind, &mut visit),
@@ -441,13 +488,58 @@ impl Auth {
         true
     }
 
-    /// The credential strings [`Auth::visit_extended_credentials`] visits; `None` for the
-    /// kinds it does not cover.
+    /// Visit the identity fields of the same kinds (Digest and password-grant usernames,
+    /// the AWS access key): history masks them beside the credentials, as it masks Basic's
+    /// username. Visits nothing for any other kind.
+    pub fn visit_history_identities(&mut self, mut visit: impl FnMut(&mut String)) {
+        let identities = match self {
+            Auth::Digest(kind) => kind.identities_mut(),
+            Auth::OAuth2(kind) => kind.identities_mut(),
+            Auth::AwsSigV4(kind) => kind.identities_mut(),
+            Auth::JwtBearer(kind) => kind.identities_mut(),
+            Auth::Inherit
+            | Auth::None
+            | Auth::Basic { .. }
+            | Auth::Bearer { .. }
+            | Auth::ApiKey { .. }
+            | Auth::Unsupported(_) => Vec::new(),
+        };
+        for identity in identities {
+            visit(identity);
+        }
+    }
+
+    /// What the import report and the export warning check: the strings
+    /// [`Auth::visit_extended_credentials`] visits, except the OAuth 2.0 extra-parameter
+    /// rows, which [`Auth::extended_parameter_rows`] hands over to be judged by name.
+    /// `None` for the kinds it does not cover.
     pub fn extended_credentials(&self) -> Option<Vec<String>> {
-        let mut values = Vec::new();
         let mut copy = self.clone();
+        if let Auth::OAuth2(oauth2) = &mut copy {
+            for list in OAUTH2_PARAMETER_LISTS {
+                if let Some(serde_json::Value::Array(entries)) = oauth2.extra.get_mut(list) {
+                    entries.retain(|entry| parameter_row(entry).is_none());
+                }
+            }
+        }
+        let mut values = Vec::new();
         copy.visit_extended_credentials(|text| values.push(text.clone()))
             .then_some(values)
+    }
+
+    /// The OAuth 2.0 extra-parameter rows as `(key, value)`, for a caller to judge by
+    /// name. Empty for every other kind.
+    pub fn extended_parameter_rows(&self) -> Vec<(String, Option<String>)> {
+        let Auth::OAuth2(oauth2) = self else {
+            return Vec::new();
+        };
+        OAUTH2_PARAMETER_LISTS
+            .iter()
+            .filter_map(|list| oauth2.extra.get(*list))
+            .filter_map(serde_json::Value::as_array)
+            .flatten()
+            .filter_map(parameter_row)
+            .collect()
     }
 }
 

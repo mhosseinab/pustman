@@ -5,8 +5,8 @@
 use std::collections::BTreeMap;
 
 use api_model::{
-    ApiKeyLocation, Auth, Body, HttpRequest, ItemId, JwtAlgorithm, JwtBearerAuth, Method,
-    OAuth2Auth, OAuth2Grant, SecretValues,
+    ApiKeyLocation, Auth, AwsSigV4Auth, Body, DigestAuth, HttpRequest, ItemId, JwtAlgorithm,
+    JwtBearerAuth, Method, OAuth2Auth, OAuth2Grant, SecretValues,
 };
 use serde_json::json;
 
@@ -82,4 +82,33 @@ fn history_masks_literal_credentials_in_unmodelled_auth_fields() {
         oauth2.contains("client_credentials"),
         "the rest is kept: {oauth2}"
     );
+}
+
+#[test]
+fn history_masks_the_identity_beside_the_secret() {
+    // The Basic rule: history masks the identity too; only import and export ignore it.
+    let digest = stored(Auth::Digest(DigestAuth {
+        username: "digest-user-REDACTED-example".to_owned(),
+        password: "{{digest_password}}".to_owned(),
+        ..DigestAuth::default()
+    }));
+    assert!(!digest.contains("digest-user-REDACTED-example"), "{digest}");
+
+    let aws = stored(Auth::AwsSigV4(AwsSigV4Auth {
+        access_key: "AKIDREDACTEDEXAMPLE".to_owned(),
+        secret_key: "{{aws_secret}}".to_owned(),
+        region: "eu-west-1".to_owned(),
+        ..AwsSigV4Auth::default()
+    }));
+    assert!(!aws.contains("AKIDREDACTEDEXAMPLE"), "{aws}");
+    assert!(aws.contains("eu-west-1"), "the rest is kept: {aws}");
+
+    let oauth2 = stored(Auth::OAuth2(OAuth2Auth {
+        grant: OAuth2Grant::Password {
+            username: "grant-user-REDACTED-example".to_owned(),
+            password: "{{grant_password}}".to_owned(),
+        },
+        ..OAuth2Auth::default()
+    }));
+    assert!(!oauth2.contains("grant-user-REDACTED-example"), "{oauth2}");
 }

@@ -59,17 +59,35 @@ fn extended_credentials_include_secrets_postman_keeps_in_unmodelled_fields() {
     let values = oauth2
         .extended_credentials()
         .expect("OAuth 2.0 is an extended kind");
-    for secret in [
-        "{{client_secret}}",
-        "token-REDACTED-leftover-password",
-        "token-REDACTED-param-secret",
-    ] {
+    for secret in ["{{client_secret}}", "token-REDACTED-leftover-password"] {
         assert!(
             values.iter().any(|value| value == secret),
             "{secret}: {values:?}"
         );
     }
     assert!(!values.iter().any(|value| value == "dev"), "{values:?}");
+    // A parameter row is handed over whole, to be judged by its name.
+    assert_eq!(
+        oauth2.extended_parameter_rows(),
+        vec![(
+            "client_secret".to_owned(),
+            Some("token-REDACTED-param-secret".to_owned())
+        )]
+    );
+    assert!(
+        !values
+            .iter()
+            .any(|value| value == "token-REDACTED-param-secret"),
+        "{values:?}"
+    );
+    // History still masks every string in it.
+    let mut masked = oauth2.clone();
+    let mut seen = Vec::new();
+    masked.visit_extended_credentials(|text| seen.push(text.clone()));
+    assert!(
+        seen.iter()
+            .any(|value| value == "token-REDACTED-param-secret")
+    );
 
     let password_grant = Auth::OAuth2(OAuth2Auth {
         grant: OAuth2Grant::Password {

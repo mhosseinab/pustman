@@ -437,11 +437,14 @@ fn redact_auth(kind: &Auth, node: &mut Value, secrets: &SecretValues) {
         // typed secrets and the unmodelled `extra` alike.
         Auth::Digest(_) | Auth::OAuth2(_) | Auth::AwsSigV4(_) | Auth::JwtBearer(_) => {
             let mut masked = kind.clone();
-            masked.visit_extended_credentials(|text| {
+            let mask = |text: &mut String| {
                 if !is_one_reference(text) {
                     *text = shared_mask();
                 }
-            });
+            };
+            masked.visit_extended_credentials(mask);
+            // The identity too, as for Basic's username.
+            masked.visit_history_identities(mask);
             match serde_json::to_value(&masked) {
                 Ok(value) => {
                     *node = value;
