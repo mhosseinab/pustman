@@ -17,6 +17,14 @@ pub mod workspace {
         [
             /// Creates a new request and opens it in a tab.
             NewRequest,
+            /// Creates a new GraphQL request and opens it in a tab.
+            NewGraphQlRequest,
+            /// Creates a new WebSocket request and opens it in a tab.
+            NewWebSocketRequest,
+            /// Creates a new Socket.IO request and opens it in a tab.
+            NewSocketIoRequest,
+            /// Creates a new gRPC request and opens it in a tab.
+            NewGrpcRequest,
             /// Opens a new tab.
             NewTab,
             /// Closes the active tab.

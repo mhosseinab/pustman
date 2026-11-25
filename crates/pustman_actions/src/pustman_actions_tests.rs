@@ -3,6 +3,10 @@ use gpui::TestAppContext;
 /// Every action the PRD needs, as `namespace::Name` (S21 action set).
 const EXPECTED_ACTIONS: &[&str] = &[
     "workspace::NewRequest",
+    "workspace::NewGraphQlRequest",
+    "workspace::NewWebSocketRequest",
+    "workspace::NewSocketIoRequest",
+    "workspace::NewGrpcRequest",
     "workspace::NewTab",
     "workspace::CloseTab",
     "workspace::NextTab",
