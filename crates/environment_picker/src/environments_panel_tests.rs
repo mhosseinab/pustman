@@ -177,3 +177,100 @@ fn test_the_active_environment_is_badged_and_a_click_activates_another(cx: &mut 
         "a click makes that environment active"
     );
 }
+
+/// The environment files in `root/environments`, sorted.
+fn environment_files(root: &Path) -> Vec<String> {
+    let mut files: Vec<String> = std::fs::read_dir(root.join("environments"))
+        .map(|entries| {
+            entries
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    files
+}
+
+fn toast_count(workspace: &Entity<Workspace>, cx: &mut VisualTestContext) -> usize {
+    cx.update(|_window, cx| workspace.read(cx).toasts().read(cx).len())
+}
+
+#[gpui::test]
+fn test_two_quick_new_clicks_write_two_distinct_environments(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().expect("the temp dir is created");
+    let root = workspace_folder(directory.path());
+    let (_workspace, cx) = open_panel(Some(&root), cx);
+    let button = cx
+        .debug_bounds(EMPTY_NEW_ID)
+        .expect("New environment… renders");
+    // Two clicks before either write lands.
+    cx.simulate_click(button.center(), Modifiers::none());
+    cx.simulate_click(button.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(
+        environment_files(&root),
+        vec![
+            "new-environment-2.environment.json".to_owned(),
+            "new-environment.environment.json".to_owned(),
+        ],
+        "each click writes its own environment under its own name"
+    );
+}
+
+#[gpui::test]
+fn test_a_created_environment_is_announced(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().expect("the temp dir is created");
+    let root = workspace_folder(directory.path());
+    let (_workspace, cx) = open_panel(Some(&root), cx);
+    click(cx, EMPTY_NEW_ID);
+    let message: &'static str =
+        ui::components::toast::toast_message_selector(&super::created_message("New Environment"))
+            .leak();
+    assert!(
+        cx.debug_bounds(message).is_some(),
+        "a successful create says what it created"
+    );
+}
+
+#[gpui::test]
+fn test_a_create_that_cannot_be_written_shows_an_error(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().expect("the temp dir is created");
+    let root = workspace_folder(directory.path());
+    // A regular file where the environments folder belongs: the write must fail.
+    std::fs::write(root.join("environments"), b"not a folder").expect("the blocker is written");
+    let (workspace, cx) = open_panel(Some(&root), cx);
+    let before = toast_count(&workspace, cx);
+    click(cx, EMPTY_NEW_ID);
+    assert_eq!(
+        toast_count(&workspace, cx),
+        before + 1,
+        "the failed create reaches the user as a toast"
+    );
+    let success: &'static str =
+        ui::components::toast::toast_message_selector(&super::created_message("New Environment"))
+            .leak();
+    assert!(
+        cx.debug_bounds(success).is_none(),
+        "and it is not announced as created"
+    );
+}
+
+#[gpui::test]
+fn test_new_environment_names_are_numbered_past_the_taken_ones(_cx: &mut TestAppContext) {
+    let taken = |names: &[&str]| {
+        names
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(super::unique_name(&taken(&[])), "New Environment");
+    assert_eq!(
+        super::unique_name(&taken(&["New Environment"])),
+        "New Environment 2"
+    );
+    assert_eq!(
+        super::unique_name(&taken(&["New Environment", "New Environment 2", "Staging"])),
+        "New Environment 3"
+    );
+}

@@ -18,6 +18,7 @@
 //! holds a handful of environments (one per place requests go), unlike the collections
 //! tree or the history.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use api_model::{Environment, ItemId};
@@ -72,8 +73,14 @@ pub(crate) fn row_id(id: ItemId) -> String {
 pub struct EnvironmentsPanel {
     focus_handle: FocusHandle,
     workspace: WeakEntity<Workspace>,
-    /// The create in flight; replacing it cancels the older one.
-    pending_create: Option<Task<()>>,
+    /// The creates in flight, keyed by a per-panel counter: each "＋ New" writes its
+    /// own file, so a second click never cancels the first one's write.
+    pending_creates: BTreeMap<u64, Task<()>>,
+    next_create: u64,
+    /// The names this panel has handed out: a create's name is unique against these as
+    /// well as the listed environments, which only learn of a new file once the
+    /// workspace is re-read — so two quick clicks never pick the same name.
+    reserved_names: Vec<String>,
     /// Redraws when the installed inputs change (a selection, a re-read workspace).
     _subscriptions: Vec<Subscription>,
 }
@@ -84,7 +91,9 @@ impl EnvironmentsPanel {
         Self {
             focus_handle: cx.focus_handle(),
             workspace,
-            pending_create: None,
+            pending_creates: BTreeMap::new(),
+            next_create: 0,
+            reserved_names: Vec::new(),
             _subscriptions: vec![cx.observe_global::<SelectorInputs>(|_panel, cx| cx.notify())],
         }
     }
@@ -107,7 +116,7 @@ impl EnvironmentsPanel {
             self.report("Open a workspace first — environments are saved in it.", cx);
             return;
         };
-        let taken: Vec<String> = cx
+        let mut taken: Vec<String> = cx
             .try_global::<SelectorInputs>()
             .map(|inputs| {
                 inputs
@@ -117,13 +126,18 @@ impl EnvironmentsPanel {
                     .collect()
             })
             .unwrap_or_default();
+        taken.extend(self.reserved_names.iter().cloned());
+        let name = unique_name(&taken);
+        self.reserved_names.push(name.clone());
         let environment = Environment {
             id: ItemId::new(),
-            name: unique_name(&taken),
+            name,
             variables: Vec::new(),
             extra: Default::default(),
         };
-        self.pending_create = Some(cx.spawn(async move |this, cx| {
+        let key = self.next_create;
+        self.next_create += 1;
+        let task = cx.spawn(async move |this, cx| {
             let name = environment.name.clone();
             let written = cx
                 .background_executor()
@@ -136,25 +150,47 @@ impl EnvironmentsPanel {
                     workspace_store::save_item(&root, &item)
                 })
                 .await;
-            if let Err(error) = written {
-                // The panel went away with its window; nobody is left to tell.
-                this.update(cx, |panel, cx| {
-                    panel.report(format!("{name} could not be created — {error}"), cx);
-                })
-                .ok();
-            }
-        }));
+            // The panel went away with its window; nobody is left to tell.
+            this.update(cx, |panel, cx| {
+                panel.pending_creates.remove(&key);
+                match written {
+                    Ok(_) => panel.announce(created_message(&name), Severity::Success, cx),
+                    Err(error) => {
+                        // The name was never used; the next create may take it.
+                        panel.reserved_names.retain(|reserved| *reserved != name);
+                        panel.announce(
+                            format!("{name} could not be created — {error}"),
+                            Severity::Error,
+                            cx,
+                        );
+                    }
+                }
+            })
+            .ok();
+        });
+        self.pending_creates.insert(key, task);
     }
 
     /// Show `message` as an error toast on this window's workspace (AGENTS.md › errors
-    /// reach the user). Deferred: the workspace may be on the update stack.
+    /// reach the user).
     fn report(&self, message: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.announce(message, Severity::Error, cx);
+    }
+
+    /// Show `message` as a toast at `severity` on this window's workspace. Deferred:
+    /// the workspace may be on the update stack.
+    fn announce(
+        &self,
+        message: impl Into<SharedString>,
+        severity: Severity,
+        cx: &mut Context<Self>,
+    ) {
         let message = message.into();
         let workspace = self.workspace.clone();
         cx.defer(move |cx| {
             if workspace
                 .update(cx, |workspace, cx| {
-                    workspace.show_toast(message, Severity::Error, None, cx);
+                    workspace.show_toast(message, severity, None, cx);
                 })
                 .is_err()
             {
@@ -367,6 +403,12 @@ impl Panel for EnvironmentsPanel {
     fn create_action(&self, _cx: &App) -> Option<Box<dyn Action>> {
         Some(Box::new(NewEnvironment))
     }
+}
+
+/// What a successful create says: the new environment appears in the list once the
+/// workspace is re-read, and this tells the user which one it is.
+pub(crate) fn created_message(name: &str) -> String {
+    format!("Created {name}. Click it in the list to make it active.")
 }
 
 /// "New Environment", or the first "New Environment N" no environment already has.
