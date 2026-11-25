@@ -92,3 +92,6 @@ mod cookie_test_support;
 mod debug_redaction_tests;
 
 mod retention;
+
+/// GraphQL over the HTTP engine (REQ-GQL-01).
+pub mod graphql;
