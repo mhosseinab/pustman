@@ -15,7 +15,7 @@ use serde_json::{Map, Value, json};
 use crate::redact::{SecretValues, redact_headers, redact_text, redact_url};
 
 /// One thing that happened in a streaming session, in the order it happened.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum SessionEvent {
     Connecting { target: String },
     Connected { details: ConnectionDetails },
@@ -23,6 +23,27 @@ pub enum SessionEvent {
     Received(Message),
     Error(SessionError),
     Closed { reason: CloseReason },
+}
+
+// A target URL can carry `user:password@`; Debug shows it through `redact_url`. The other
+// variants delegate to Debug impls that already hide header values and payload bytes.
+impl fmt::Debug for SessionEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Connecting { target } => f
+                .debug_struct("Connecting")
+                .field("target", &redact_url(target, &SecretValues::new()))
+                .finish(),
+            Self::Connected { details } => f
+                .debug_struct("Connected")
+                .field("details", details)
+                .finish(),
+            Self::Sent(message) => f.debug_tuple("Sent").field(message).finish(),
+            Self::Received(message) => f.debug_tuple("Received").field(message).finish(),
+            Self::Error(error) => f.debug_tuple("Error").field(error).finish(),
+            Self::Closed { reason } => f.debug_struct("Closed").field("reason", reason).finish(),
+        }
+    }
 }
 
 /// One message sent or received in a session.

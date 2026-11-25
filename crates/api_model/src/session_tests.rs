@@ -150,3 +150,20 @@ fn connection_details_redact_authorization() {
         "Debug output must not carry the credential either"
     );
 }
+
+#[test]
+fn connecting_debug_never_prints_url_credentials() {
+    let event = SessionEvent::Connecting {
+        target: "wss://user:hunter2-example@host/x".to_owned(),
+    };
+
+    let debug = format!("{event:?}");
+    assert!(
+        !debug.contains("hunter2-example"),
+        "Debug leaked the URL password: {debug}"
+    );
+    assert!(
+        debug.contains("host/x"),
+        "Debug still names the target: {debug}"
+    );
+}
