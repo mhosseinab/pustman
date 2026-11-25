@@ -793,8 +793,15 @@ fn harden_auth(auth: &mut Auth, label: &str, problems: &mut Vec<ImportProblem>) 
             strip_extra(extra, label, problems);
         }
         // A preserved auth has no modelled fields to override, and its shape is never
-        // the file's to change either.
-        Auth::Inherit | Auth::None | Auth::Unsupported(_) => {}
+        // the file's to change either. The extended kinds' `extra` can never shadow a
+        // typed field: `api_model` drops such a key when it writes the auth.
+        Auth::Digest(_)
+        | Auth::OAuth2(_)
+        | Auth::AwsSigV4(_)
+        | Auth::JwtBearer(_)
+        | Auth::Inherit
+        | Auth::None
+        | Auth::Unsupported(_) => {}
     }
 }
 
@@ -918,6 +925,24 @@ fn auth_carries_credential(auth: &Auth) -> bool {
         Auth::Basic { password, .. } => literal_opt(password),
         Auth::Bearer { token, .. } => literal_opt(token),
         Auth::ApiKey { value, .. } => literal_opt(value),
+        Auth::Digest(digest) => {
+            literal(&digest.password) || extra_carries_credential(&digest.extra)
+        }
+        Auth::OAuth2(oauth2) => {
+            let grant_password = match &oauth2.grant {
+                api_model::OAuth2Grant::Password { password, .. } => literal(password),
+                _ => false,
+            };
+            grant_password
+                || literal(&oauth2.client_secret)
+                || extra_carries_credential(&oauth2.extra)
+        }
+        Auth::AwsSigV4(aws) => {
+            literal(&aws.secret_key)
+                || literal_opt(&aws.session_token)
+                || extra_carries_credential(&aws.extra)
+        }
+        Auth::JwtBearer(jwt) => literal(&jwt.secret_or_key) || extra_carries_credential(&jwt.extra),
         // Preserved verbatim: whatever the file held is still in there.
         Auth::Unsupported(raw) => raw_auth_carries_credential(raw),
         Auth::Inherit | Auth::None => false,

@@ -5,7 +5,12 @@ use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::{extra_to_map, map_to_extra, object_tag, serialize_tagged, take_field};
+use crate::auth_extended::ExtendedKind;
+use crate::postman::{ImportReport, import_auth};
+use crate::{
+    AwsSigV4Auth, DigestAuth, JwtBearerAuth, OAuth2Auth, extra_to_map, map_to_extra, object_tag,
+    serialize_tagged, take_field,
+};
 
 /// Where an API key is placed on the wire.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -42,7 +47,12 @@ pub enum Auth {
         location: Option<ApiKeyLocation>,
         extra: BTreeMap<String, serde_json::Value>,
     },
-    /// An auth kind we do not model (Hawk, ASAP, EdgeGrid, Digest, …), preserved verbatim.
+    Digest(DigestAuth),
+    OAuth2(OAuth2Auth),
+    AwsSigV4(AwsSigV4Auth),
+    JwtBearer(JwtBearerAuth),
+    /// An auth kind we do not model (Hawk, NTLM, OAuth 1.0, ASAP, EdgeGrid, …), preserved
+    /// verbatim.
     Unsupported(serde_json::Value),
 }
 
@@ -59,6 +69,10 @@ impl Auth {
             Auth::Basic { .. } => "basic",
             Auth::Bearer { .. } => "bearer",
             Auth::ApiKey { .. } => "api_key",
+            Auth::Digest(_) => "digest",
+            Auth::OAuth2(_) => "oauth2",
+            Auth::AwsSigV4(_) => "aws_sigv4",
+            Auth::JwtBearer(_) => "jwt_bearer",
             Auth::Unsupported(_) => "unsupported",
         }
     }
@@ -146,6 +160,13 @@ pub fn effective_auth(chain: &[&Auth]) -> (EffectiveAuth, AuthSource) {
                     source,
                 );
             }
+            // `Decision:` nothing signs these kinds yet, so the engine reports them exactly
+            // as it reports a raw kind — by name only, which keeps every credential they
+            // hold out of the effective auth.
+            Auth::Digest(_) | Auth::OAuth2(_) | Auth::AwsSigV4(_) | Auth::JwtBearer(_) => {
+                let kind = serde_json::json!({ "type": auth.kind() });
+                return (EffectiveAuth::Unsupported(kind), source);
+            }
             Auth::Unsupported(raw) => return (EffectiveAuth::Unsupported(raw.clone()), source),
         }
     }
@@ -181,6 +202,10 @@ impl Serialize for Auth {
                 insert_optional::<S>(&mut fields, "value", value)?;
                 insert_optional::<S>(&mut fields, "location", location)?;
             }
+            Auth::Digest(digest) => fields = object_fields::<S, _>(digest)?,
+            Auth::OAuth2(oauth2) => fields = object_fields::<S, _>(oauth2)?,
+            Auth::AwsSigV4(aws) => fields = object_fields::<S, _>(aws)?,
+            Auth::JwtBearer(jwt) => fields = object_fields::<S, _>(jwt)?,
             Auth::Unsupported(raw) => return raw.serialize(serializer),
         }
         serialize_tagged(serializer, "type", self.kind(), fields)
@@ -210,12 +235,22 @@ fn parse_auth(value: serde_json::Value) -> Auth {
         _ => {}
     }
 
+    // A workspace saved before these kinds were modelled kept an imported Postman auth raw,
+    // its fields still in the Postman group (`"digest": [...]`): map it as an import would.
+    if matches!(tag, "digest" | "oauth2" | "awsv4" | "jwt") && object.contains_key(tag) {
+        return import_auth(&value, "auth", &mut ImportReport::default());
+    }
+
     let mut fields = object.clone();
     fields.remove("type");
     let parsed = match tag {
         "basic" => read_basic(fields),
         "bearer" => read_bearer(fields),
         "api_key" => read_api_key(fields),
+        "digest" => read_kind(fields).map(Auth::Digest),
+        "oauth2" => read_kind(fields).map(Auth::OAuth2),
+        "aws_sigv4" => read_kind(fields).map(Auth::AwsSigV4),
+        "jwt_bearer" => read_kind(fields).map(Auth::JwtBearer),
         _ => None,
     };
     parsed.unwrap_or(Auth::Unsupported(value))
@@ -249,6 +284,37 @@ fn read_api_key(mut fields: serde_json::Map<String, serde_json::Value>) -> Optio
         location,
         extra: map_to_extra(fields),
     })
+}
+
+/// Decode one of the extended kinds; a field of the wrong shape keeps the whole auth raw.
+fn read_kind<T: serde::de::DeserializeOwned>(
+    fields: serde_json::Map<String, serde_json::Value>,
+) -> Option<T> {
+    serde_json::from_value(serde_json::Value::Object(fields)).ok()
+}
+
+/// An extended kind's fields as the JSON object [`serialize_tagged`] writes under its tag:
+/// the typed fields, then each `extra` entry whose key names none of them.
+fn object_fields<S, K>(kind: &K) -> Result<serde_json::Map<String, serde_json::Value>, S::Error>
+where
+    S: Serializer,
+    K: ExtendedKind,
+{
+    let mut fields = match serde_json::to_value(kind).map_err(serde::ser::Error::custom)? {
+        serde_json::Value::Object(fields) => fields,
+        // Never echo the value: it holds the kind's credentials.
+        _ => {
+            return Err(serde::ser::Error::custom(
+                "an auth kind did not serialize as a JSON object",
+            ));
+        }
+    };
+    for (key, value) in kind.extra() {
+        if !K::FIELDS.contains(&key.as_str()) {
+            fields.insert(key.clone(), value.clone());
+        }
+    }
+    Ok(fields)
 }
 
 fn insert_optional<S>(

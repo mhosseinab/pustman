@@ -428,6 +428,19 @@ fn redact_auth(kind: &Auth, node: &mut Value, secrets: &SecretValues) {
         Auth::Basic { .. } => &["username", "password"],
         Auth::Bearer { .. } => &["token"],
         Auth::ApiKey { .. } => &["value"],
+        Auth::Digest(_) => &["username", "password"],
+        Auth::OAuth2(_) => {
+            // The password grant keeps its credential one level down.
+            if let Some(password) = node
+                .get_mut("grant")
+                .and_then(|grant| grant.get_mut("password"))
+            {
+                mask_credential(password);
+            }
+            &["client_secret"]
+        }
+        Auth::AwsSigV4(_) => &["access_key", "secret_key", "session_token"],
+        Auth::JwtBearer(_) => &["secret_or_key"],
         Auth::Unsupported(_) => {
             mask_credential(node);
             return;

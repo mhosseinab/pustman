@@ -374,6 +374,18 @@ fn scan_literal_auth(name: &str, auth: &Auth, carrying: &mut Vec<String>) {
         Auth::Basic { password, .. } => is_literal_credential(password),
         Auth::Bearer { token, .. } => is_literal_credential(token),
         Auth::ApiKey { value, .. } => is_literal_credential(value),
+        Auth::Digest(digest) => is_literal_text(&digest.password),
+        Auth::OAuth2(oauth2) => {
+            let grant_password = match &oauth2.grant {
+                api_model::OAuth2Grant::Password { password, .. } => is_literal_text(password),
+                _ => false,
+            };
+            grant_password || is_literal_text(&oauth2.client_secret)
+        }
+        Auth::AwsSigV4(aws) => {
+            is_literal_text(&aws.secret_key) || is_literal_credential(&aws.session_token)
+        }
+        Auth::JwtBearer(jwt) => is_literal_text(&jwt.secret_or_key),
         Auth::Inherit | Auth::None | Auth::Unsupported(_) => false,
     };
     if literal {
@@ -390,9 +402,12 @@ fn note_literal_credential(carrying: &mut Vec<String>, name: &str) {
 
 /// A credential value typed literally: present, non-empty and not a `{{…}}` reference.
 fn is_literal_credential(value: &Option<String>) -> bool {
-    value
-        .as_deref()
-        .is_some_and(|value| !value.is_empty() && !value.contains("{{"))
+    value.as_deref().is_some_and(is_literal_text)
+}
+
+/// [`is_literal_credential`] for the credentials the model keeps as plain text.
+fn is_literal_text(value: &str) -> bool {
+    !value.is_empty() && !value.contains("{{")
 }
 
 /// An `Authorization` or `Cookie` header carrying a literal credential value.

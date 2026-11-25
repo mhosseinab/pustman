@@ -11,8 +11,10 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use crate::{
-    ApiKeyLocation, Auth, Body, Collection, Environment, Example, ExampleResponse, Folder,
-    FormField, HttpRequest, ItemId, KeyValue, Method, RawLanguage, Request, Variable, VariableKind,
+    ApiKeyLocation, Auth, AwsSigV4Auth, Body, ClientAuthentication, Collection, DigestAlgorithm,
+    DigestAuth, Environment, Example, ExampleResponse, Folder, FormField, HttpRequest, ItemId,
+    JwtAlgorithm, JwtBearerAuth, KeyValue, Method, OAuth2Auth, OAuth2Grant, RawLanguage, Request,
+    Variable, VariableKind,
 };
 
 /// What an import accepts. Both bounds are enforced **before** full parsing.
@@ -675,6 +677,10 @@ pub(crate) fn import_auth(value: &Value, path: &str, report: &mut ImportReport) 
             }),
             extra: auth_extra(object, "apikey"),
         },
+        "digest" => import_digest(object, path, report),
+        "oauth2" => import_oauth2(object, path, report),
+        "awsv4" => import_aws(object),
+        "jwt" => import_jwt(object, path, report),
         other => {
             report.note(
                 path,
@@ -708,15 +714,25 @@ fn auth_field(object: &serde_json::Map<String, Value>, group: &str, name: &str) 
 }
 
 fn auth_extra(object: &serde_json::Map<String, Value>, group: &str) -> BTreeMap<String, Value> {
+    auth_extra_except(
+        object,
+        group,
+        &["username", "password", "token", "key", "value", "in"],
+    )
+}
+
+/// The entries of an auth group the model did not take, for its `extra`.
+fn auth_extra_except(
+    object: &serde_json::Map<String, Value>,
+    group: &str,
+    taken: &[&str],
+) -> BTreeMap<String, Value> {
     let mut extra = BTreeMap::new();
     let Some(group) = object.get(group) else {
         return extra;
     };
     let mut add = |key: &str, value: &Value| {
-        if matches!(
-            key,
-            "username" | "password" | "token" | "key" | "value" | "in"
-        ) {
+        if taken.contains(&key) {
             return;
         }
         extra.insert(key.to_owned(), value.clone());
@@ -740,6 +756,246 @@ fn auth_extra(object: &serde_json::Map<String, Value>, group: &str) -> BTreeMap<
         _ => {}
     }
     extra
+}
+
+/// Reads the fields of one Postman auth group, remembering which ones the model took so
+/// the rest round-trips through `extra`.
+struct AuthGroup<'a> {
+    object: &'a serde_json::Map<String, Value>,
+    group: &'static str,
+    taken: Vec<&'static str>,
+}
+
+impl<'a> AuthGroup<'a> {
+    fn new(object: &'a serde_json::Map<String, Value>, group: &'static str) -> Self {
+        Self {
+            object,
+            group,
+            taken: Vec::new(),
+        }
+    }
+
+    fn optional(&mut self, name: &'static str) -> Option<String> {
+        let value = auth_field(self.object, self.group, name);
+        if value.is_some() {
+            self.taken.push(name);
+        }
+        value
+    }
+
+    fn text(&mut self, name: &'static str) -> String {
+        self.optional(name).unwrap_or_default()
+    }
+
+    /// Take `name` out of the group without keeping its value, whatever shape it has;
+    /// reports whether it held one.
+    fn discard(&mut self, name: &'static str) -> bool {
+        self.taken.push(name);
+        auth_field(self.object, self.group, name).is_some_and(|value| !value.is_empty())
+    }
+
+    fn extra(&self) -> BTreeMap<String, Value> {
+        auth_extra_except(self.object, self.group, &self.taken)
+    }
+}
+
+/// Keep an auth whose value the model has no slot for raw, rather than guess at it.
+fn preserve_auth(
+    object: &serde_json::Map<String, Value>,
+    path: &str,
+    report: &mut ImportReport,
+    reason: String,
+) -> Auth {
+    report.note(
+        path,
+        format!("{reason}; auth preserved verbatim, not executed"),
+    );
+    Auth::Unsupported(Value::Object(object.clone()))
+}
+
+fn import_digest(
+    object: &serde_json::Map<String, Value>,
+    path: &str,
+    report: &mut ImportReport,
+) -> Auth {
+    let mut group = AuthGroup::new(object, "digest");
+    let algorithm = match group.optional("algorithm") {
+        Some(token) if !token.trim().is_empty() => match DigestAlgorithm::parse(&token) {
+            Some(algorithm) => algorithm,
+            None => {
+                return preserve_auth(
+                    object,
+                    path,
+                    report,
+                    format!("digest algorithm {token:?} is not supported"),
+                );
+            }
+        },
+        _ => DigestAlgorithm::default(),
+    };
+    Auth::Digest(DigestAuth {
+        username: group.text("username"),
+        password: group.text("password"),
+        realm: group.optional("realm"),
+        nonce: group.optional("nonce"),
+        algorithm,
+        qop: group.optional("qop"),
+        extra: group.extra(),
+    })
+}
+
+/// Postman's OAuth 2.0 token fields. Tokens live only in the keychain (REQ-HTTP-07), so an
+/// import drops them — and an export never writes one, whatever `extra` holds. A PKCE
+/// verifier belongs to one finished flow and goes with them.
+const OAUTH2_TOKEN_FIELDS: [&str; 7] = [
+    "accessToken",
+    "refreshToken",
+    "idToken",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "code_verifier",
+];
+
+fn import_oauth2(
+    object: &serde_json::Map<String, Value>,
+    path: &str,
+    report: &mut ImportReport,
+) -> Auth {
+    let mut group = AuthGroup::new(object, "oauth2");
+    // Postman's own default grant when the field is absent.
+    let grant_type = group
+        .optional("grant_type")
+        .unwrap_or_else(|| "authorization_code".to_owned());
+    let grant = match grant_type.as_str() {
+        "authorization_code" | "authorization_code_with_pkce" => OAuth2Grant::AuthorizationCode {
+            auth_url: group.text("authUrl"),
+            use_pkce: grant_type == "authorization_code_with_pkce",
+        },
+        "client_credentials" => OAuth2Grant::ClientCredentials,
+        "password_credentials" => OAuth2Grant::Password {
+            username: group.text("username"),
+            password: group.text("password"),
+        },
+        "implicit" => {
+            report.note(
+                path,
+                "OAuth 2.0 implicit grant is legacy (deprecated by the OAuth 2.0 Security BCP); \
+                 prefer authorization code with PKCE",
+            );
+            OAuth2Grant::Implicit {
+                auth_url: group.text("authUrl"),
+            }
+        }
+        other => {
+            return preserve_auth(
+                object,
+                path,
+                report,
+                format!("OAuth 2.0 grant {other:?} is not supported"),
+            );
+        }
+    };
+    let client_authentication = match group.optional("client_authentication").as_deref() {
+        None | Some("header") => ClientAuthentication::Header,
+        Some("body") => ClientAuthentication::Body,
+        Some(other) => {
+            return preserve_auth(
+                object,
+                path,
+                report,
+                format!("OAuth 2.0 client authentication {other:?} is not supported"),
+            );
+        }
+    };
+    let mut dropped_token = false;
+    for field in OAUTH2_TOKEN_FIELDS {
+        dropped_token |= group.discard(field);
+    }
+    if dropped_token {
+        report.note(
+            path,
+            "OAuth 2.0 token not imported: tokens are kept only in the keychain; \
+             get a new token after the import",
+        );
+    }
+    Auth::OAuth2(OAuth2Auth {
+        grant,
+        token_url: group.text("accessTokenUrl"),
+        client_id: group.text("clientId"),
+        client_secret: group.text("clientSecret"),
+        scope: group.text("scope"),
+        audience: group.optional("audience"),
+        client_authentication,
+        // Importing is offline: no token is fetched, so none is referenced yet.
+        token_ref: None,
+        extra: group.extra(),
+    })
+}
+
+fn import_aws(object: &serde_json::Map<String, Value>) -> Auth {
+    let mut group = AuthGroup::new(object, "awsv4");
+    Auth::AwsSigV4(AwsSigV4Auth {
+        access_key: group.text("accessKey"),
+        secret_key: group.text("secretKey"),
+        session_token: group.optional("sessionToken"),
+        region: group.text("region"),
+        service: group.text("service"),
+        extra: group.extra(),
+    })
+}
+
+/// Postman keeps an HMAC secret in `secret` and an RSA/ECDSA key in `privateKey`.
+fn jwt_key_field(algorithm: JwtAlgorithm) -> &'static str {
+    if algorithm.is_hmac() {
+        "secret"
+    } else {
+        "privateKey"
+    }
+}
+
+fn import_jwt(
+    object: &serde_json::Map<String, Value>,
+    path: &str,
+    report: &mut ImportReport,
+) -> Auth {
+    let mut group = AuthGroup::new(object, "jwt");
+    let algorithm = match group.optional("algorithm") {
+        Some(name) if !name.trim().is_empty() => match JwtAlgorithm::parse(&name) {
+            Some(algorithm) => algorithm,
+            None => {
+                return preserve_auth(
+                    object,
+                    path,
+                    report,
+                    format!("JWT algorithm {name:?} is not supported"),
+                );
+            }
+        },
+        _ => JwtAlgorithm::default(),
+    };
+    let add_to = match group.optional("addTokenTo").as_deref() {
+        None | Some("header") => ApiKeyLocation::Header,
+        Some("queryParam") => ApiKeyLocation::Query,
+        Some(other) => {
+            return preserve_auth(
+                object,
+                path,
+                report,
+                format!("JWT token placement {other:?} is not supported"),
+            );
+        }
+    };
+    Auth::JwtBearer(JwtBearerAuth {
+        algorithm,
+        secret_or_key: group.text(jwt_key_field(algorithm)),
+        payload: group.text("payload"),
+        header_prefix: group
+            .optional("headerPrefix")
+            .unwrap_or_else(|| "Bearer".to_owned()),
+        add_to,
+        extra: group.extra(),
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1019,14 +1275,115 @@ fn auth_entry(key: &str, value: Value) -> Value {
 }
 
 fn auth_group(named: &[(&str, &Option<String>)], extra: &BTreeMap<String, Value>) -> Value {
-    let mut entries: Vec<Value> = named
+    let named = named
         .iter()
-        .map(|(key, value)| auth_entry(key, optional(value)))
+        .map(|(key, value)| (*key, optional(value)))
+        .collect();
+    auth_entries(named, extra, &[])
+}
+
+/// One auth group: the model's `named` fields, then every `extra` entry not `withheld`.
+fn auth_entries(
+    named: Vec<(&str, Value)>,
+    extra: &BTreeMap<String, Value>,
+    withheld: &[&str],
+) -> Value {
+    let mut entries: Vec<Value> = named
+        .into_iter()
+        .map(|(key, value)| auth_entry(key, value))
         .collect();
     for (key, value) in extra {
-        entries.push(auth_entry(key, value.clone()));
+        if !withheld.contains(&key.as_str()) {
+            entries.push(auth_entry(key, value.clone()));
+        }
     }
     Value::Array(entries)
+}
+
+fn text(value: &str) -> Value {
+    Value::String(value.to_owned())
+}
+
+/// Add `name` only when the model holds a value for it.
+fn push_optional<'a>(named: &mut Vec<(&'a str, Value)>, name: &'a str, value: &Option<String>) {
+    if let Some(value) = value {
+        named.push((name, text(value)));
+    }
+}
+
+fn export_digest(digest: &DigestAuth) -> Value {
+    let mut named = vec![
+        ("username", text(&digest.username)),
+        ("password", text(&digest.password)),
+        ("algorithm", text(digest.algorithm.as_str())),
+    ];
+    push_optional(&mut named, "realm", &digest.realm);
+    push_optional(&mut named, "nonce", &digest.nonce);
+    push_optional(&mut named, "qop", &digest.qop);
+    auth_entries(named, &digest.extra, &[])
+}
+
+/// `token_ref` never exports: it names an entry in this machine's keychain.
+fn export_oauth2(oauth2: &OAuth2Auth) -> Value {
+    let mut named = Vec::new();
+    match &oauth2.grant {
+        OAuth2Grant::AuthorizationCode { auth_url, use_pkce } => {
+            let grant_type = if *use_pkce {
+                "authorization_code_with_pkce"
+            } else {
+                "authorization_code"
+            };
+            named.push(("grant_type", text(grant_type)));
+            named.push(("authUrl", text(auth_url)));
+        }
+        OAuth2Grant::ClientCredentials => named.push(("grant_type", text("client_credentials"))),
+        OAuth2Grant::Password { username, password } => {
+            named.push(("grant_type", text("password_credentials")));
+            named.push(("username", text(username)));
+            named.push(("password", text(password)));
+        }
+        OAuth2Grant::Implicit { auth_url } => {
+            named.push(("grant_type", text("implicit")));
+            named.push(("authUrl", text(auth_url)));
+        }
+    }
+    named.push(("accessTokenUrl", text(&oauth2.token_url)));
+    named.push(("clientId", text(&oauth2.client_id)));
+    named.push(("clientSecret", text(&oauth2.client_secret)));
+    named.push(("scope", text(&oauth2.scope)));
+    push_optional(&mut named, "audience", &oauth2.audience);
+    let client_authentication = match oauth2.client_authentication {
+        ClientAuthentication::Header => "header",
+        ClientAuthentication::Body => "body",
+    };
+    named.push(("client_authentication", text(client_authentication)));
+    auth_entries(named, &oauth2.extra, &OAUTH2_TOKEN_FIELDS)
+}
+
+fn export_aws(aws: &AwsSigV4Auth) -> Value {
+    let mut named = vec![
+        ("accessKey", text(&aws.access_key)),
+        ("secretKey", text(&aws.secret_key)),
+        ("region", text(&aws.region)),
+        ("service", text(&aws.service)),
+    ];
+    push_optional(&mut named, "sessionToken", &aws.session_token);
+    auth_entries(named, &aws.extra, &[])
+}
+
+fn export_jwt(jwt: &JwtBearerAuth) -> Value {
+    let add_to = match jwt.add_to {
+        ApiKeyLocation::Header => "header",
+        ApiKeyLocation::Query => "queryParam",
+    };
+    let named = vec![
+        ("algorithm", text(jwt.algorithm.as_str())),
+        (jwt_key_field(jwt.algorithm), text(&jwt.secret_or_key)),
+        ("payload", text(&jwt.payload)),
+        ("headerPrefix", text(&jwt.header_prefix)),
+        ("addTokenTo", text(add_to)),
+    ];
+    auth_entries(named, &jwt.extra, &[])
 }
 
 pub(crate) fn export_auth(auth: &Auth) -> Value {
@@ -1071,6 +1428,22 @@ pub(crate) fn export_auth(auth: &Auth) -> Value {
                 "apikey".to_owned(),
                 auth_group(&[("key", key), ("value", value), ("in", &where_)], extra),
             );
+        }
+        Auth::Digest(digest) => {
+            object.insert("type".to_owned(), text("digest"));
+            object.insert("digest".to_owned(), export_digest(digest));
+        }
+        Auth::OAuth2(oauth2) => {
+            object.insert("type".to_owned(), text("oauth2"));
+            object.insert("oauth2".to_owned(), export_oauth2(oauth2));
+        }
+        Auth::AwsSigV4(aws) => {
+            object.insert("type".to_owned(), text("awsv4"));
+            object.insert("awsv4".to_owned(), export_aws(aws));
+        }
+        Auth::JwtBearer(jwt) => {
+            object.insert("type".to_owned(), text("jwt"));
+            object.insert("jwt".to_owned(), export_jwt(jwt));
         }
         Auth::Unsupported(value) => return value.clone(),
     }

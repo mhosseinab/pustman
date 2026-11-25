@@ -530,7 +530,14 @@ fn record_auth(auth: &Auth, flags: &mut Vec<String>, query_pairs: &mut Vec<(Stri
                 }
             }
         }
-        Auth::Inherit | Auth::None | Auth::Unsupported(_) => {}
+        // Signed or challenge-driven kinds have no fixed wire form until a signer exists.
+        Auth::Digest(_)
+        | Auth::OAuth2(_)
+        | Auth::AwsSigV4(_)
+        | Auth::JwtBearer(_)
+        | Auth::Inherit
+        | Auth::None
+        | Auth::Unsupported(_) => {}
     }
 }
 
