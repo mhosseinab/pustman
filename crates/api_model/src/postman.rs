@@ -67,7 +67,7 @@ pub struct ImportReport {
 }
 
 impl ImportReport {
-    fn note(&mut self, path: impl Into<String>, detail: impl Into<String>) {
+    pub(crate) fn note(&mut self, path: impl Into<String>, detail: impl Into<String>) {
         self.problems.push(ImportProblem {
             path: path.into(),
             detail: detail.into(),
@@ -181,8 +181,9 @@ pub fn import_globals(
     Ok((variables, secrets, report))
 }
 
-/// Emit a Postman v2.1 collection. Non-HTTP request kinds are skipped and listed as warnings:
-/// v2.1 has no request shape this crate models for them.
+/// Emit a Postman v2.1 collection. GraphQL requests export as `body.mode = "graphql"`; the
+/// other non-HTTP request kinds are skipped and listed as warnings: v2.1 has no request shape
+/// for them.
 pub fn export_collection(collection: &Collection) -> (Vec<u8>, ExportReport) {
     let mut report = ExportReport::default();
     let mut items = Vec::new();
@@ -335,7 +336,10 @@ fn import_children(
             order.push(folder.id);
             children.push(crate::Child::Folder(folder));
         } else if object.contains_key("request") {
-            let request = import_request(object, &at, report);
+            let request = match crate::postman_graphql::from_postman(object, &at, report) {
+                Some(graphql) => Request::GraphQl(graphql),
+                None => import_request(object, &at, report),
+            };
             order.push(request_id(&request));
             children.push(crate::Child::Request(request));
         } else {
@@ -407,7 +411,7 @@ fn import_request(
     Request::Http(http)
 }
 
-fn import_url(value: Option<&Value>, path: &str, report: &mut ImportReport) -> String {
+pub(crate) fn import_url(value: Option<&Value>, path: &str, report: &mut ImportReport) -> String {
     match value {
         None | Some(Value::Null) => String::new(),
         Some(Value::String(raw)) => raw.clone(),
@@ -456,7 +460,7 @@ fn joined(value: Option<&Value>, separator: &str) -> String {
     }
 }
 
-fn import_headers(value: Option<&Value>) -> Vec<KeyValue> {
+pub(crate) fn import_headers(value: Option<&Value>) -> Vec<KeyValue> {
     let Some(headers) = value.and_then(Value::as_array) else {
         return Vec::new();
     };
@@ -644,7 +648,7 @@ fn import_responses(value: Option<&Value>, path: &str, report: &mut ImportReport
 // ---------------------------------------------------------------------------------------------
 // Auth
 
-fn import_auth(value: &Value, path: &str, report: &mut ImportReport) -> Auth {
+pub(crate) fn import_auth(value: &Value, path: &str, report: &mut ImportReport) -> Auth {
     let Some(object) = value.as_object() else {
         report.note(path, "auth is not an object; treated as inherit");
         return Auth::Inherit;
@@ -824,7 +828,7 @@ fn import_variables(values: &[Value], path: &str, report: &mut ImportReport) -> 
 }
 
 /// Imported `event[]` scripts are preserved verbatim and **never executed** (plan D3/D4/D5).
-fn import_events(
+pub(crate) fn import_events(
     object: &serde_json::Map<String, Value>,
     path: &str,
     extra: &mut BTreeMap<String, Value>,
@@ -879,10 +883,12 @@ fn export_children(children: &[crate::Child], out: &mut Vec<Value>, report: &mut
                 }
                 out.push(Value::Object(object));
             }
+            crate::Child::Request(Request::GraphQl(graphql)) => {
+                out.push(crate::postman_graphql::to_postman(graphql));
+            }
             // v2.1 has no shape for these kinds either: skipped exactly like Unsupported.
             crate::Child::Request(
-                Request::GraphQl(_)
-                | Request::WebSocket(_)
+                Request::WebSocket(_)
                 | Request::SocketIo(_)
                 | Request::Grpc(_)
                 | Request::Unsupported(_),
@@ -911,7 +917,7 @@ fn export_request(http: &HttpRequest) -> Value {
     Value::Object(object)
 }
 
-fn export_key_values(values: &[KeyValue]) -> Value {
+pub(crate) fn export_key_values(values: &[KeyValue]) -> Value {
     Value::Array(
         values
             .iter()
@@ -1023,7 +1029,7 @@ fn auth_group(named: &[(&str, &Option<String>)], extra: &BTreeMap<String, Value>
     Value::Array(entries)
 }
 
-fn export_auth(auth: &Auth) -> Value {
+pub(crate) fn export_auth(auth: &Auth) -> Value {
     let mut object = serde_json::Map::new();
     match auth {
         Auth::Inherit => {
