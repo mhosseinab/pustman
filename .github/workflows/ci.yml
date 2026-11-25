@@ -32,16 +32,12 @@ jobs:
       - name: Install toolchain from rust-toolchain.toml
         run: rustup toolchain install
 
-      - name: Cache cargo registry and target
-        uses: actions/cache@v4
+      # Saves on every default-branch run (a fixed key on actions/cache never refreshed,
+      # so the cached build went stale as the code moved); other refs restore it.
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('rust-toolchain.toml', '**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          shared-key: ci-${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/pustman-v1/main' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 
       - name: Verify
         run: scripts/pustman-v1-verify.sh
