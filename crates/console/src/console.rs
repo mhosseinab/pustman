@@ -19,7 +19,9 @@ mod panel;
 mod store;
 
 pub use export::export_text;
-pub use feed::{record_error, record_outcome, record_warnings, watch};
+pub use feed::{
+    record_error, record_error_as, record_outcome, record_outcome_as, record_warnings, watch,
+};
 pub use panel::{ConsolePanel, PANEL_ID};
 pub use store::{ConsoleEntry, ConsoleLevel, ConsoleSetting, ConsoleStore};
 

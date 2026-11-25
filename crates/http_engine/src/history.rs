@@ -49,8 +49,8 @@ mod window_tests;
 /// configurable — and `0` disabling storage — is settings work (S16b), not this step.
 pub const HISTORY_BODY_LIMIT: usize = 1024 * 1024;
 
-/// The `protocol` column: every send through [`crate::HttpClient::send_request`] is an
-/// HTTP exchange (plan D7 gives later protocols their own row shapes).
+/// The `protocol` column of a send through [`crate::HttpClient::send_request`]: an HTTP
+/// exchange (plan D7 gives later protocols their own row shapes).
 const PROTOCOL: &str = "http";
 
 /// Records a workspace's request history in `storage`'s `history` table (REQ-HIST-01).
@@ -143,10 +143,22 @@ impl HistoryRecorder {
         request: &HttpRequest,
         installation_key: Option<String>,
     ) -> Option<Arc<HistoryDraft>> {
+        self.draft_for_protocol(request, installation_key, PROTOCOL)
+    }
+
+    /// [`HistoryRecorder::draft_recorded_in`] for a send whose row names `protocol`: a
+    /// GraphQL request goes out as HTTP but is recorded as `graphql` (REQ-GQL-01).
+    pub(crate) fn draft_for_protocol(
+        &self,
+        request: &HttpRequest,
+        installation_key: Option<String>,
+        protocol: &'static str,
+    ) -> Option<Arc<HistoryDraft>> {
         let (target, request_json) = redacted_parts(request, &SecretValues::new())?;
         Some(Arc::new(HistoryDraft {
             recorder: self.clone(),
             installation_key,
+            protocol,
             method: request.method.as_str().to_owned(),
             target,
             request_json,
@@ -175,6 +187,8 @@ pub struct HistoryDraft {
     recorder: HistoryRecorder,
     /// The installation key of the folder the send came from, stored beside the row.
     installation_key: Option<String>,
+    /// The row's `protocol` column.
+    protocol: &'static str,
     method: String,
     target: String,
     request_json: Value,
@@ -202,7 +216,7 @@ impl HistoryDraft {
             id: None,
             workspace_id: self.recorder.workspace_id.clone(),
             created_at: self.created_at,
-            protocol: PROTOCOL.to_owned(),
+            protocol: self.protocol.to_owned(),
             method: redact_text(&self.method, secrets_used),
             target,
             status: Some(i64::from(response.status)),
@@ -230,7 +244,7 @@ impl HistoryDraft {
             id: None,
             workspace_id: self.recorder.workspace_id.clone(),
             created_at: self.created_at,
-            protocol: PROTOCOL.to_owned(),
+            protocol: self.protocol.to_owned(),
             method: redact_text(&self.method, secrets_used),
             target,
             status: None,
@@ -248,7 +262,7 @@ impl HistoryDraft {
             id: None,
             workspace_id: self.recorder.workspace_id.clone(),
             created_at: self.created_at,
-            protocol: PROTOCOL.to_owned(),
+            protocol: self.protocol.to_owned(),
             method: self.method.clone(),
             target: self.target.clone(),
             status: None,

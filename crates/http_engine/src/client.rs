@@ -14,6 +14,7 @@ use variables::{DynamicValues, ScopeKind, ScopeStack};
 
 use crate::body::resolve_body_files;
 use crate::error::TransportError;
+use crate::graphql::{self, GraphQlError, GraphQlSendInput};
 use crate::history::{HistoryDraft, HistoryRecorder};
 use crate::pipeline::{PipelineError, Warning};
 use crate::prepare::{Prepared, prepare};
@@ -331,12 +332,68 @@ impl HttpClient {
         installation_key: Option<String>,
         cx: &mut Context<HttpClient>,
     ) -> Task<Result<SendOutcome, PipelineError>> {
+        self.send_request_with_protocol(owner, input, installation_key, None, cx)
+    }
+
+    /// Send a GraphQL request as `owner` (REQ-GQL-01): built by
+    /// [`graphql::to_http_request`] into `POST application/json {query, variables,
+    /// operationName}`, then sent exactly as [`HttpClient::send_request_recorded_in`]
+    /// sends — `{{variables}}`, secrets, auth, cancellation — with its history row
+    /// naming the protocol [`graphql::PROTOCOL`]. The Console entry is the caller's to
+    /// record, as for every send: `console::record_outcome_as(graphql::PROTOCOL, …)`.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphQlError`] when the request cannot be built — variables that are not JSON —
+    /// before anything is sent or recorded, so the editor can mark the spot.
+    pub fn send_graphql(
+        &mut self,
+        owner: SendOwner,
+        input: GraphQlSendInput,
+        installation_key: Option<String>,
+        cx: &mut Context<HttpClient>,
+    ) -> Result<Task<Result<SendOutcome, PipelineError>>, GraphQlError> {
+        let GraphQlSendInput {
+            request,
+            ancestors,
+            scopes,
+            secrets,
+            secret_key,
+        } = input;
+        let input = SendInput {
+            request: graphql::to_http_request(&request)?,
+            ancestors,
+            scopes,
+            secrets,
+            secret_key,
+        };
+        Ok(self.send_request_with_protocol(
+            owner,
+            input,
+            installation_key,
+            Some(graphql::PROTOCOL),
+            cx,
+        ))
+    }
+
+    /// The one prepare-and-send path behind [`HttpClient::send_request_recorded_in`] and
+    /// [`HttpClient::send_graphql`]; the history row names `protocol`, or HTTP for `None`.
+    fn send_request_with_protocol(
+        &mut self,
+        owner: SendOwner,
+        input: SendInput,
+        installation_key: Option<String>,
+        protocol: Option<&'static str>,
+        cx: &mut Context<HttpClient>,
+    ) -> Task<Result<SendOutcome, PipelineError>> {
         let transport = self.transport.clone();
         let workspace_root = self.workspace_root.clone();
-        let draft = self
-            .history
-            .as_ref()
-            .and_then(|recorder| recorder.draft_recorded_in(&input.request, installation_key));
+        let draft = self.history.as_ref().and_then(|recorder| match protocol {
+            Some(protocol) => {
+                recorder.draft_for_protocol(&input.request, installation_key, protocol)
+            }
+            None => recorder.draft_recorded_in(&input.request, installation_key),
+        });
         // The send names itself in the [`SendEvent`] a cancellation becomes: the method
         // and URL as the caller sent it, placeholders and all (REQ-HTTP-12).
         let identity = SendIdentity {

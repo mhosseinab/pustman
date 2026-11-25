@@ -7,13 +7,36 @@
 //! `{"id": {{userId}}}`, which only becomes JSON once resolved.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use api_model::{Body, GraphQlRequest, HttpRequest, Method, RawLanguage};
+use api_model::{Auth, Body, GraphQlRequest, HttpRequest, Method, RawLanguage};
+use secrets::SecretStore;
 use variables::{ScopeStack, spans};
+
+use crate::SecretKeyLookup;
 
 #[cfg(test)]
 #[path = "graphql_tests.rs"]
 mod tests;
+
+/// Everything one [`crate::HttpClient::send_graphql`] needs: [`crate::SendInput`] with the
+/// GraphQL request in place of the HTTP one it is sent as.
+pub struct GraphQlSendInput {
+    /// The request to send, unresolved: `{{variables}}` in the URL, headers, query and
+    /// variables resolve in [`crate::prepare`].
+    pub request: GraphQlRequest,
+    /// The request's parents' auths, nearest first (folder → … → collection).
+    pub ancestors: Vec<Auth>,
+    /// The variables the request resolves against.
+    pub scopes: ScopeStack,
+    /// Where a referenced secret's value comes from.
+    pub secrets: Arc<dyn SecretStore>,
+    /// The keychain key of a secret variable, as in [`crate::SendInput::secret_key`].
+    pub secret_key: SecretKeyLookup,
+}
+
+/// The protocol a GraphQL send is listed under in History and the Console (REQ-GQL-01).
+pub const PROTOCOL: &str = "graphql";
 
 /// Why a [`GraphQlRequest`] cannot be built into an HTTP request.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]

@@ -3,13 +3,16 @@
 //! `prepare`, and a document's operation names are listed in order.
 
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 use api_model::{Auth, GraphQlRequest, ItemId, Method, Variable, VariableKind};
+use gpui::{AppContext, TestAppContext};
 use secrets::MemorySecretStore;
+use storage::LocalStore;
 use variables::{DynamicValues, ScopeKind, ScopeStack};
 
-use super::{GraphQlError, operation_names, to_http_request};
-use crate::{Header, RequestBody, prepare};
+use super::{GraphQlError, GraphQlSendInput, PROTOCOL, operation_names, to_http_request};
+use crate::{FakeTransport, Header, HistoryRecorder, HttpClient, RequestBody, SendOwner, prepare};
 
 fn graphql_request(query: &str, variables: &str, operation_name: Option<&str>) -> GraphQlRequest {
     GraphQlRequest {
@@ -107,6 +110,52 @@ fn invalid_variables_json_reports_line_and_column() {
         message.contains("line 3") && message.contains("column 10"),
         "the message names the line and column: {message}"
     );
+}
+
+#[gpui::test]
+async fn history_records_protocol_graphql(cx: &mut TestAppContext) {
+    let transport = FakeTransport::with_response(cx.executor(), 200, r#"{"data":{}}"#);
+    let client = cx.new(|_| HttpClient::new(Arc::new(transport.clone())));
+    let mut store = LocalStore::open_in_memory().unwrap();
+    store.migrate().unwrap();
+    let store = Arc::new(Mutex::new(store));
+    client.update(cx, |client, _| {
+        client.set_history(HistoryRecorder::new(store.clone(), "workspace-under-test"));
+    });
+    let mut scopes = ScopeStack::new();
+    scopes.push(
+        ScopeKind::Environment,
+        vec![variable("host", "api.example.test")],
+    );
+    let input = GraphQlSendInput {
+        request: graphql_request("query Me { me { id } }", "", Some("Me")),
+        ancestors: Vec::new(),
+        scopes,
+        secrets: Arc::new(MemorySecretStore::new()),
+        secret_key: Arc::new(|_, _| None),
+    };
+
+    let outcome = client
+        .update(cx, |client, cx| {
+            client.send_graphql(SendOwner::Shared, input, None, cx)
+        })
+        .unwrap()
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.response.status, 200);
+    assert_eq!(transport.requests().len(), 1);
+    assert_eq!(transport.requests()[0].method, Method::Post);
+    let rows = store
+        .lock()
+        .unwrap()
+        .history()
+        .search("workspace-under-test", "")
+        .unwrap();
+    assert_eq!(rows.len(), 1, "the send is recorded once");
+    assert_eq!(rows[0].protocol, PROTOCOL);
+    assert_eq!(rows[0].protocol, "graphql");
+    assert_eq!(rows[0].method, "POST");
 }
 
 #[test]
