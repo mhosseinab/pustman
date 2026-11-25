@@ -139,8 +139,8 @@ Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub p
 | S48u7 | UX follow-ups #332/#333 (driver-added; header-switch removal dropped) | done | 1 | | | S48u7 merged |
 | S48 | M2 SIGN-OFF (HUMAN) | done | 0 | | | M2 GO (human, 2026-11-25) at `839d378` |
 | S49 | Declare the M3–M5 dependencies | done | 1 | | | S49 merged |
-| S50 | Protocol request kinds, files, import, New menu, open from tree | pending | 0 | | | S50a–S50e |
-| S51 | Session events, Message log store/view/toolbar, Console entry | pending | 0 | | | S51a–S51e |
+| S50 | Protocol request kinds, files, import, New menu, open from tree | in_progress | 0 | | | S50a–S50e; S50a building |
+| S51 | Session events, Message log store/view/toolbar, Console entry | in_progress | 0 | | | S51a–S51e; S51a building |
 | S52 | Auth kinds and network model (proxy, client certs, CA) | pending | 0 | | | S52a, S52b |
 | S53 | GraphQL over the HTTP engine | pending | 0 | | |  |
 | S54 | Server-sent events: parser, streaming, viewer mode | pending | 0 | | | S54a–S54c |
