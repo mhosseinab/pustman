@@ -823,8 +823,9 @@ fn invalid_json(error: &serde_json::Error) -> ItemProblemKind {
 }
 
 /// A file name stem from an item name (REQ-WSP-03): lowercase, runs of anything else
-/// collapsed to a single dash.
-fn slugify(name: &str) -> String {
+/// collapsed to a single dash. Public so a folder named after an item (the New Workspace
+/// form's `<location>/<slug>`) reads the way that item's own files do.
+pub fn slugify(name: &str) -> String {
     let mut slug = String::new();
     for character in name.chars() {
         if character.is_ascii_alphanumeric() {

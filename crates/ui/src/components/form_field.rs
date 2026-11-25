@@ -17,7 +17,7 @@ use gpui::{
 use theme::ActiveTheme;
 
 use crate::color::Color;
-use crate::components::label::Label;
+use crate::components::label::{Label, LabelSize};
 use crate::spacing::DynamicSpacing;
 use crate::v_flex;
 
@@ -85,6 +85,7 @@ impl RenderOnce for FormField {
         let hint_selector = Self::hint_selector(&self.name);
         let error_selector = Self::error_selector(&self.name);
         let error = self.error;
+        let has_error = error.is_some();
         let hint = self.hint;
         v_flex()
             .id(ElementId::from(self.name.to_string()))
@@ -96,21 +97,26 @@ impl RenderOnce for FormField {
             .role(gpui::Role::Group)
             .aria_label(self.label.clone())
             .child(
-                div()
-                    .debug_selector(move || label_selector)
-                    .child(
-                        Label::new(self.label)
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
-                    ),
+                div().debug_selector(move || label_selector).child(
+                    Label::new(self.label)
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                ),
             )
             .child(
                 div()
                     .w_full()
                     .min_w_0()
                     .px(DynamicSpacing::Base03.rems(cx))
+                    .py(DynamicSpacing::Base02.rems(cx))
                     .border_1()
-                    .border_color(cx.theme().colors().border)
+                    // A broken field's box takes the error's colour too, beside the
+                    // message under it — the state is never colour-only.
+                    .border_color(if has_error {
+                        Color::Error.color(cx)
+                    } else {
+                        cx.theme().colors().border
+                    })
                     .rounded_sm()
                     .children(self.content),
             )
