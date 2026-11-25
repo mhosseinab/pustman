@@ -161,6 +161,12 @@ impl ResponseView {
             .update(cx, |timeline, cx| timeline.set_response(&response, cx));
         self.body
             .update(cx, |body, cx| body.set_body(Arc::clone(&response), cx));
+        let counts = TabCounts {
+            headers: Some(response.headers.len()),
+            cookies: Some(self.cookies.read(cx).rows().len()),
+        };
+        self.tab_bar
+            .update(cx, |tab_bar, cx| tab_bar.set_tabs(tabs_with(counts), cx));
         cx.notify();
     }
 
@@ -201,6 +207,8 @@ impl ResponseView {
         self.headers = cx.new(HeadersView::new);
         self.cookies = cx.new(CookiesTab::new);
         self.timeline = cx.new(TimelineTab::new);
+        self.tab_bar
+            .update(cx, |tab_bar, cx| tab_bar.set_tabs(tabs(), cx));
         cx.notify();
     }
 
@@ -315,10 +323,31 @@ pub fn init(cx: &mut App) {
 
 /// The tabs, built from [`TAB_TITLES`] so later steps append there and nowhere else.
 fn tabs() -> Vec<Tab> {
+    tabs_with(TabCounts::default())
+}
+
+/// What the Headers and Cookies tabs count for the response on screen (S48u5, the
+/// mockup's `Headers 11` / `Cookies 3`); `None` before a response arrived.
+#[derive(Clone, Copy, Default)]
+struct TabCounts {
+    headers: Option<usize>,
+    cookies: Option<usize>,
+}
+
+/// The tabs with their counts. The count is part of the tab's accessible name too
+/// (`Tab::accessible_label`), so it is never only a visual detail.
+fn tabs_with(counts: TabCounts) -> Vec<Tab> {
     TAB_TITLES
         .iter()
         .enumerate()
-        .map(|(index, title)| Tab::new(("response-tab", index), *title))
+        .map(|(index, title)| {
+            let count = match index {
+                HEADERS_TAB => counts.headers,
+                COOKIES_TAB => counts.cookies,
+                _ => None,
+            };
+            Tab::new(("response-tab", index), *title).count(count)
+        })
         .collect()
 }
 
@@ -352,6 +381,23 @@ fn empty_state(cx: &App) -> impl IntoElement {
             Label::new("Send a request to see its status, headers and body here.")
                 .color(Color::Muted),
         )
+        .child(send_hint(cx))
+}
+
+/// The debug selector on the empty state's "how to send" line.
+pub(crate) const SEND_HINT_SELECTOR: &str = "response-empty-send-hint";
+
+/// The empty state's second line (S48u5): how to send, with the binding read from the
+/// keymap so it follows a rebind — "Press Ctrl+Enter or click Send.", or just "Click
+/// Send." when nothing binds `request::Send`.
+fn send_hint(cx: &App) -> impl IntoElement {
+    let text = match ui::keymap_binding_text(&pustman_actions::request::Send, cx) {
+        Some(keys) => format!("Press {keys} or click Send."),
+        None => "Click Send.".to_owned(),
+    };
+    div()
+        .debug_selector(|| SEND_HINT_SELECTOR.to_owned())
+        .child(Label::new(text).size(LabelSize::Small).color(Color::Muted))
 }
 
 #[cfg(test)]

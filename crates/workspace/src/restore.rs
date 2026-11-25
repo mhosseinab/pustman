@@ -41,6 +41,10 @@ mod atomic_tests;
 #[path = "restore_duplicate_tests.rs"]
 mod duplicate_tests;
 
+#[cfg(test)]
+#[path = "restore_collapsed_tests.rs"]
+mod collapsed_tests;
+
 /// How long a change to the pane or a dock waits for the next one before the save task
 /// writes it — REQ-NFR-05's 2 s autosave cadence.
 pub const SAVE_DEBOUNCE: Duration = Duration::from_secs(2);
@@ -215,13 +219,16 @@ impl Restore {
         let Snapshot { layout, tabs } = snapshot;
         if let Some(layout) = &layout {
             workspace.update(cx, |workspace, cx| {
+                // Applied as the saved layout, not as plain setters: the dock then keeps
+                // it against a resting default that arrives later (`Dock::rest_as_strip`),
+                // so the saved layout wins by design rather than by init order.
                 workspace.left_dock().update(cx, |dock, cx| {
-                    dock.set_open(layout.left_dock.is_open, cx);
-                    dock.set_size_px(layout.left_dock.size_px, cx);
+                    let saved = &layout.left_dock;
+                    dock.apply_saved_layout(saved.is_open, saved.collapsed, saved.size_px, cx);
                 });
                 workspace.bottom_dock().update(cx, |dock, cx| {
-                    dock.set_open(layout.bottom_dock.is_open, cx);
-                    dock.set_size_px(layout.bottom_dock.size_px, cx);
+                    let saved = &layout.bottom_dock;
+                    dock.apply_saved_layout(saved.is_open, saved.collapsed, saved.size_px, cx);
                 });
             });
         }
@@ -313,10 +320,12 @@ impl Restore {
                 left_dock: DockLayout {
                     is_open: left_dock.is_open(),
                     size_px: left_dock.size_px(),
+                    collapsed: left_dock.is_collapsed(),
                 },
                 bottom_dock: DockLayout {
                     is_open: bottom_dock.is_open(),
                     size_px: bottom_dock.size_px(),
+                    collapsed: bottom_dock.is_collapsed(),
                 },
                 active_item_id: pane
                     .active_item()
@@ -479,6 +488,10 @@ struct LayoutDocument {
 struct DockLayout {
     is_open: bool,
     size_px: f32,
+    /// Folded to its header strip (S48u5). Layouts saved before the field existed read
+    /// as unfolded — what those docks were when they were saved.
+    #[serde(default)]
+    collapsed: bool,
 }
 
 /// One tab on its way to or from `open_tabs`.
