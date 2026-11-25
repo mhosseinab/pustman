@@ -111,8 +111,6 @@ pub struct RequestEditor {
     /// The collection and folder names over this request, `None` while it has no file
     /// in the open workspace (`breadcrumb`).
     location: Option<Vec<String>>,
-    /// Keeps the breadcrumb following the window's workspace (`breadcrumb`).
-    _location_subscription: Option<Subscription>,
     /// Each `{{variable}}` the request uses and what it resolves to (`variable_line`).
     variable_line: Vec<variable_line::VariableLineEntry>,
     /// The counts and dots the tab strip shows (`request_tabs`).
@@ -292,7 +290,6 @@ impl RequestEditor {
             tab_badges,
             variable_line: Vec::new(),
             location: None,
-            _location_subscription: None,
             params,
             headers,
             body_tab,

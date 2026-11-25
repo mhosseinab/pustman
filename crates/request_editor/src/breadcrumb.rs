@@ -12,8 +12,13 @@
 //! It is recomputed when the window's workspace opens or its snapshot changes, never
 //! in `render`.
 
+use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
+
 use api_model::ItemId;
-use gpui::{AnyElement, App, Context, Entity, FontWeight, Global, Subscription};
+use gpui::{
+    AnyElement, App, Context, Entity, EntityId, FontWeight, Global, Subscription, WeakEntity,
+};
 use pustman_actions::request::CopyAsCurl;
 use pustman_actions::workspace::Save;
 use ui::prelude::*;
@@ -37,30 +42,52 @@ pub const UNSAVED_LABEL: &str = "Unsaved request";
 /// The collection and folder names the request `id` sits under, outermost first, or
 /// `None` when the snapshot holds no request with that id (not saved there yet).
 pub fn location_of(snapshot: &WorkspaceSnapshot, id: &ItemId) -> Option<Vec<String>> {
-    let request = snapshot.items.get(id)?;
-    if !matches!(request.body, ItemBody::Request(_)) {
-        return None;
-    }
-    let mut containers: Vec<(usize, String)> = snapshot
+    locations_of(snapshot).remove(id)
+}
+
+/// Every request's trail in `snapshot`, computed in one pass: the containers are
+/// collected and ordered once, then each request takes the ones whose directory holds
+/// its own.
+fn locations_of(snapshot: &WorkspaceSnapshot) -> BTreeMap<ItemId, Vec<String>> {
+    let mut containers: Vec<(usize, &Path, String)> = snapshot
         .items
         .values()
         .filter(|item| matches!(item.body, ItemBody::Collection(_) | ItemBody::Folder(_)))
         .filter_map(|item| {
             let own_dir = item.path.as_deref()?.parent()?;
-            request
-                .dir
-                .starts_with(own_dir)
-                .then(|| (own_dir.components().count(), item.name()))
+            Some((own_dir.components().count(), own_dir, item.name()))
         })
         .collect();
     containers.sort();
-    Some(containers.into_iter().map(|(_, name)| name).collect())
+    snapshot
+        .items
+        .iter()
+        .filter(|(_, item)| matches!(item.body, ItemBody::Request(_)))
+        .map(|(id, request)| {
+            let trail = containers
+                .iter()
+                .filter(|(_, own_dir, _)| request.dir.starts_with(own_dir))
+                .map(|(_, _, name)| name.clone())
+                .collect();
+            (*id, trail)
+        })
+        .collect()
 }
 
-/// The init guard and the new-editor observation behind it (`disk_change`'s shape).
+/// One window's workspace as the breadcrumbs see it: every request's trail, computed
+/// once per snapshot and shared by all the window's editors (never once per editor).
+struct OpenerLocations {
+    locations: BTreeMap<ItemId, Vec<String>>,
+    editors: Vec<WeakEntity<RequestEditor>>,
+    /// Recomputes `locations` when the window opens a folder or its snapshot changes.
+    _subscription: Subscription,
+}
+
+/// The init guard, the new-editor observation, and the shared trails per window.
 #[derive(Default)]
 struct Wiring {
     started: bool,
+    by_opener: HashMap<EntityId, OpenerLocations>,
     /// Kept so the observation keeps firing (AGENTS.md).
     _subscriptions: Vec<Subscription>,
 }
@@ -83,6 +110,14 @@ pub fn init(cx: &mut App) {
         .push(subscription);
 }
 
+fn current_locations(opener: &Entity<WorkspaceOpen>, cx: &App) -> BTreeMap<ItemId, Vec<String>> {
+    opener
+        .read(cx)
+        .snapshot()
+        .map(locations_of)
+        .unwrap_or_default()
+}
+
 fn wire_editor(editor: &Entity<RequestEditor>, cx: &mut App) {
     let Some(opener) = cx
         .with_window(editor.entity_id(), |window, cx| {
@@ -97,32 +132,57 @@ fn wire_editor(editor: &Entity<RequestEditor>, cx: &mut App) {
         // request stays "Unsaved request".
         return;
     };
-    editor.update(cx, |editor, cx| editor.follow_location(&opener, cx));
+    let opener_id = opener.entity_id();
+    if !cx.global::<Wiring>().by_opener.contains_key(&opener_id) {
+        let locations = current_locations(&opener, cx);
+        let subscription = cx.subscribe(&opener, move |opener, event, cx| match event {
+            WorkspaceOpenEvent::Opened { .. } | WorkspaceOpenEvent::SnapshotChanged => {
+                refresh_opener(opener_id, &opener, cx)
+            }
+        });
+        cx.global_mut::<Wiring>().by_opener.insert(
+            opener_id,
+            OpenerLocations {
+                locations,
+                editors: Vec::new(),
+                _subscription: subscription,
+            },
+        );
+    }
+    let id = editor.read(cx).draft.id;
+    let location = cx
+        .global_mut::<Wiring>()
+        .by_opener
+        .get_mut(&opener_id)
+        .and_then(|entry| {
+            entry.editors.push(editor.downgrade());
+            entry.locations.get(&id).cloned()
+        });
+    editor.update(cx, |editor, cx| editor.set_location(location, cx));
+}
+
+/// The window's snapshot changed: recompute its trails once and hand each live editor
+/// its own; editors that closed are dropped from the list.
+fn refresh_opener(opener_id: EntityId, opener: &Entity<WorkspaceOpen>, cx: &mut App) {
+    let locations = current_locations(opener, cx);
+    let editors = match cx.global_mut::<Wiring>().by_opener.get_mut(&opener_id) {
+        Some(entry) => {
+            entry.editors.retain(|editor| editor.upgrade().is_some());
+            entry.locations = locations.clone();
+            entry.editors.clone()
+        }
+        None => return,
+    };
+    for editor in editors.iter().filter_map(WeakEntity::upgrade) {
+        editor.update(cx, |editor, cx| {
+            let location = locations.get(&editor.draft.id).cloned();
+            editor.set_location(location, cx);
+        });
+    }
 }
 
 impl RequestEditor {
-    /// Track where this request lives in `opener`'s workspace from now on.
-    pub(crate) fn follow_location(
-        &mut self,
-        opener: &Entity<WorkspaceOpen>,
-        cx: &mut Context<Self>,
-    ) {
-        self._location_subscription =
-            Some(
-                cx.subscribe(opener, |editor, opener, event, cx| match event {
-                    WorkspaceOpenEvent::Opened { .. } | WorkspaceOpenEvent::SnapshotChanged => {
-                        editor.refresh_location(&opener, cx)
-                    }
-                }),
-            );
-        self.refresh_location(opener, cx);
-    }
-
-    fn refresh_location(&mut self, opener: &Entity<WorkspaceOpen>, cx: &mut Context<Self>) {
-        let location = opener
-            .read(cx)
-            .snapshot()
-            .and_then(|snapshot| location_of(snapshot, &self.draft.id));
+    fn set_location(&mut self, location: Option<Vec<String>>, cx: &mut Context<Self>) {
         if location != self.location {
             self.location = location;
             cx.notify();
@@ -224,3 +284,7 @@ impl RequestEditor {
 #[cfg(test)]
 #[path = "breadcrumb_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "breadcrumb_wiring_tests.rs"]
+mod wiring_tests;

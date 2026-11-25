@@ -9,9 +9,9 @@ use gpui::{
 };
 use ui::test_support::{draw_window, init_test};
 
+use crate::REQUEST_TAB_CONTENT_SELECTOR;
 use crate::RequestEditor;
 use crate::key_value_table::ADD_ROW_SELECTOR;
-use crate::REQUEST_TAB_CONTENT_SELECTOR;
 
 fn request() -> HttpRequest {
     let mut request = crate::new_request::fresh_request();
