@@ -387,6 +387,30 @@ impl BodyView {
         (row_height > px(0.)).then(|| (row_height, -state.base_handle.offset().y))
     }
 
+    /// The lines on screen, 1-based and inclusive, and how many there are — the mockup's
+    /// "Lines 1–9 of 29" (S48u5). `None` outside Pretty/Raw, with nothing to draw, or
+    /// before the list's first layout told us its row height and viewport.
+    pub(crate) fn visible_line_range(&self) -> Option<(usize, usize, usize)> {
+        if !matches!(self.mode, BodyMode::Pretty | BodyMode::Raw) {
+            return None;
+        }
+        let total = self.shown().len();
+        if total == 0 {
+            return None;
+        }
+        let (row_height, scroll_top) = self.row_geometry()?;
+        let viewport = self
+            .list_scroll_handle
+            .0
+            .borrow()
+            .last_item_size?
+            .item
+            .height;
+        let first = ((scroll_top / row_height).floor().max(0.) as usize).min(total - 1);
+        let last = (((scroll_top + viewport) / row_height).floor() as usize).clamp(first + 1, total);
+        Some((first + 1, last, total))
+    }
+
     fn select_all(&mut self, _: &SelectAll, _window: &mut Window, cx: &mut Context<Self>) {
         if !matches!(self.mode, BodyMode::Pretty | BodyMode::Raw) {
             return;
@@ -939,7 +963,18 @@ impl BodyView {
             .px(DynamicSpacing::Base04.rems(cx))
             .py(DynamicSpacing::Base06.rems(cx))
             .child(self.mode_bar.clone())
-            .child(self.render_formatter_control(cx))
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap(DynamicSpacing::Base08.rems(cx))
+                    .children(self.visible_line_range().map(|(first, last, total)| {
+                        let text = line_range_text(first, last, total);
+                        div()
+                            .debug_selector(|| LINE_RANGE_SELECTOR.to_owned())
+                            .child(Label::new(text).size(LabelSize::Small).color(Color::Muted))
+                    }))
+                    .child(self.render_formatter_control(cx)),
+            )
     }
 
     /// The override trigger — a dropdown button, drawn like the URL bar's method picker
@@ -1395,6 +1430,14 @@ pub(crate) fn note(text: impl Into<SharedString>, cx: &App) -> impl IntoElement 
         .px(DynamicSpacing::Base04.rems(cx))
         .py(DynamicSpacing::Base02.rems(cx))
         .child(Label::new(text.into()).color(Color::Muted))
+}
+
+/// The debug selector on the body toolbar's "Lines a–b of N" readout.
+pub(crate) const LINE_RANGE_SELECTOR: &str = "body-line-range";
+
+/// The readout of the lines on screen: `Lines 1–9 of 29`.
+pub(crate) fn line_range_text(first: usize, last: usize, total: usize) -> SharedString {
+    format!("Lines {first}–{last} of {total}").into()
 }
 
 /// The number a line draws in the gutter left of the code (#225): 1-based, padded with

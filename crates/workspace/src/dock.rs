@@ -70,6 +70,11 @@ impl DockPosition {
 pub struct Dock {
     position: DockPosition,
     is_open: bool,
+    /// Open but folded down to its panel header row (S48u5): the app starts the console
+    /// this way, a one-line strip that opens on a click or `ToggleConsole`, instead of a
+    /// 200 px empty pane taking room from the request. Only drawn for the bottom dock;
+    /// [`Self::is_open`] stays true, because the strip is on screen.
+    collapsed: bool,
     size_px: f32,
     panels: Vec<Box<dyn PanelHandle>>,
     active_panel: Option<usize>,
@@ -85,6 +90,7 @@ impl Dock {
         Self {
             position,
             is_open: true,
+            collapsed: false,
             size_px: position.default_size_px(),
             panels: Vec::new(),
             active_panel: None,
@@ -121,8 +127,25 @@ impl Dock {
         cx.notify();
     }
 
-    /// Flip between hidden and showing.
+    /// Whether the dock shows only its header strip ([`Self::set_collapsed`]).
+    pub fn is_collapsed(&self) -> bool {
+        self.collapsed
+    }
+
+    /// Fold the dock down to its header strip, or unfold it to its full size.
+    pub fn set_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) {
+        self.collapsed = collapsed;
+        cx.notify();
+    }
+
+    /// Flip between hidden and showing. A collapsed dock counts as asking to be seen:
+    /// the toggle unfolds it rather than hiding the strip the user just asked about.
     pub fn toggle(&mut self, cx: &mut Context<Self>) {
+        if self.is_open && self.collapsed {
+            self.set_collapsed(false, cx);
+            return;
+        }
+        self.collapsed = false;
         self.set_open(!self.is_open, cx);
     }
 
@@ -204,6 +227,8 @@ impl Dock {
             return;
         };
         self.active_panel = Some(index);
+        // Choosing a panel is asking to see it: a collapsed strip unfolds.
+        self.collapsed = false;
         cx.notify();
         if let Some(panel) = self.panels.get(index) {
             let focus_handle = panel.focus_handle(cx);
@@ -338,7 +363,33 @@ impl Dock {
                 .children(title)
                 .child(div().flex_1())
                 .children(actions)
-                .child(self.hide_action(cx)),
+                .map(|row| {
+                    if self.shows_strip() {
+                        row.child(self.expand_action(cx))
+                    } else {
+                        row.child(self.hide_action(cx))
+                    }
+                }),
+        )
+    }
+
+    /// Whether the dock draws as its header strip only: collapsed, and an edge where a
+    /// strip reads as a bar — the bottom one. The left dock keeps its rail for that.
+    fn shows_strip(&self) -> bool {
+        self.collapsed && self.position == DockPosition::Bottom
+    }
+
+    /// The collapsed strip's rightmost action: unfold the dock — what `ToggleConsole`
+    /// does from the keyboard.
+    fn expand_action(&self, cx: &Context<Self>) -> impl IntoElement {
+        let selector = dock_expand_selector(self.position);
+        div().debug_selector(move || selector.clone()).child(
+            IconButton::new(
+                format!("dock-expand-button-{}", self.position.element_id()),
+                IconName::ChevronUp,
+                Tooltip::for_action("Show console", &pustman_actions::workspace::ToggleConsole),
+            )
+            .on_click(cx.listener(|dock, _event, _window, cx| dock.set_collapsed(false, cx))),
         )
     }
 
@@ -405,6 +456,10 @@ impl Dock {
                     .h_full()
                     .border_r_1()
                     .border_color(colors.border_variant),
+                DockPosition::Bottom if self.shows_strip() => this
+                    .w_full()
+                    .border_t_1()
+                    .border_color(colors.border_variant),
                 DockPosition::Bottom => this
                     .w_full()
                     .h(px_to_rems(self.size_px))
@@ -412,7 +467,7 @@ impl Dock {
                     .border_color(colors.border_variant),
             })
             .children(header)
-            .children(active_panel.map(|panel| div().flex_1().min_h_0().child(panel)))
+            .children(active_panel.filter(|_| !self.shows_strip()).map(|panel| div().flex_1().min_h_0().child(panel)))
             .into_any_element()
     }
 }
@@ -483,6 +538,11 @@ pub(crate) fn dock_panel_selector(panel_id: &str) -> String {
 /// The debug selector the dock's panel header row carries.
 pub(crate) fn dock_header_selector(position: DockPosition) -> String {
     format!("dock-header-{}", position.element_id())
+}
+
+/// The debug selector the collapsed strip's expand action carries.
+pub(crate) fn dock_expand_selector(position: DockPosition) -> String {
+    format!("dock-expand-{}", position.element_id())
 }
 
 /// The debug selector the panel header's hide action carries.

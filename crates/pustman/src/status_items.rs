@@ -4,8 +4,28 @@
 //! [`Workspace`] window's status bar here in the app shell, the one crate that can see
 //! both globals they read: `console`'s [`ConsoleStore`] and `environment_picker`'s
 //! [`SelectorInputs`].
+//!
+//! Since S48u5 the readouts are controls, as in the approved mockup's status bar: the
+//! console count toggles the console (`workspace::ToggleConsole`) with Cookies beside it
+//! (`cookies::Manage`), and the environment readout ends in the Sidebar toggle
+//! (`workspace::ToggleSidebar`). Each shows its key binding and is a tab stop.
+//!
+//! `Decision:` the extra controls render inside the two existing items rather than as
+//! items of their own: the status bar's item list is the shell's contract (one console
+//! item left, one environment item right), and Cookies and Sidebar are part of those
+//! groups in the mockup, not new regions.
+//!
+//! `Decision:` Cookies shows no count. The jar is an `Arc<Mutex<_>>` with no change
+//! notification, so a count would go stale between sends; a number that can lie is worse
+//! than none. "Saved to <collection>" and Globals are not shown: nothing in the app holds
+//! a saved-to state or a globals scope to name, and the bar shows nothing that does nothing.
+//!
+//! The app also starts every window's console collapsed to its one-line strip
+//! ([`collapse_console`]): a saved layout, restored after, wins.
 
 use console::ConsoleStore;
+use pustman_actions::cookies::Manage;
+use pustman_actions::workspace::{ToggleConsole, ToggleSidebar};
 use environment_picker::SelectorInputs;
 use environment_picker::selector::NO_ENVIRONMENT_LABEL;
 use gpui::{App, Context, EntityId, Global, Subscription, WeakEntity};
@@ -18,6 +38,11 @@ pub(crate) const CONSOLE_COUNT_SELECTOR: &str = "status-console-count";
 
 /// The debug selector on the active-environment readout's rendered element.
 pub(crate) const ENVIRONMENT_SELECTOR: &str = "status-environment";
+
+/// The debug selectors (and element ids) of the status bar's controls.
+pub(crate) const CONSOLE_TOGGLE_SELECTOR: &str = "status-console-toggle";
+pub(crate) const COOKIES_SELECTOR: &str = "status-cookies";
+pub(crate) const SIDEBAR_TOGGLE_SELECTOR: &str = "status-sidebar-toggle";
 
 /// The console entry count at the status bar's left: the blueprint's `Console  0`
 /// readout (title, count). It follows [`ConsoleStore`] as entries arrive, are cleared,
@@ -46,14 +71,27 @@ impl ConsoleCount {
 }
 
 impl Render for ConsoleCount {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
-            .debug_selector(|| CONSOLE_COUNT_SELECTOR.to_owned())
+            .gap(DynamicSpacing::Base08.rems(cx))
             .child(
-                Label::new(self.readout())
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
+                div()
+                    .debug_selector(|| CONSOLE_COUNT_SELECTOR.to_owned())
+                    .child(status_control(
+                        CONSOLE_TOGGLE_SELECTOR,
+                        IconName::Terminal,
+                        self.readout().into(),
+                        "Toggle console",
+                        Box::new(ToggleConsole),
+                    )),
             )
+            .child(status_control(
+                COOKIES_SELECTOR,
+                IconName::Cookie,
+                SharedString::new_static("Cookies"),
+                "Manage cookies",
+                Box::new(Manage),
+            ))
     }
 }
 
@@ -87,20 +125,57 @@ impl ActiveEnvironment {
 }
 
 impl Render for ActiveEnvironment {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let readout = self.readout();
-        div()
-            .id(ENVIRONMENT_SELECTOR)
-            .debug_selector(|| ENVIRONMENT_SELECTOR.to_owned())
+        h_flex()
             .min_w_0()
-            .tooltip(Tooltip::text(readout.clone()).builder())
+            .gap(DynamicSpacing::Base08.rems(cx))
             .child(
-                Label::new(readout)
-                    .size(LabelSize::Small)
-                    .color(Color::Muted)
-                    .truncate(),
+                div()
+                    .id(ENVIRONMENT_SELECTOR)
+                    .debug_selector(|| ENVIRONMENT_SELECTOR.to_owned())
+                    .min_w_0()
+                    .tooltip(Tooltip::text(readout.clone()).builder())
+                    .child(
+                        Label::new(readout)
+                            .size(LabelSize::Small)
+                            .color(Color::Muted)
+                            .truncate(),
+                    ),
             )
+            .child(status_control(
+                SIDEBAR_TOGGLE_SELECTOR,
+                IconName::PanelLeft,
+                SharedString::new_static("Sidebar"),
+                "Toggle sidebar",
+                Box::new(ToggleSidebar),
+            ))
     }
+}
+
+/// One status-bar control: an icon, its label and the action's key binding, as the
+/// mockup's `▣ Console  Ctrl Alt C`. A click dispatches `action` from the control, so
+/// the workspace handler above it answers; the control is a tab stop (Enter/Space run
+/// it through the button) and is named for assistive tech by its tooltip title.
+fn status_control(
+    selector: &'static str,
+    icon: IconName,
+    label: SharedString,
+    what: &'static str,
+    action: Box<dyn gpui::Action>,
+) -> impl IntoElement {
+    let hint = KeyBinding::for_action(action.as_ref());
+    let tooltip = Tooltip::for_action(what, action.as_ref());
+    div().debug_selector(move || selector.to_owned()).child(
+        Button::new(selector, label)
+            .size(ButtonSize::Default)
+            .style(ButtonStyle::Transparent)
+            .label_color(Color::Muted)
+            .start_icon(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
+            .key_binding(hint)
+            .tooltip(tooltip)
+            .on_click(move |_event, window, cx| window.dispatch_action(action.boxed_clone(), cx)),
+    )
 }
 
 /// The installed inputs' active environment's name — `None` while no environment is
@@ -145,6 +220,17 @@ pub(crate) fn init(cx: &mut App) {
         .push(subscription);
 }
 
+/// Start the window's console as its one-line strip (S48u5): an empty console pane took
+/// ~200 px from the request on every launch. This runs as the window opens, before the
+/// saved layout is read back, so a layout saved with the console open still wins.
+fn collapse_console(workspace: &gpui::Entity<Workspace>, cx: &mut App) {
+    workspace.update(cx, |workspace, cx| {
+        workspace
+            .bottom_dock()
+            .update(cx, |dock, cx| dock.set_collapsed(true, cx));
+    });
+}
+
 /// Add the readouts to one workspace's status bar, at most once per workspace whichever
 /// path gets there first.
 fn add_status_items(workspace: &WeakEntity<Workspace>, cx: &mut App) {
@@ -160,6 +246,7 @@ fn add_status_items(workspace: &WeakEntity<Workspace>, cx: &mut App) {
     {
         return;
     }
+    collapse_console(&workspace, cx);
     let console_count = cx.new(ConsoleCount::new);
     let environment = cx.new(ActiveEnvironment::new);
     workspace.update(cx, |workspace, cx| {

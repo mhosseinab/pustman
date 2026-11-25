@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use gpui::{App, FontFeatures, Hsla};
 use http_engine::ResponseBody;
+use pustman_actions::response::SaveBody;
 use ui::prelude::*;
 
 use crate::child_id;
@@ -122,6 +123,7 @@ impl RenderOnce for StatusLine {
                 "Total time",
                 cx,
             ))
+            .child(separator_dot())
             .child(metric(
                 child_id(&self.id, "size"),
                 "Size",
@@ -130,7 +132,32 @@ impl RenderOnce for StatusLine {
                 cx,
             ))
             .child(div().flex_1())
+            .child(save_response_button(child_id(&self.id, "save-response")))
     }
+}
+
+/// The mockup's dot between the time and the size: a muted middle dot in the label
+/// font, so it scales with the text and needs no colour of its own.
+fn separator_dot() -> impl IntoElement {
+    Label::new("·").size(LabelSize::Small).color(Color::Muted)
+}
+
+/// The debug selector on the header's "Save response" control.
+pub(crate) const SAVE_RESPONSE_SELECTOR: &str = "response-save";
+
+/// "Save response" at the header's right end: `response::SaveBody` (REQ-RESP-07), the
+/// same action as its key binding, dispatched from inside the viewer so its handler
+/// answers. A tab stop like every button; its tooltip names the binding.
+fn save_response_button(id: ElementId) -> impl IntoElement {
+    div()
+        .debug_selector(|| SAVE_RESPONSE_SELECTOR.to_owned())
+        .child(
+            Button::new(id, "Save response")
+                .style(ButtonStyle::Subtle)
+                .start_icon(Icon::new(IconName::Download).size(IconSize::Small))
+                .tooltip(Tooltip::for_action("Save the response body to a file", &SaveBody))
+                .on_click(|_event, window, cx| window.dispatch_action(Box::new(SaveBody), cx)),
+        )
 }
 
 /// The color a status code draws in: one theme token per HTTP class. A code outside the

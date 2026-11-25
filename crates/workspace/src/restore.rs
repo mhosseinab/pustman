@@ -217,10 +217,12 @@ impl Restore {
             workspace.update(cx, |workspace, cx| {
                 workspace.left_dock().update(cx, |dock, cx| {
                     dock.set_open(layout.left_dock.is_open, cx);
+                    dock.set_collapsed(layout.left_dock.collapsed, cx);
                     dock.set_size_px(layout.left_dock.size_px, cx);
                 });
                 workspace.bottom_dock().update(cx, |dock, cx| {
                     dock.set_open(layout.bottom_dock.is_open, cx);
+                    dock.set_collapsed(layout.bottom_dock.collapsed, cx);
                     dock.set_size_px(layout.bottom_dock.size_px, cx);
                 });
             });
@@ -313,10 +315,12 @@ impl Restore {
                 left_dock: DockLayout {
                     is_open: left_dock.is_open(),
                     size_px: left_dock.size_px(),
+                    collapsed: left_dock.is_collapsed(),
                 },
                 bottom_dock: DockLayout {
                     is_open: bottom_dock.is_open(),
                     size_px: bottom_dock.size_px(),
+                    collapsed: bottom_dock.is_collapsed(),
                 },
                 active_item_id: pane
                     .active_item()
@@ -479,6 +483,10 @@ struct LayoutDocument {
 struct DockLayout {
     is_open: bool,
     size_px: f32,
+    /// Folded to its header strip (S48u5). Layouts saved before the field existed read
+    /// as unfolded — what those docks were when they were saved.
+    #[serde(default)]
+    collapsed: bool,
 }
 
 /// One tab on its way to or from `open_tabs`.
