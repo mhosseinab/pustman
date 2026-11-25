@@ -12,6 +12,7 @@ mod environment;
 mod example;
 mod network;
 mod postman;
+mod postman_graphql;
 mod protocol_request;
 mod redact;
 mod request;
