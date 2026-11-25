@@ -346,3 +346,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — S49 merged (M3–M5 dependencies; websocket_client and grpc_client crates; one aws-lc-rs provider; Socket.IO deferred to S62a; security PASS_WITH_ISSUES; VERIFY OK; LOW #337).
 - 2026-11-25 — Dispatched S50a (request kinds) and S51a (session events), Claude workers, 2 at once for disk (22 GB free). S50d (authorized EXPECTED_ACTIONS edit in the ledger) and S52b queued.
 - 2026-11-25 — S50a merged (protocol request kinds; security fix 1; authorized request_tests edit, ledger row now used; VERIFY OK; follow-ups #339).
+- 2026-11-25 — S51a merged (session events; security fix 1; merge renamed its MessageKind to SessionMessageKind next to S50a's authoring MessageKind; VERIFY OK; follow-ups #338).

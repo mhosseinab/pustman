@@ -14,6 +14,7 @@ mod postman;
 mod protocol_request;
 mod redact;
 mod request;
+mod session;
 mod settings;
 mod variable;
 
@@ -33,6 +34,10 @@ pub use protocol_request::{
 pub use redact::{MASK, SecretValues, redact_headers, redact_text, redact_url};
 pub use request::{
     Body, FormField, HttpRequest, KeyValue, Method, MethodError, RawLanguage, Request,
+};
+pub use session::{
+    CloseReason, ConnectionDetails, Message, Payload, ProtocolFields, SessionError, SessionEvent,
+    SessionMessageKind, WebSocketOpcode, to_jsonl_line,
 };
 pub use settings::{HttpVersion, RequestSettings};
 pub use variable::{Variable, VariableKind};
