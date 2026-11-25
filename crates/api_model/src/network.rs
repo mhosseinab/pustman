@@ -58,6 +58,7 @@ pub enum ProxyMode {
 
 /// The outgoing proxy and the hosts that skip it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "serde_json::Map<String, serde_json::Value>")]
 pub struct ProxyConfig {
     #[serde(flatten)]
     pub mode: ProxyMode,
@@ -65,6 +66,27 @@ pub struct ProxyConfig {
     /// leading `.` or `*.` on an entry is optional, and `*` alone matches every host.
     #[serde(default)]
     pub no_proxy: Vec<String>,
+}
+
+/// A proxy section that only lists exceptions (`{"no_proxy": [...]}`) means the system
+/// proxy minus those hosts, so an absent `mode` reads as `system`. A present but unknown
+/// or malformed `mode` still fails, through [`ProxyMode`]'s own deserializer.
+impl TryFrom<serde_json::Map<String, serde_json::Value>> for ProxyConfig {
+    type Error = serde_json::Error;
+
+    fn try_from(
+        mut fields: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<Self, Self::Error> {
+        let no_proxy = match fields.remove("no_proxy") {
+            Some(value) => serde_json::from_value(value)?,
+            None => Vec::new(),
+        };
+        fields
+            .entry("mode")
+            .or_insert_with(|| serde_json::Value::from("system"));
+        let mode = serde_json::from_value(serde_json::Value::Object(fields))?;
+        Ok(Self { mode, no_proxy })
+    }
 }
 
 impl ProxyConfig {

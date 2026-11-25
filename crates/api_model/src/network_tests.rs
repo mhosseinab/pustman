@@ -200,3 +200,64 @@ fn network_settings_never_serialise_a_secret_value() {
     }
     assert!(saved.contains("network/proxy-auth"));
 }
+
+#[test]
+fn test_proxy_without_mode_means_system_proxy_with_its_exceptions() {
+    let settings: NetworkSettings =
+        serde_json::from_str(r#"{"proxy":{"no_proxy":["localhost","*.corp"]}}"#).unwrap();
+    assert_eq!(settings.proxy.mode, ProxyMode::System);
+    assert_eq!(settings.proxy.no_proxy, vec!["localhost", "*.corp"]);
+
+    let empty: ProxyConfig = serde_json::from_str("{}").unwrap();
+    assert_eq!(empty, ProxyConfig::default());
+}
+
+#[test]
+fn test_proxy_with_unknown_or_malformed_mode_is_rejected() {
+    let unknown = serde_json::from_str::<ProxyConfig>(r#"{"mode":"pac","no_proxy":[]}"#);
+    assert!(unknown.is_err());
+    let not_a_string = serde_json::from_str::<ProxyConfig>(r#"{"mode":3}"#);
+    assert!(not_a_string.is_err());
+    let manual_missing_host =
+        serde_json::from_str::<ProxyConfig>(r#"{"mode":"manual","scheme":"http","port":8080}"#);
+    assert!(manual_missing_host.is_err());
+}
+
+#[test]
+fn test_proxy_serialises_with_its_mode_tag_and_round_trips() {
+    let system = ProxyConfig {
+        mode: ProxyMode::System,
+        no_proxy: vec!["localhost".to_string()],
+    };
+    assert_eq!(
+        serde_json::to_value(&system).unwrap(),
+        serde_json::json!({"mode": "system", "no_proxy": ["localhost"]})
+    );
+
+    let manual = ProxyConfig {
+        mode: ProxyMode::Manual {
+            scheme: ProxyScheme::Socks5,
+            host: "proxy.example".to_string(),
+            port: 1080,
+            auth_secret: Some(SecretRef::new("network/proxy-auth")),
+        },
+        no_proxy: Vec::new(),
+    };
+    let manual_json = serde_json::to_value(&manual).unwrap();
+    assert_eq!(
+        manual_json,
+        serde_json::json!({
+            "mode": "manual",
+            "scheme": "socks5",
+            "host": "proxy.example",
+            "port": 1080,
+            "auth_secret": "network/proxy-auth",
+            "no_proxy": []
+        })
+    );
+    let round_tripped: ProxyConfig = serde_json::from_value(manual_json).unwrap();
+    assert_eq!(round_tripped, manual);
+
+    let direct: ProxyConfig = serde_json::from_str(r#"{"mode":"none"}"#).unwrap();
+    assert_eq!(direct.mode, ProxyMode::None);
+}
