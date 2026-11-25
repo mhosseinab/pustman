@@ -13,6 +13,7 @@ mod example;
 mod postman;
 mod redact;
 mod request;
+mod session;
 mod settings;
 mod variable;
 
@@ -28,6 +29,10 @@ pub use postman::{
 pub use redact::{MASK, SecretValues, redact_headers, redact_text, redact_url};
 pub use request::{
     Body, FormField, HttpRequest, KeyValue, Method, MethodError, RawLanguage, Request,
+};
+pub use session::{
+    CloseReason, ConnectionDetails, Message, MessageKind, Payload, ProtocolFields, SessionError,
+    SessionEvent, WebSocketOpcode, to_jsonl_line,
 };
 pub use settings::{HttpVersion, RequestSettings};
 pub use variable::{Variable, VariableKind};
