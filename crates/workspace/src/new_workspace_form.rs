@@ -640,9 +640,7 @@ fn probe_location(location: PathBuf, target: Option<PathBuf>) -> Probe {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => LocationCheck::Missing,
         Err(_) => LocationCheck::Unreadable,
     };
-    let target_is_workspace = target
-        .as_deref()
-        .is_some_and(|target| holds_workspace(target));
+    let target_is_workspace = target.as_deref().is_some_and(holds_workspace);
     Probe {
         location,
         target,

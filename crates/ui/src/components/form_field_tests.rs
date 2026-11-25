@@ -3,7 +3,8 @@
 //! box and never sitting on top of the field it is about.
 
 use gpui::{
-    Context, IntoElement, ParentElement, Render, TestAppContext, VisualTestContext, Window, div, px,
+    Context, IntoElement, ParentElement, Render, Styled, TestAppContext, VisualTestContext, Window,
+    div, px,
 };
 
 use super::FormField;
