@@ -469,9 +469,17 @@ fn open_workspace_action(_: &OpenWorkspace, cx: &mut App) {
     with_active_opener(cx, |opener, cx| opener.prompt_open(cx));
 }
 
+/// The window an app-level action (New workspace…, Import…) acts in: the active window, or
+/// — when the platform reports none, as under a compositor without focus tracking or a bare
+/// X server — the first open window, so the click is never silently dropped.
+pub fn action_window(cx: &App) -> Option<gpui::AnyWindowHandle> {
+    cx.active_window()
+        .or_else(|| cx.windows().into_iter().next())
+}
+
 /// The `CreateWorkspace` answer in the active window: the New Workspace form.
 fn create_workspace_action(_: &CreateWorkspace, cx: &mut App) {
-    let Some(window_handle) = cx.active_window() else {
+    let Some(window_handle) = action_window(cx) else {
         return;
     };
     // Deferred like [`with_active_opener`]: the dispatch runs with the window on the
@@ -495,7 +503,7 @@ pub(crate) fn with_active_opener(
     cx: &mut App,
     prompt: impl FnOnce(&mut WorkspaceOpen, &mut Context<WorkspaceOpen>) + 'static,
 ) {
-    let Some(window_handle) = cx.active_window() else {
+    let Some(window_handle) = action_window(cx) else {
         return;
     };
     cx.defer(move |cx| {

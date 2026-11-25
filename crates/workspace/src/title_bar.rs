@@ -267,10 +267,29 @@ struct BoundMnemonics(BTreeSet<String>);
 
 impl Global for BoundMnemonics {}
 
+/// Set when the platform's own menu bar shows the app menus (macOS). Decided at runtime by
+/// the binary, not by `cfg!`, so the in-window bar — and its tests — work on every platform
+/// whenever no native bar has been claimed.
+#[derive(Default)]
+struct NativeMenuBar(bool);
+
+impl Global for NativeMenuBar {}
+
+/// Claim the platform's native menu bar for the app menus: the title bar then draws no
+/// in-window menus and binds no Alt access keys. Call before [`install_app_menus`].
+pub fn use_native_menu_bar(cx: &mut App) {
+    cx.set_global(NativeMenuBar(true));
+}
+
+fn native_menu_bar(cx: &App) -> bool {
+    cx.try_global::<NativeMenuBar>()
+        .is_some_and(|native| native.0)
+}
+
 /// Install the app's menu model: the native menu bar on macOS and the in-window one
 /// elsewhere both draw it. Off macOS each menu's first letter becomes its Alt access key.
 pub fn install_app_menus(menus: Vec<Menu>, cx: &mut App) {
-    if !cfg!(target_os = "macos") {
+    if !native_menu_bar(cx) {
         let mnemonics: Vec<String> = menus
             .iter()
             .filter_map(|menu| menu.name.chars().next())
@@ -365,7 +384,7 @@ pub(crate) fn switcher_label(name: &str) -> SharedString {
 /// The application menus the in-window bar draws; none on macOS, whose native bar shows
 /// the same model.
 fn in_window_menus(cx: &App) -> Vec<OwnedMenu> {
-    if cfg!(target_os = "macos") {
+    if native_menu_bar(cx) {
         return Vec::new();
     }
     cx.get_menus().unwrap_or_default()
@@ -795,7 +814,7 @@ impl TitleBar {
             .next()
             .map(|letter| letter.to_uppercase().to_string())
             .unwrap_or_default();
-        let tooltip = if cfg!(target_os = "macos") || mnemonic.is_empty() {
+        let tooltip = if native_menu_bar(cx) || mnemonic.is_empty() {
             Tooltip::text(format!("{name} menu"))
         } else {
             Tooltip::text(format!("{name} menu (Alt+{mnemonic})"))

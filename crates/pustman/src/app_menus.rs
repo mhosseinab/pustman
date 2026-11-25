@@ -111,6 +111,9 @@ pub fn app_menus(recents: &[RecentEntry]) -> Vec<Menu> {
 
 /// Install the model now and again whenever the recent workspace list changes.
 pub fn init(cx: &mut App) {
+    if cfg!(target_os = "macos") {
+        workspace::use_native_menu_bar(cx);
+    }
     install(cx);
     cx.observe_global::<RecentWorkspaces>(install).detach();
 }

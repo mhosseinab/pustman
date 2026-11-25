@@ -165,7 +165,7 @@ pub fn init(cx: &mut App) {
 /// dispatch runs inside the window's own update and a window cannot be updated from
 /// there, so the question is deferred (the `command_palette` toggle's shape).
 fn import_action(_: &Import, cx: &mut App) {
-    let Some(window_handle) = cx.active_window() else {
+    let Some(window_handle) = workspace::action_window(cx) else {
         return;
     };
     cx.defer(move |cx| {

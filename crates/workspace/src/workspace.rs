@@ -31,10 +31,10 @@ pub use pane::Pane;
 pub use panel::{Panel, PanelHandle};
 pub use restore::{ItemFactory, Restore, SAVE_DEBOUNCE};
 pub use status_bar::StatusBar;
-pub use title_bar::{OpenApplicationMenu, TitleBar, install_app_menus};
+pub use title_bar::{OpenApplicationMenu, TitleBar, install_app_menus, use_native_menu_bar};
 pub use toast_layer::{TOAST_DURATION, ToastAction, ToastHandler};
 pub use welcome::Welcome;
-pub use workspace_open::{OpenedWorkspace, WorkspaceOpen, WorkspaceOpenEvent};
+pub use workspace_open::{OpenedWorkspace, WorkspaceOpen, WorkspaceOpenEvent, action_window};
 
 use gpui::{
     App, Context, Decorations, Entity, FocusHandle, Focusable, ParentElement, Render, Subscription,

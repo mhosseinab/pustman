@@ -61,7 +61,7 @@ pub(crate) fn init(cx: &mut App) {
 /// `NewCollection` outside the tree: the active window's form, or the no-workspace
 /// dialog. Deferred like the import action: the dispatch runs inside the window's update.
 fn new_collection_action(_: &NewCollection, cx: &mut App) {
-    let Some(window_handle) = cx.active_window() else {
+    let Some(window_handle) = workspace::action_window(cx) else {
         return;
     };
     cx.defer(move |cx| {
