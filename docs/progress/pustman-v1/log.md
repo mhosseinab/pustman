@@ -366,3 +366,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — Dispatched S52a (auth kinds model; high-stakes; http-engine-engineer). S53 fix (9beedf8) in re-review. Disk 28 GB free.
 - 2026-11-25 — S53 merged (GraphQL over the HTTP engine; security fix 1 + re-review; VERIFY OK; LOWs on #344).
 - 2026-11-25 — Dispatched S51c (message log view; ui-implementer). Running: S52a, S51c. Disk 37 GB.
+- 2026-11-25 — Driver decision: S52a Edits extended to curl.rs, http_engine history.rs (redact new kinds' credential fields), request_editor auth_tab.rs and variable_line.rs (compile: exhaustive matches), collections_panel import.rs and export.rs (literal-credential report/warning for the new kinds' secret fields). Patch reviewed: 6 files, no test files.
