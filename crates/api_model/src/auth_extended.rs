@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 
-use crate::{ApiKeyLocation, MASK, SecretRef};
+use crate::{ApiKeyLocation, Auth, MASK, SecretRef};
 
 /// The hash a Digest challenge names (RFC 7616 §3.3); the `-sess` forms hash the session.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -277,23 +277,38 @@ impl Default for JwtBearerAuth {
     }
 }
 
-/// What `Auth` needs to write one of these kinds. `extra` is written after the typed fields
-/// and may never shadow one, set or not: an imported `extra` entry named `token_ref` would
-/// otherwise read back as the real reference and point the token lookup at another
-/// keychain entry.
+/// What `Auth` needs to write one of these kinds and to find their credentials. `extra` is
+/// written after the typed fields and may never shadow one, set or not: an imported `extra`
+/// entry named `token_ref` would otherwise read back as the real reference and point the
+/// token lookup at another keychain entry.
 pub(crate) trait ExtendedKind: Serialize {
     /// Every typed field's JSON name.
     const FIELDS: &'static [&'static str];
 
+    /// The Postman fields this kind keeps in `extra` that are known to hold no
+    /// credential. Every other `extra` entry is treated as one: Postman keeps real
+    /// credentials in fields the model does not use (an unused JWT `privateKey`, a
+    /// password left behind by a grant switch, a `client_secret` token parameter).
+    const HARMLESS_EXTRA: &'static [&'static str];
+
     fn extra(&self) -> &BTreeMap<String, serde_json::Value>;
+
+    /// The typed secret fields, and `extra`.
+    fn credentials_mut(&mut self) -> (Vec<&mut String>, &mut BTreeMap<String, serde_json::Value>);
 }
 
 impl ExtendedKind for DigestAuth {
     const FIELDS: &'static [&'static str] =
         &["username", "password", "realm", "nonce", "algorithm", "qop"];
+    const HARMLESS_EXTRA: &'static [&'static str] =
+        &["opaque", "nc", "cnonce", "disableRetryRequest"];
 
     fn extra(&self) -> &BTreeMap<String, serde_json::Value> {
         &self.extra
+    }
+
+    fn credentials_mut(&mut self) -> (Vec<&mut String>, &mut BTreeMap<String, serde_json::Value>) {
+        (vec![&mut self.password], &mut self.extra)
     }
 }
 
@@ -308,9 +323,26 @@ impl ExtendedKind for OAuth2Auth {
         "client_authentication",
         "token_ref",
     ];
+    const HARMLESS_EXTRA: &'static [&'static str] = &[
+        "tokenName",
+        "challengeAlgorithm",
+        "addTokenTo",
+        "headerPrefix",
+        "redirect_uri",
+        "useBrowser",
+        "tokenType",
+    ];
 
     fn extra(&self) -> &BTreeMap<String, serde_json::Value> {
         &self.extra
+    }
+
+    fn credentials_mut(&mut self) -> (Vec<&mut String>, &mut BTreeMap<String, serde_json::Value>) {
+        let mut secrets = vec![&mut self.client_secret];
+        if let OAuth2Grant::Password { password, .. } = &mut self.grant {
+            secrets.push(password);
+        }
+        (secrets, &mut self.extra)
     }
 }
 
@@ -322,9 +354,16 @@ impl ExtendedKind for AwsSigV4Auth {
         "region",
         "service",
     ];
+    const HARMLESS_EXTRA: &'static [&'static str] = &["addAuthDataToQuery"];
 
     fn extra(&self) -> &BTreeMap<String, serde_json::Value> {
         &self.extra
+    }
+
+    fn credentials_mut(&mut self) -> (Vec<&mut String>, &mut BTreeMap<String, serde_json::Value>) {
+        let mut secrets = vec![&mut self.secret_key];
+        secrets.extend(self.session_token.as_mut());
+        (secrets, &mut self.extra)
     }
 }
 
@@ -336,9 +375,79 @@ impl ExtendedKind for JwtBearerAuth {
         "header_prefix",
         "add_to",
     ];
+    const HARMLESS_EXTRA: &'static [&'static str] =
+        &["queryParamKey", "isSecretBase64Encoded", "header"];
 
     fn extra(&self) -> &BTreeMap<String, serde_json::Value> {
         &self.extra
+    }
+
+    fn credentials_mut(&mut self) -> (Vec<&mut String>, &mut BTreeMap<String, serde_json::Value>) {
+        (vec![&mut self.secret_or_key], &mut self.extra)
+    }
+}
+
+/// Visit `kind`'s secret fields and every string under an `extra` entry not known to be
+/// harmless.
+fn visit_credentials<K: ExtendedKind>(kind: &mut K, visit: &mut dyn FnMut(&mut String)) {
+    let (secrets, extra) = kind.credentials_mut();
+    for secret in secrets {
+        visit(secret);
+    }
+    for (key, value) in extra.iter_mut() {
+        if !K::HARMLESS_EXTRA.contains(&key.as_str()) {
+            visit_strings(value, visit);
+        }
+    }
+}
+
+fn visit_strings(value: &mut serde_json::Value, visit: &mut dyn FnMut(&mut String)) {
+    match value {
+        serde_json::Value::String(text) => visit(text),
+        serde_json::Value::Array(items) => {
+            for item in items {
+                visit_strings(item, visit);
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            for field in fields.values_mut() {
+                visit_strings(field, visit);
+            }
+        }
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
+    }
+}
+
+impl Auth {
+    /// Visit every credential string of a Digest, OAuth 2.0, AWS SigV4 or JWT Bearer auth:
+    /// its secret fields and, conservatively, every string under an `extra` entry not known
+    /// to be harmless. History masks through this, and the import report and the export
+    /// warning check [`Auth::extended_credentials`]: one list for all three. Returns
+    /// `false`, having visited nothing, for the other kinds, whose callers check their own
+    /// fields.
+    pub fn visit_extended_credentials(&mut self, mut visit: impl FnMut(&mut String)) -> bool {
+        match self {
+            Auth::Digest(kind) => visit_credentials(kind, &mut visit),
+            Auth::OAuth2(kind) => visit_credentials(kind, &mut visit),
+            Auth::AwsSigV4(kind) => visit_credentials(kind, &mut visit),
+            Auth::JwtBearer(kind) => visit_credentials(kind, &mut visit),
+            Auth::Inherit
+            | Auth::None
+            | Auth::Basic { .. }
+            | Auth::Bearer { .. }
+            | Auth::ApiKey { .. }
+            | Auth::Unsupported(_) => return false,
+        }
+        true
+    }
+
+    /// The credential strings [`Auth::visit_extended_credentials`] visits; `None` for the
+    /// kinds it does not cover.
+    pub fn extended_credentials(&self) -> Option<Vec<String>> {
+        let mut values = Vec::new();
+        let mut copy = self.clone();
+        copy.visit_extended_credentials(|text| values.push(text.clone()))
+            .then_some(values)
     }
 }
 

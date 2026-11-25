@@ -109,6 +109,10 @@ mod tests;
 #[path = "graphql_io_tests.rs"]
 mod graphql_io_tests;
 
+#[cfg(test)]
+#[path = "import_extended_auth_tests.rs"]
+mod extended_auth_tests;
+
 /// The directory top-level collections live in (REQ-WSP-01), the same one the CRUD
 /// creates use.
 const COLLECTIONS_DIR: &str = "collections";
@@ -925,24 +929,10 @@ fn auth_carries_credential(auth: &Auth) -> bool {
         Auth::Basic { password, .. } => literal_opt(password),
         Auth::Bearer { token, .. } => literal_opt(token),
         Auth::ApiKey { value, .. } => literal_opt(value),
-        Auth::Digest(digest) => {
-            literal(&digest.password) || extra_carries_credential(&digest.extra)
-        }
-        Auth::OAuth2(oauth2) => {
-            let grant_password = match &oauth2.grant {
-                api_model::OAuth2Grant::Password { password, .. } => literal(password),
-                _ => false,
-            };
-            grant_password
-                || literal(&oauth2.client_secret)
-                || extra_carries_credential(&oauth2.extra)
-        }
-        Auth::AwsSigV4(aws) => {
-            literal(&aws.secret_key)
-                || literal_opt(&aws.session_token)
-                || extra_carries_credential(&aws.extra)
-        }
-        Auth::JwtBearer(jwt) => literal(&jwt.secret_or_key) || extra_carries_credential(&jwt.extra),
+        // `api_model`'s one list: typed secrets and the unmodelled fields Postman fills.
+        Auth::Digest(_) | Auth::OAuth2(_) | Auth::AwsSigV4(_) | Auth::JwtBearer(_) => auth
+            .extended_credentials()
+            .is_some_and(|values| values.iter().any(|value| literal(value))),
         // Preserved verbatim: whatever the file held is still in there.
         Auth::Unsupported(raw) => raw_auth_carries_credential(raw),
         Auth::Inherit | Auth::None => false,

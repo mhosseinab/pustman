@@ -337,3 +337,7 @@ where
 #[cfg(test)]
 #[path = "auth_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "auth_credentials_tests.rs"]
+mod credentials_tests;

@@ -374,18 +374,10 @@ fn scan_literal_auth(name: &str, auth: &Auth, carrying: &mut Vec<String>) {
         Auth::Basic { password, .. } => is_literal_credential(password),
         Auth::Bearer { token, .. } => is_literal_credential(token),
         Auth::ApiKey { value, .. } => is_literal_credential(value),
-        Auth::Digest(digest) => is_literal_text(&digest.password),
-        Auth::OAuth2(oauth2) => {
-            let grant_password = match &oauth2.grant {
-                api_model::OAuth2Grant::Password { password, .. } => is_literal_text(password),
-                _ => false,
-            };
-            grant_password || is_literal_text(&oauth2.client_secret)
-        }
-        Auth::AwsSigV4(aws) => {
-            is_literal_text(&aws.secret_key) || is_literal_credential(&aws.session_token)
-        }
-        Auth::JwtBearer(jwt) => is_literal_text(&jwt.secret_or_key),
+        // `api_model`'s one list: the export writes the unmodelled fields back verbatim.
+        Auth::Digest(_) | Auth::OAuth2(_) | Auth::AwsSigV4(_) | Auth::JwtBearer(_) => auth
+            .extended_credentials()
+            .is_some_and(|values| values.iter().any(|value| is_literal_text(value))),
         Auth::Inherit | Auth::None | Auth::Unsupported(_) => false,
     };
     if literal {
@@ -467,3 +459,7 @@ fn report_to_user(
 #[cfg(test)]
 #[path = "export_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "export_extended_auth_tests.rs"]
+mod extended_auth_tests;

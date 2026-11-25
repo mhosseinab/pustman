@@ -857,6 +857,44 @@ const OAUTH2_TOKEN_FIELDS: [&str; 7] = [
     "code_verifier",
 ];
 
+const OAUTH2_TOKEN_NOTE: &str = "OAuth 2.0 token not imported: tokens are kept only in the \
+     keychain; get a new token after the import";
+
+/// [`preserve_auth`] for an OAuth 2.0 auth the model cannot map: kept raw, but without
+/// its tokens, from the group in either shape and from beside it.
+fn preserve_oauth2(
+    object: &serde_json::Map<String, Value>,
+    path: &str,
+    report: &mut ImportReport,
+    reason: String,
+) -> Auth {
+    let mut kept = object.clone();
+    let mut dropped = false;
+    for field in OAUTH2_TOKEN_FIELDS {
+        dropped |= kept.remove(field).is_some();
+    }
+    match kept.get_mut("oauth2") {
+        Some(Value::Array(entries)) => entries.retain(|entry| {
+            let is_token = entry
+                .as_object()
+                .and_then(|entry| string_field(entry, "key"))
+                .is_some_and(|key| OAUTH2_TOKEN_FIELDS.contains(&key.as_str()));
+            dropped |= is_token;
+            !is_token
+        }),
+        Some(Value::Object(fields)) => {
+            for field in OAUTH2_TOKEN_FIELDS {
+                dropped |= fields.remove(field).is_some();
+            }
+        }
+        _ => {}
+    }
+    if dropped {
+        report.note(path, OAUTH2_TOKEN_NOTE);
+    }
+    preserve_auth(&kept, path, report, reason)
+}
+
 fn import_oauth2(
     object: &serde_json::Map<String, Value>,
     path: &str,
@@ -888,7 +926,7 @@ fn import_oauth2(
             }
         }
         other => {
-            return preserve_auth(
+            return preserve_oauth2(
                 object,
                 path,
                 report,
@@ -900,7 +938,7 @@ fn import_oauth2(
         None | Some("header") => ClientAuthentication::Header,
         Some("body") => ClientAuthentication::Body,
         Some(other) => {
-            return preserve_auth(
+            return preserve_oauth2(
                 object,
                 path,
                 report,
@@ -913,11 +951,7 @@ fn import_oauth2(
         dropped_token |= group.discard(field);
     }
     if dropped_token {
-        report.note(
-            path,
-            "OAuth 2.0 token not imported: tokens are kept only in the keychain; \
-             get a new token after the import",
-        );
+        report.note(path, OAUTH2_TOKEN_NOTE);
     }
     Auth::OAuth2(OAuth2Auth {
         grant,
@@ -1522,3 +1556,7 @@ fn bool_field(object: &serde_json::Map<String, Value>, name: &str) -> Option<boo
 #[cfg(test)]
 #[path = "postman_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "postman_oauth2_tokens_tests.rs"]
+mod oauth2_tokens_tests;
