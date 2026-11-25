@@ -12,23 +12,34 @@
 //! The parser's size bounds drop or ignore oversized server input; every time they do,
 //! the user is told through a [`SessionEvent::Error`] rather than the loss being silent.
 //! There is no reconnect yet, so the server's `retry` field is not acted on.
+//!
+//! Memory is bounded twice over: at most [`EVENT_BUFFER`] events wait for the reader, and
+//! the pump stops reading the body while the waiting events' payloads pass
+//! [`MAX_QUEUED_BYTES`]. A server faster than the reader then waits in the socket
+//! buffers, not in this process.
 
 use std::fmt;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::task::Poll;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use api_model::{CloseReason, SessionError, SessionEvent};
 use futures::channel::{mpsc, oneshot};
 use futures::future::{self, Either};
+use futures::task::AtomicWaker;
 use futures::{SinkExt, Stream, StreamExt};
 
 use crate::event_source::{EventSourceParser, MAX_EVENT_BYTES, MAX_FIELD_BYTES, MAX_ID_BYTES};
 use crate::response::ResponseBody;
 
-/// How many events wait for the reader before the pump stops reading the body. The
-/// limit is backpressure: a server faster than the UI waits in its own socket buffers,
-/// not in this process's memory.
+/// How many events wait for the reader before the pump stops reading the body.
 const EVENT_BUFFER: usize = 64;
+
+/// How many payload bytes may wait for the reader before the pump stops reading the body.
+/// One event is always let through when nothing waits, so the most held is this plus one
+/// event of up to [`MAX_EVENT_BYTES`] — about 20 MiB, never `EVENT_BUFFER` × 16 MiB.
+pub const MAX_QUEUED_BYTES: usize = 4 * 1024 * 1024;
 
 /// Whether a `Content-Type` value names an event stream: its media type, parameters and
 /// case aside, is `text/event-stream`.
@@ -53,6 +64,64 @@ struct Shared {
     receiving: futures::lock::Mutex<Receiving>,
     /// Dropping the sender is the stop signal. `None` once the stream was stopped.
     stop: Mutex<Option<oneshot::Sender<()>>>,
+    /// The payload bytes waiting for the reader, shared with the pump.
+    queue: Arc<QueueBudget>,
+}
+
+impl Shared {
+    fn stop(&self) {
+        drop(lock(&self.stop).take());
+    }
+
+    /// Neither stopped nor ended: the pump still holds the connection.
+    fn is_open(&self) -> bool {
+        lock(&self.stop)
+            .as_ref()
+            .is_some_and(|stop| !stop.is_canceled())
+    }
+}
+
+/// The payload bytes queued between the pump and the reader, and the pump's wake-up for
+/// when the reader takes some.
+#[derive(Default)]
+struct QueueBudget {
+    queued: AtomicUsize,
+    reader_took: AtomicWaker,
+}
+
+impl QueueBudget {
+    /// Wait until `len` more bytes fit under [`MAX_QUEUED_BYTES`] — or nothing is queued,
+    /// so an event bigger than the budget still passes — then count them.
+    async fn reserve(&self, len: usize) {
+        future::poll_fn(|cx| {
+            // Registered before the check, so a release between the two still wakes us.
+            self.reader_took.register(cx.waker());
+            let queued = self.queued.load(Ordering::Acquire);
+            if queued == 0 || queued.saturating_add(len) <= MAX_QUEUED_BYTES {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        })
+        .await;
+        self.queued.fetch_add(len, Ordering::AcqRel);
+    }
+
+    fn release(&self, len: usize) {
+        // Only bytes `reserve` counted are released, so this never wraps.
+        self.queued.fetch_sub(len, Ordering::AcqRel);
+        self.reader_took.wake();
+    }
+}
+
+/// The payload bytes an event holds while it waits in the queue.
+fn queued_len(event: &SessionEvent) -> usize {
+    match event {
+        SessionEvent::Sent(message) | SessionEvent::Received(message) => {
+            message.payload.bytes().len()
+        }
+        _ => 0,
+    }
 }
 
 struct Receiving {
@@ -78,6 +147,7 @@ impl EventStream {
     {
         let (sender, events) = mpsc::channel(EVENT_BUFFER);
         let (stop_sender, stop) = oneshot::channel();
+        let queue = Arc::new(QueueBudget::default());
         let stream = Self {
             shared: Arc::new(Shared {
                 receiving: futures::lock::Mutex::new(Receiving {
@@ -85,9 +155,10 @@ impl EventStream {
                     closed: false,
                 }),
                 stop: Mutex::new(Some(stop_sender)),
+                queue: Arc::clone(&queue),
             }),
         };
-        (stream, pump(body, sender, stop, describe))
+        (stream, pump(body, sender, stop, queue, describe))
     }
 
     /// The next event, waiting for it to arrive. The last event is always a
@@ -98,7 +169,10 @@ impl EventStream {
             return None;
         }
         let event = match receiving.events.next().await {
-            Some(event) => event,
+            Some(event) => {
+                self.shared.queue.release(queued_len(&event));
+                event
+            }
             // The pump ended without saying why: it was stopped, or it went away.
             None => SessionEvent::Closed {
                 reason: if self.is_stopped() {
@@ -119,12 +193,24 @@ impl EventStream {
     /// [`SessionEvent::Closed`] with [`CloseReason::Client`]. Stopping twice does
     /// nothing more.
     pub fn stop(&self) {
-        drop(lock(&self.shared.stop).take());
+        self.shared.stop();
     }
 
     /// Whether [`EventStream::stop`] was called.
     pub fn is_stopped(&self) -> bool {
         lock(&self.shared.stop).is_none()
+    }
+
+    /// Whether the connection is still open: not stopped, and the server has not ended
+    /// the stream.
+    pub fn is_open(&self) -> bool {
+        self.shared.is_open()
+    }
+
+    /// The payload bytes received but not yet read, at most [`MAX_QUEUED_BYTES`] plus one
+    /// event.
+    pub fn queued_bytes(&self) -> usize {
+        self.shared.queue.queued.load(Ordering::Acquire)
     }
 }
 
@@ -151,6 +237,7 @@ async fn pump<S, B, E, D>(
     body: S,
     mut sender: mpsc::Sender<SessionEvent>,
     mut stop: oneshot::Receiver<()>,
+    queue: Arc<QueueBudget>,
     describe: D,
 ) where
     S: Stream<Item = Result<B, E>>,
@@ -205,7 +292,12 @@ async fn pump<S, B, E, D>(
         };
         events.splice(insert_at..insert_at, losses);
         for event in events {
-            let delivered = match future::select(&mut stop, sender.send(event)).await {
+            let len = queued_len(&event);
+            let send = async {
+                queue.reserve(len).await;
+                sender.send(event).await
+            };
+            let delivered = match future::select(&mut stop, std::pin::pin!(send)).await {
                 Either::Left(_) => false,
                 Either::Right((sent, _)) => sent.is_ok(),
             };
@@ -283,6 +375,8 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// The event stream a send left open, held where a cancel can reach it: the
 /// [`crate::HttpClient`] stops it when its owner cancels or sends again (REQ-HTTP-12).
+/// It holds the stream weakly — it can stop the stream, never keep it alive: once the
+/// response that carries it is dropped, the stream stops and its connection closes.
 #[derive(Clone, Default)]
 pub(crate) struct OpenStream {
     state: Arc<Mutex<OpenStreamState>>,
@@ -290,7 +384,7 @@ pub(crate) struct OpenStream {
 
 #[derive(Default)]
 struct OpenStreamState {
-    stream: Option<EventStream>,
+    stream: Option<Weak<Shared>>,
     /// Cancelled before the send handed its stream over: one arriving later is stopped
     /// on arrival, so a cancel racing the response never leaves a stream running.
     cancelled: bool,
@@ -306,16 +400,25 @@ impl OpenStream {
         if state.cancelled {
             stream.stop();
         } else {
-            state.stream = Some(stream.clone());
+            state.stream = Some(Arc::downgrade(&stream.shared));
         }
+    }
+
+    /// Whether the held stream still has its connection open.
+    pub(crate) fn is_open(&self) -> bool {
+        lock(&self.state)
+            .stream
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .is_some_and(|shared| shared.is_open())
     }
 
     /// Stop the held stream, and any stream held from now on.
     pub(crate) fn stop(&self) {
         let mut state = lock(&self.state);
         state.cancelled = true;
-        if let Some(stream) = state.stream.take() {
-            stream.stop();
+        if let Some(shared) = state.stream.take().and_then(|stream| stream.upgrade()) {
+            shared.stop();
         }
     }
 }

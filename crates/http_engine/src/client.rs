@@ -548,7 +548,9 @@ impl HttpClient {
     {
         self.cancel_pending(owner, cx);
         // A finished send of a tab that has since closed would otherwise stay forever.
-        self.owned_sends.retain(|_, pending| pending.is_running());
+        // A send whose response is still streaming stays: its owner can still cancel it.
+        self.owned_sends
+            .retain(|_, pending| pending.is_running() || pending.stream.is_open());
         let stream = OpenStream::default();
         let work = make_work(stream.clone());
         let (sender, receiver) = oneshot::channel();

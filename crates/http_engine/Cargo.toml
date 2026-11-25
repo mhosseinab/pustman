@@ -61,8 +61,9 @@ tempfile.workspace = true
 thiserror.workspace = true
 # Cookie expiry is a wall-clock time (REQ-HTTP-08), as in `storage`.
 time.workspace = true
-# `fs` is how the spawned tokio task writes the spilled tail of a response body.
-tokio = { workspace = true, features = ["fs"] }
+# `fs` is how the spawned tokio task writes the spilled tail of a response body; `time`
+# is the request timeout `exchange` applies (it no longer lives on the reqwest client).
+tokio = { workspace = true, features = ["fs", "time"] }
 url.workspace = true
 variables.workspace = true
 
