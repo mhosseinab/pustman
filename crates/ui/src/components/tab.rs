@@ -11,6 +11,7 @@ use gpui::{
 };
 use theme::ActiveTheme;
 
+use crate::color::Color;
 use crate::components::behavior::{Clickable, Disableable, Toggleable, VisibleOnHover};
 use crate::components::button::{ClickHandler, IconButton};
 use crate::components::label::{Label, LabelSize};
@@ -24,6 +25,9 @@ use crate::units::px_to_rems;
 
 /// The dot that says "this tab has unsaved changes".
 const DIRTY_DOT_PX: f32 = 6.;
+
+/// The "this tab's content is set" dot (Auth, Body).
+const INDICATOR_DOT_PX: f32 = 6.;
 
 /// The accent line under the active section tab.
 const UNDERLINE_PX: f32 = 2.;
@@ -54,6 +58,10 @@ pub struct Tab {
     dirty: bool,
     pinned: bool,
     disabled: bool,
+    /// A number beside the label (enabled header rows), drawn muted.
+    count: Option<usize>,
+    /// What the dot beside the label means ("set"), or no dot.
+    indicator: Option<SharedString>,
     style: TabStyle,
     width: Option<gpui::Rems>,
     on_activated: Option<ClickHandler>,
@@ -83,6 +91,8 @@ impl Tab {
             dirty: false,
             pinned: false,
             disabled: false,
+            count: None,
+            indicator: None,
             style: TabStyle::Pane,
             width: None,
             on_activated: None,
@@ -101,6 +111,33 @@ impl Tab {
     pub fn dirty(mut self, dirty: bool) -> Self {
         self.dirty = dirty;
         self
+    }
+
+    /// Show `count` beside the label (`Headers 8`). `None` shows nothing.
+    pub fn count(mut self, count: Option<usize>) -> Self {
+        self.count = count;
+        self
+    }
+
+    /// Show a success dot beside the label; `meaning` says what the dot stands for
+    /// ("set") and is part of the accessible label and tooltip, so the state is never
+    /// carried by colour alone.
+    pub fn indicator(mut self, meaning: Option<SharedString>) -> Self {
+        self.indicator = meaning;
+        self
+    }
+
+    /// The tab's accessible name: its label, then its count or what its dot means.
+    pub fn accessible_label(&self) -> SharedString {
+        let mut label = self.label.to_string();
+        if let Some(count) = self.count {
+            label.push_str(&format!(", {count}"));
+        }
+        if let Some(meaning) = &self.indicator {
+            label.push_str(", ");
+            label.push_str(meaning);
+        }
+        label.into()
     }
 
     /// Pin the tab: pinned tabs are not closed by "close the others".
@@ -184,13 +221,16 @@ impl RenderOnce for Tab {
         let close_selector = format!("{selector}-close");
         let dot_selector = format!("{selector}-dot");
         let underline_selector = format!("{selector}-underline");
+        let count_selector = format!("{selector}-count");
+        let indicator_selector = format!("{selector}-indicator");
+        let accessible = self.accessible_label();
         // The row hover that swaps the trailing slot's two glyphs: a dirty tab shows its
         // dot at rest and its close × while the pointer rests on the tab (#214).
         let hover_group = SharedString::from(format!("{selector}-hover"));
         let tooltip_text = if self.dirty {
             SharedString::from(format!("{label} — unsaved changes"))
         } else {
-            label.clone()
+            accessible.clone()
         };
         let colors = cx.theme().colors();
         let active = self.active;
@@ -253,9 +293,12 @@ impl RenderOnce for Tab {
             .when_some(self.width, |this, width| this.w(width))
             // A tooltip only when it adds what the tab does not show: the dirty state, or
             // a label a fixed width may truncate. Repeating a visible label covers the bar.
-            .when(self.dirty || self.width.is_some(), |this| {
-                this.tooltip(Tooltip::text(tooltip_text.clone()).builder())
-            })
+            .when(
+                self.dirty || self.width.is_some() || self.indicator.is_some(),
+                |this| {
+                    this.tooltip(Tooltip::text(tooltip_text.clone()).builder())
+                },
+            )
             .map(|this| match (style, active) {
                 (TabStyle::Section, true) => this.text_color(colors.text),
                 (TabStyle::Section, false) => this.text_color(colors.text_muted),
@@ -295,6 +338,20 @@ impl RenderOnce for Tab {
             })
             .children(self.icon.map(|icon| Icon::new(icon).size(IconSize::Small)))
             .child(Label::new(label).size(LabelSize::Small).truncate())
+            .children(self.count.map(|count| {
+                div().debug_selector(move || count_selector).child(
+                    Label::new(SharedString::from(count.to_string()))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                )
+            }))
+            .children(self.indicator.is_some().then(|| {
+                div()
+                    .debug_selector(move || indicator_selector)
+                    .size(px_to_rems(INDICATOR_DOT_PX))
+                    .rounded_full()
+                    .bg(Color::Success.color(cx))
+            }))
             .map(|this| {
                 if self.dirty {
                     this.child(
@@ -340,3 +397,7 @@ impl RenderOnce for Tab {
 #[cfg(test)]
 #[path = "tab_tooltip_tests.rs"]
 mod tooltip_tests;
+
+#[cfg(test)]
+#[path = "tab_badge_tests.rs"]
+mod badge_tests;

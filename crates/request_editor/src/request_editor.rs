@@ -20,6 +20,7 @@ mod method;
 mod new_request;
 mod params;
 mod read_only_wiring;
+pub mod request_tabs;
 mod response_split;
 pub mod save;
 pub mod send;
@@ -63,14 +64,14 @@ pub(crate) const REQUEST_TAB_CONTENT_SELECTOR: &str = "request-tab-content";
 /// The Params tab's index in the request tab strip.
 const PARAMS_TAB_INDEX: usize = 0;
 
+/// The Auth tab's index in the request tab strip (mockup order: Params, Auth, …).
+const AUTH_TAB_INDEX: usize = 1;
+
 /// The Headers tab's index in the request tab strip.
-const HEADERS_TAB_INDEX: usize = 1;
+const HEADERS_TAB_INDEX: usize = 2;
 
 /// The Body tab's index in the request tab strip.
-const BODY_TAB_INDEX: usize = 2;
-
-/// The Auth tab's index in the request tab strip.
-const AUTH_TAB_INDEX: usize = 3;
+const BODY_TAB_INDEX: usize = 3;
 
 /// The Settings tab's index in the request tab strip.
 const SETTINGS_TAB_INDEX: usize = 4;
@@ -104,6 +105,8 @@ pub struct RequestEditor {
     tab_bar: Entity<TabBar>,
     /// Which request tab's content shows: the [`TabBar`]'s selection index.
     active_tab: usize,
+    /// The counts and dots the tab strip shows (`request_tabs`).
+    tab_badges: request_tabs::TabBadges,
     /// The Params tab: the query and path-variable tables (S27a).
     params: Entity<Params>,
     /// The Headers tab: the user's rows and the request's auto headers (S27b).
@@ -254,33 +257,9 @@ impl RequestEditor {
         let settings_tab_subscription =
             cx.subscribe_in(&settings_tab, window, Self::on_settings_tab_event);
         let tab_bar = cx.new(|cx| TabBar::new(cx).section());
+        let tab_badges = request_tabs::TabBadges::of(&request);
         tab_bar.update(cx, |bar, cx| {
-            bar.set_tabs(
-                vec![
-                    Tab::new(
-                        SharedString::new_static("request-tab-params"),
-                        SharedString::new_static("Params"),
-                    )
-                    .toggle_state(true),
-                    Tab::new(
-                        SharedString::new_static("request-tab-headers"),
-                        SharedString::new_static("Headers"),
-                    ),
-                    Tab::new(
-                        SharedString::new_static("request-tab-body"),
-                        SharedString::new_static("Body"),
-                    ),
-                    Tab::new(
-                        SharedString::new_static("request-tab-auth"),
-                        SharedString::new_static("Auth"),
-                    ),
-                    Tab::new(
-                        SharedString::new_static("request-tab-settings"),
-                        SharedString::new_static("Settings"),
-                    ),
-                ],
-                cx,
-            )
+            bar.set_tabs(request_tabs::request_tabs(tab_badges), cx)
         });
         let tab_bar_subscription = cx.subscribe_in(&tab_bar, window, Self::on_tab_bar_event);
         let send_owner = http_engine::SendOwner::from(cx.entity_id());
@@ -298,6 +277,7 @@ impl RequestEditor {
             url_bar,
             tab_bar,
             active_tab: PARAMS_TAB_INDEX,
+            tab_badges,
             params,
             headers,
             body_tab,
@@ -659,7 +639,7 @@ impl Render for RequestEditor {
             .children(self.render_auth_warning(cx))
             // The request tab strip over the tab content: the selection decides which
             // tab's content shows below.
-            .child(self.tab_bar.clone())
+            .child(self.render_tab_strip(cx))
             .child(
                 v_flex()
                     .debug_selector(|| REQUEST_TAB_CONTENT_SELECTOR.to_owned())

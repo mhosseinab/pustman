@@ -148,6 +148,8 @@ impl RequestEditor {
     /// a variable cycle) has no warning to show: the send itself reports that failure
     /// when the user tries it.
     pub(super) fn recheck_unresolved(&mut self, cx: &mut Context<Self>) {
+        // Every draft edit lands here, so the tab strip's badges follow it too.
+        self.refresh_tab_badges(cx);
         let ancestors = self.auth_ancestors(cx);
         let checked = match self.presend_check(&ancestors) {
             Ok(warnings) => {
