@@ -153,41 +153,78 @@ impl EnvironmentSelector {
     /// Remember `choice` as the active environment and persist it for this workspace on a
     /// background task: the environment's id under [`selection_key`], or — for
     /// "No environment" — no row at all.
-    ///
-    /// `Decision:` the task is detached rather than stored in a field: confirming
-    /// dismisses (and drops) the picker, and a dropped `Task` would cancel the write
-    /// mid-flight (AGENTS.md › Dropping a `Task` cancels it). Detaching is only sound
-    /// with the task carrying its own error report, which is the other half of this
-    /// contract: a failed write becomes an error toast on the workspace.
     fn select(&mut self, choice: Option<ItemId>, cx: &mut Context<Picker<Self>>) {
         self.active = choice;
-        // The confirmed choice replaces what the installed inputs carry, so the status
-        // bar's active-environment readout and this picker's own preselection follow the
-        // user instead of going stale (REQ-VAR-08). Inputs installed only after a choice
-        // is made are not overwritten here.
-        if cx.has_global::<SelectorInputs>() {
-            cx.global_mut::<SelectorInputs>().active = choice;
-        }
         cx.notify();
-        let key = selection_key(&self.workspace_id);
-        let store = Arc::clone(&self.store);
-        let workspace = self.workspace.clone();
-        cx.spawn(async move |_this, cx| {
-            let write = cx
-                .background_executor()
-                .spawn(async move { persist_selection(&store, &key, choice.as_ref()) })
-                .await;
-            if write.is_err()
-                && let Err(_released) = workspace.update(cx, |workspace, cx| {
-                    workspace.show_toast(WRITE_FAILURE_MESSAGE, Severity::Error, None, cx);
-                })
-            {
-                // Handled: the workspace went away with its window; no one is left to
-                // tell that the write failed.
-            }
-        })
-        .detach();
+        persist_choice(
+            choice,
+            self.workspace_id.clone(),
+            Arc::clone(&self.store),
+            self.workspace.clone(),
+            cx,
+        );
     }
+}
+
+/// Make `choice` the active environment — what the picker's confirm and the sidebar's
+/// Environments list (S48u3) both do: the installed [`SelectorInputs`] take it, so the
+/// status bar's readout and every resolver follow, and it is persisted for the inputs'
+/// workspace on a background task. Without installed inputs there is nowhere to persist
+/// the choice, and the user is told so.
+pub fn select_environment(
+    choice: Option<ItemId>,
+    workspace: WeakEntity<Workspace>,
+    cx: &mut App,
+) {
+    let Some(inputs) = cx.try_global::<SelectorInputs>().cloned() else {
+        if let Err(_released) = workspace.update(cx, |workspace, cx| {
+            workspace.show_toast(NOT_WIRED_MESSAGE, Severity::Error, None, cx);
+        }) {
+            // Handled: the window is gone; no one is left to tell.
+        }
+        return;
+    };
+    persist_choice(choice, inputs.workspace_id, inputs.store, workspace, cx);
+}
+
+/// The shared half of a selection: the installed inputs take `choice`, and the write
+/// runs detached with its own error report.
+///
+/// `Decision:` the task is detached rather than stored in a field: confirming
+/// dismisses (and drops) the picker, and a dropped `Task` would cancel the write
+/// mid-flight (AGENTS.md › Dropping a `Task` cancels it). Detaching is only sound
+/// with the task carrying its own error report, which is the other half of this
+/// contract: a failed write becomes an error toast on the workspace.
+fn persist_choice(
+    choice: Option<ItemId>,
+    workspace_id: String,
+    store: Arc<Mutex<LocalStore>>,
+    workspace: WeakEntity<Workspace>,
+    cx: &mut App,
+) {
+    // The confirmed choice replaces what the installed inputs carry, so the status
+    // bar's active-environment readout and this picker's own preselection follow the
+    // user instead of going stale (REQ-VAR-08). Inputs installed only after a choice
+    // is made are not overwritten here.
+    if cx.has_global::<SelectorInputs>() {
+        cx.global_mut::<SelectorInputs>().active = choice;
+    }
+    let key = selection_key(&workspace_id);
+    cx.spawn(async move |cx| {
+        let write = cx
+            .background_executor()
+            .spawn(async move { persist_selection(&store, &key, choice.as_ref()) })
+            .await;
+        if write.is_err()
+            && let Err(_released) = workspace.update(cx, |workspace, cx| {
+                workspace.show_toast(WRITE_FAILURE_MESSAGE, Severity::Error, None, cx);
+            })
+        {
+            // Handled: the workspace went away with its window; no one is left to
+            // tell that the write failed.
+        }
+    })
+    .detach();
 }
 
 impl PickerDelegate for EnvironmentSelector {

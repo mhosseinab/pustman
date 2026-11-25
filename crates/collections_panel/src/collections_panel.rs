@@ -96,8 +96,14 @@ pub fn init(cx: &mut App) {
             let registered = cx.with_window(workspace.entity_id(), |window, cx| {
                 let panel =
                     cx.new(|cx| CollectionsTree::new_in_window(empty_snapshot(), window, cx));
+                // The Environments view (S48u3) registers right after the tree, so the
+                // rail reads Collections, Environments, History in every window.
+                let environments = cx.new(|cx| {
+                    environment_picker::EnvironmentsPanel::new(workspace.downgrade(), cx)
+                });
                 workspace.update(cx, |workspace, cx| {
                     workspace.register_panel(panel, window, cx);
+                    workspace.register_panel(environments, window, cx);
                 });
             });
             if registered.is_none() {
