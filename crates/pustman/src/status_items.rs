@@ -83,6 +83,7 @@ impl Render for ConsoleCount {
                         self.readout().into(),
                         "Toggle console",
                         Box::new(ToggleConsole),
+                        cx,
                     )),
             )
             .child(status_control(
@@ -91,6 +92,7 @@ impl Render for ConsoleCount {
                 SharedString::new_static("Cookies"),
                 "Manage cookies",
                 Box::new(Manage),
+                cx,
             ))
     }
 }
@@ -149,6 +151,7 @@ impl Render for ActiveEnvironment {
                 SharedString::new_static("Sidebar"),
                 "Toggle sidebar",
                 Box::new(ToggleSidebar),
+                cx,
             ))
     }
 }
@@ -157,25 +160,36 @@ impl Render for ActiveEnvironment {
 /// mockup's `▣ Console  Ctrl Alt C`. A click dispatches `action` from the control, so
 /// the workspace handler above it answers; the control is a tab stop (Enter/Space run
 /// it through the button) and is named for assistive tech by its tooltip title.
+///
+/// The binding is looked up in the whole keymap (`keymap_binding_text`, what the app
+/// menus show), not under the focused element's contexts: these are workspace-wide
+/// actions, and a hint that vanished whenever focus sat in a button read as a glitch.
 fn status_control(
     selector: &'static str,
     icon: IconName,
     label: SharedString,
     what: &'static str,
     action: Box<dyn gpui::Action>,
+    cx: &App,
 ) -> impl IntoElement {
-    let hint = KeyBinding::for_action(action.as_ref());
+    let hint = ui::keymap_binding_text(action.as_ref(), cx);
     let tooltip = Tooltip::for_action(what, action.as_ref());
-    div().debug_selector(move || selector.to_owned()).child(
-        Button::new(selector, label)
-            .size(ButtonSize::Default)
-            .style(ButtonStyle::Transparent)
-            .label_color(Color::Muted)
-            .start_icon(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
-            .key_binding(hint)
-            .tooltip(tooltip)
-            .on_click(move |_event, window, cx| window.dispatch_action(action.boxed_clone(), cx)),
-    )
+    h_flex()
+        .debug_selector(move || selector.to_owned())
+        .items_center()
+        .gap(DynamicSpacing::Base02.rems(cx))
+        .child(
+            Button::new(selector, label)
+                .size(ButtonSize::Default)
+                .style(ButtonStyle::Transparent)
+                .label_color(Color::Muted)
+                .start_icon(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
+                .tooltip(tooltip)
+                .on_click(move |_event, window, cx| {
+                    window.dispatch_action(action.boxed_clone(), cx)
+                }),
+        )
+        .children(hint.map(|keys| Label::new(keys).size(LabelSize::XSmall).color(Color::Muted)))
 }
 
 /// The installed inputs' active environment's name — `None` while no environment is
