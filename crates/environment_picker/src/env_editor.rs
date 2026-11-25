@@ -180,6 +180,9 @@ mod edit_secret_tests;
 #[path = "env_editor_read_only_tests.rs"]
 mod env_editor_read_only_tests;
 
+#[path = "env_editor_write.rs"]
+pub mod write;
+
 gpui::actions!(
     env_editor,
     [
@@ -993,28 +996,49 @@ impl EnvEditor {
         saved_locals: &[LocalValue],
         cx: &mut Context<Self>,
     ) {
-        if !cx.has_global::<EnvEditorInputs>() {
-            return;
-        }
-        let inputs = cx.global_mut::<EnvEditorInputs>();
-        if inputs.workspace_id != self.workspace_id
-            || inputs.target.scope_id() != self.target.scope_id()
-        {
-            return;
-        }
-        let mut saved_item = saved_item.clone();
-        // The file `save_item` wrote is where the item lives now: a never-written item's
-        // first save gives it a path for the first time, and an item without one is
-        // re-suffixed instead of written over its own file next time.
-        saved_item.path = Some(written.to_path_buf());
-        // The body just came out of `saved_item`, which built it, so this re-read of the
-        // variables cannot fail where that build did not.
-        if let Ok(target) = EditTarget::new(saved_item) {
-            inputs.target = target;
-        }
-        inputs.local_values = saved_locals.to_vec();
+        refresh_installed_inputs(
+            &self.workspace_id,
+            self.target.scope_id(),
+            saved_item,
+            written,
+            saved_locals,
+            cx,
+        );
     }
+}
 
+/// Point the installed [`EnvEditorInputs`] at what a save of `scope_id` just wrote, when
+/// they are that scope's — the editor's save and [`write::write_variable`] both land
+/// here, so the wire's copy follows either.
+fn refresh_installed_inputs(
+    workspace_id: &str,
+    scope_id: &str,
+    saved_item: &Item,
+    written: &Path,
+    saved_locals: &[LocalValue],
+    cx: &mut App,
+) {
+    if !cx.has_global::<EnvEditorInputs>() {
+        return;
+    }
+    let inputs = cx.global_mut::<EnvEditorInputs>();
+    if inputs.workspace_id != workspace_id || inputs.target.scope_id() != scope_id {
+        return;
+    }
+    let mut saved_item = saved_item.clone();
+    // The file `save_item` wrote is where the item lives now: a never-written item's
+    // first save gives it a path for the first time, and an item without one is
+    // re-suffixed instead of written over its own file next time.
+    saved_item.path = Some(written.to_path_buf());
+    // The body just came out of `saved_item`, which built it, so this re-read of the
+    // variables cannot fail where that build did not.
+    if let Ok(target) = EditTarget::new(saved_item) {
+        inputs.target = target;
+    }
+    inputs.local_values = saved_locals.to_vec();
+}
+
+impl EnvEditor {
     /// The rows as one save writes them, or why there is not one: every key is filled and
     /// unique, a secret carries no value, and a cleared local field is a deletion.
     fn collect(&self, cx: &App) -> Result<Collected, SharedString> {

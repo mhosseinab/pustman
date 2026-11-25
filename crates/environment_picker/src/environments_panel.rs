@@ -77,10 +77,6 @@ pub struct EnvironmentsPanel {
     /// own file, so a second click never cancels the first one's write.
     pending_creates: BTreeMap<u64, Task<()>>,
     next_create: u64,
-    /// The names this panel has handed out: a create's name is unique against these as
-    /// well as the listed environments, which only learn of a new file once the
-    /// workspace is re-read — so two quick clicks never pick the same name.
-    reserved_names: Vec<String>,
     /// Redraws when the installed inputs change (a selection, a re-read workspace).
     _subscriptions: Vec<Subscription>,
 }
@@ -93,7 +89,6 @@ impl EnvironmentsPanel {
             workspace,
             pending_creates: BTreeMap::new(),
             next_create: 0,
-            reserved_names: Vec::new(),
             _subscriptions: vec![cx.observe_global::<SelectorInputs>(|_panel, cx| cx.notify())],
         }
     }
@@ -105,98 +100,30 @@ impl EnvironmentsPanel {
         opener.read(cx).root().map(Path::to_path_buf)
     }
 
-    /// `＋ New`: write a new environment into the open workspace, off the foreground.
+    /// `＋ New`: write a new environment into the open workspace, off the foreground —
+    /// through [`create_environment`], the one create path the environment menu's "＋"
+    /// shares (S48u6).
     fn new_environment(
         &mut self,
         _: &NewEnvironment,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(root) = self.root(cx) else {
-            self.report("Open a workspace first — environments are saved in it.", cx);
+        let Some((_name, created)) = create_environment(self.workspace.clone(), cx) else {
             return;
-        };
-        let mut taken: Vec<String> = cx
-            .try_global::<SelectorInputs>()
-            .map(|inputs| {
-                inputs
-                    .environments
-                    .iter()
-                    .map(|environment| environment.name.clone())
-                    .collect()
-            })
-            .unwrap_or_default();
-        taken.extend(self.reserved_names.iter().cloned());
-        let name = unique_name(&taken);
-        self.reserved_names.push(name.clone());
-        let environment = Environment {
-            id: ItemId::new(),
-            name,
-            variables: Vec::new(),
-            extra: Default::default(),
         };
         let key = self.next_create;
         self.next_create += 1;
         let task = cx.spawn(async move |this, cx| {
-            let name = environment.name.clone();
-            let written = cx
-                .background_executor()
-                .spawn(async move {
-                    let item = Item {
-                        body: ItemBody::Environment(environment),
-                        dir: PathBuf::from(ENVIRONMENTS_DIR),
-                        path: None,
-                    };
-                    workspace_store::save_item(&root, &item)
-                })
-                .await;
+            // The write reports itself; whether it landed changes nothing here.
+            let _landed: bool = created.await;
             // The panel went away with its window; nobody is left to tell.
-            this.update(cx, |panel, cx| {
+            this.update(cx, |panel, _cx| {
                 panel.pending_creates.remove(&key);
-                match written {
-                    Ok(_) => panel.announce(created_message(&name), Severity::Success, cx),
-                    Err(error) => {
-                        // The name was never used; the next create may take it.
-                        panel.reserved_names.retain(|reserved| *reserved != name);
-                        panel.announce(
-                            format!("{name} could not be created — {error}"),
-                            Severity::Error,
-                            cx,
-                        );
-                    }
-                }
             })
             .ok();
         });
         self.pending_creates.insert(key, task);
-    }
-
-    /// Show `message` as an error toast on this window's workspace (AGENTS.md › errors
-    /// reach the user).
-    fn report(&self, message: impl Into<SharedString>, cx: &mut Context<Self>) {
-        self.announce(message, Severity::Error, cx);
-    }
-
-    /// Show `message` as a toast at `severity` on this window's workspace. Deferred:
-    /// the workspace may be on the update stack.
-    fn announce(
-        &self,
-        message: impl Into<SharedString>,
-        severity: Severity,
-        cx: &mut Context<Self>,
-    ) {
-        let message = message.into();
-        let workspace = self.workspace.clone();
-        cx.defer(move |cx| {
-            if workspace
-                .update(cx, |workspace, cx| {
-                    workspace.show_toast(message, severity, None, cx);
-                })
-                .is_err()
-            {
-                // Handled: the window closed; there is no one left to tell.
-            }
-        });
     }
 
     /// One environment row: its name, and the "Active" badge on the active one — the
@@ -403,6 +330,116 @@ impl Panel for EnvironmentsPanel {
     fn create_action(&self, _cx: &App) -> Option<Box<dyn Action>> {
         Some(Box::new(NewEnvironment))
     }
+}
+
+/// The names creates have handed out this session: a create's name is unique against
+/// these as well as the listed environments, which only learn of a new file once the
+/// workspace is re-read — so two quick creates, from the sidebar and the menu alike,
+/// never pick the same name.
+#[derive(Default)]
+struct ReservedNames(Vec<String>);
+
+impl gpui::Global for ReservedNames {}
+
+/// Write a new environment into `workspace`'s open folder off the foreground and say
+/// how it went in a toast (S48u3's create, shared by the sidebar's "＋ New" and the
+/// environment menu's "＋", S48u6). Its name is "New Environment", numbered past the
+/// listed environments and every name a create has already handed out
+/// ([`ReservedNames`], one reservation for both doors, fix 1). Returns that name and the write, which resolves to whether it landed; the
+/// task carries its own report, so a caller that cannot keep it may detach it. With no
+/// folder open the user is told so and nothing is written.
+pub fn create_environment(
+    workspace: WeakEntity<Workspace>,
+    cx: &mut App,
+) -> Option<(String, Task<bool>)> {
+    let root = workspace.upgrade().and_then(|workspace_entity| {
+        let opener = WorkspaceOpen::for_window(workspace_entity.entity_id(), cx)?;
+        opener.read(cx).root().map(Path::to_path_buf)
+    });
+    let Some(root) = root else {
+        announce(
+            &workspace,
+            "Open a workspace first — environments are saved in it.",
+            Severity::Error,
+            cx,
+        );
+        return None;
+    };
+    let mut taken: Vec<String> = cx
+        .try_global::<SelectorInputs>()
+        .map(|inputs| {
+            inputs
+                .environments
+                .iter()
+                .map(|environment| environment.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    taken.extend(cx.default_global::<ReservedNames>().0.iter().cloned());
+    let name = unique_name(&taken);
+    cx.default_global::<ReservedNames>().0.push(name.clone());
+    let environment = Environment {
+        id: ItemId::new(),
+        name: name.clone(),
+        variables: Vec::new(),
+        extra: Default::default(),
+    };
+    let task = cx.spawn(async move |cx| {
+        let name = environment.name.clone();
+        let written = cx
+            .background_executor()
+            .spawn(async move {
+                let item = Item {
+                    body: ItemBody::Environment(environment),
+                    dir: PathBuf::from(ENVIRONMENTS_DIR),
+                    path: None,
+                };
+                workspace_store::save_item(&root, &item)
+            })
+            .await;
+        cx.update(|cx| match written {
+            Ok(_) => {
+                announce(&workspace, created_message(&name), Severity::Success, cx);
+                true
+            }
+            Err(error) => {
+                // The name was never used; the next create may take it.
+                cx.default_global::<ReservedNames>()
+                    .0
+                    .retain(|reserved| *reserved != name);
+                announce(
+                    &workspace,
+                    format!("{name} could not be created — {error}"),
+                    Severity::Error,
+                    cx,
+                );
+                false
+            }
+        })
+    });
+    Some((name, task))
+}
+
+/// Show `message` as a toast at `severity` on `workspace`. Deferred: the workspace may
+/// be on the update stack.
+fn announce(
+    workspace: &WeakEntity<Workspace>,
+    message: impl Into<SharedString>,
+    severity: Severity,
+    cx: &mut App,
+) {
+    let message = message.into();
+    let workspace = workspace.clone();
+    cx.defer(move |cx| {
+        if workspace
+            .update(cx, |workspace, cx| {
+                workspace.show_toast(message, severity, None, cx);
+            })
+            .is_err()
+        {
+            // Handled: the window closed; there is no one left to tell.
+        }
+    });
 }
 
 /// What a successful create says: the new environment appears in the list once the

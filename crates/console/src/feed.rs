@@ -7,7 +7,9 @@
 //! [`SendOutcome::secrets_used`] — with `api_model`'s shared masking (D8), and nothing in
 //! this module logs anything (REQ-NFR-04).
 
-use api_model::{HttpRequest, SecretValues, redact_headers, redact_text, redact_url};
+use api_model::{
+    ApiKeyLocation, Auth, HttpRequest, MASK, SecretValues, redact_headers, redact_text, redact_url,
+};
 use gpui::{App, Entity, Subscription};
 use http_engine::{
     HttpClient, PipelineError, RequestBody, ResolvedRequest, Response, ResponseBody,
@@ -104,10 +106,62 @@ pub fn record_error(request: Option<&HttpRequest>, error: &PipelineError, cx: &m
             status: None,
             time: None,
             size: None,
-            raw_request: String::new(),
+            raw_request: request
+                .map(|request| failed_request_text(request, &secrets))
+                .unwrap_or_default(),
             raw_response: redact_text(&error.to_string(), &secrets),
         },
     );
+}
+
+/// What a failed send's entry keeps of its request (S48u6): the request line and the
+/// headers it would have sent, so the expanded error row can list them — redacted as
+/// every other entry is, through [`redact_headers`] (an `Authorization`, cookie or
+/// credential header is the mask, whatever its text). Nothing was resolved on a failed
+/// send, so the text is the pre-resolution template: `{{placeholders}}`, never values.
+///
+/// `Decision:` the auth the request carries is listed as the header it would add, with
+/// the mask as its value: the user sees that credentials went with the request, and
+/// the credential itself is never known here. A request with no request line yet (the
+/// failure came before one was built) still lists what it holds.
+fn failed_request_text(request: &HttpRequest, secrets: &SecretValues) -> String {
+    let mut headers: Vec<(String, String)> = Vec::new();
+    if let Some(host) = url::Url::parse(&request.url)
+        .ok()
+        .as_ref()
+        .and_then(|url| url.host_str().map(|_| host_line(url)))
+    {
+        headers.push(("Host".to_string(), host));
+    }
+    headers.extend(
+        request
+            .headers
+            .iter()
+            .filter(|header| header.enabled && !header.key.trim().is_empty())
+            .map(|header| (header.key.clone(), header.value.clone().unwrap_or_default())),
+    );
+    match &request.auth {
+        Auth::Basic { .. } | Auth::Bearer { .. } => {
+            headers.push(("Authorization".to_string(), MASK.to_string()));
+        }
+        Auth::ApiKey {
+            key: Some(key),
+            location,
+            ..
+        } if !matches!(location, Some(ApiKeyLocation::Query)) && !key.trim().is_empty() => {
+            headers.push((key.clone(), MASK.to_string()));
+        }
+        _ => {}
+    }
+    let mut raw = format!(
+        "{} {}\r\n",
+        request.method,
+        redact_url(&request.url, secrets)
+    );
+    for (name, value) in redact_headers(&headers, secrets) {
+        raw.push_str(&format!("{name}: {value}\r\n"));
+    }
+    raw
 }
 
 /// What one [`Warning`] says to the user: [`Warning::user_message`], the one wording for

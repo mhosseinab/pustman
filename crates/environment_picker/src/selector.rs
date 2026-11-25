@@ -31,6 +31,9 @@ use storage::LocalStore;
 use ui::prelude::*;
 use workspace::Workspace;
 
+use crate::env_editor;
+use crate::environments_panel::create_environment;
+
 #[cfg(test)]
 #[path = "selector_tests.rs"]
 mod tests;
@@ -38,6 +41,10 @@ mod tests;
 #[cfg(test)]
 #[path = "selector_match_key_tests.rs"]
 mod match_key_tests;
+
+#[cfg(test)]
+#[path = "selector_menu_tests.rs"]
+mod menu_tests;
 
 /// The label of the first-class "No environment" option: picking it clears the stored
 /// selection (pack screen S07's "No active environment" state). It is also what the
@@ -49,6 +56,11 @@ pub const NO_ENVIRONMENT_LABEL: &str = "No environment";
 /// never only a log) — what the user should know: the choice is real for this session.
 const WRITE_FAILURE_MESSAGE: &str =
     "The active environment could not be saved — your choice applies until Pustman restarts";
+
+/// The menu's controls: their element ids and test selectors.
+pub const NEW_ENVIRONMENT_BUTTON: &str = "environment-menu-new";
+pub const EDIT_ENVIRONMENTS_BUTTON: &str = "environment-menu-edit";
+const EDIT_ENVIRONMENTS_LABEL: &str = "Edit environments…";
 
 /// The one message the opener shows when the app has not installed [`SelectorInputs`].
 const NOT_WIRED_MESSAGE: &str =
@@ -148,6 +160,15 @@ impl EnvironmentSelector {
         self.matches
             .get(index)
             .and_then(|candidate_index| self.candidates.get(*candidate_index))
+    }
+
+    /// "＋": write a new environment through the sidebar's create path. The write is
+    /// detached — the menu closes right after — and carries its own report (a toast
+    /// either way).
+    fn new_environment(&self, cx: &mut App) {
+        if let Some((_name, created)) = create_environment(self.workspace.clone(), cx) {
+            created.detach();
+        }
     }
 
     /// Remember `choice` as the active environment and persist it for this workspace on a
@@ -271,25 +292,41 @@ impl PickerDelegate for EnvironmentSelector {
         let Some(candidate) = self.candidate_at(index) else {
             return div().into_any_element();
         };
+        let active = self.active == candidate.id;
         h_flex()
             .w_full()
             .min_w_0()
             .gap(DynamicSpacing::Base04.rems(cx))
+            // The current choice is marked before the user changes anything (pack screen
+            // S07 shows the active environment), in a fixed slot at the start of the row
+            // (mockup section 6) so the names line up whichever row carries it.
+            .child(
+                div()
+                    .flex_none()
+                    .w(IconSize::Small.rems())
+                    .children(active.then(|| {
+                        Icon::new(IconName::Check)
+                            .size(IconSize::Small)
+                            .color(Color::Accent)
+                    })),
+            )
             .child(
                 div()
                     .id(self.match_key(index))
                     .min_w_0()
                     .flex_1()
                     .tooltip(Tooltip::text(candidate.name.clone()).builder())
-                    .child(Label::new(candidate.name.clone()).truncate()),
+                    .child(
+                        Label::new(candidate.name.clone())
+                            // "No environment" is a choice, not a name (mockup section 6).
+                            .color(if candidate.id.is_none() {
+                                Color::Muted
+                            } else {
+                                Color::Default
+                            })
+                            .truncate(),
+                    ),
             )
-            // The current choice is marked before the user changes anything (pack screen
-            // S07 shows the active environment).
-            .children((self.active == candidate.id).then(|| {
-                Icon::new(IconName::Check)
-                    .size(IconSize::Small)
-                    .color(Color::Accent)
-            }))
             .into_any_element()
     }
 
@@ -311,7 +348,56 @@ impl PickerDelegate for EnvironmentSelector {
     }
 
     fn placeholder_text(&self) -> SharedString {
-        SharedString::new_static("Select an environment")
+        SharedString::new_static("Search environments")
+    }
+
+    /// "＋" at the right of the search field (mockup section 6): a new environment
+    /// through the sidebar's own create path ([`create_environment`]); the menu closes
+    /// and the toast says what was created.
+    fn render_query_accessory(
+        &self,
+        _window: &mut Window,
+        cx: &mut Context<Picker<Self>>,
+    ) -> Option<AnyElement> {
+        Some(
+            div()
+                .debug_selector(|| NEW_ENVIRONMENT_BUTTON.to_owned())
+                .child(
+                    IconButton::new(
+                        NEW_ENVIRONMENT_BUTTON,
+                        IconName::Plus,
+                        Tooltip::text("New environment"),
+                    )
+                    .on_click(cx.listener(|picker, _, _window, cx| {
+                        picker.delegate().new_environment(cx);
+                        cx.emit(DismissEvent);
+                    })),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// "Edit environments…" under the list (mockup section 6): the variables editor,
+    /// through its own `env_editor::Open`.
+    fn render_footer(
+        &self,
+        _window: &mut Window,
+        cx: &mut Context<Picker<Self>>,
+    ) -> Option<AnyElement> {
+        Some(
+            div()
+                .debug_selector(|| EDIT_ENVIRONMENTS_BUTTON.to_owned())
+                .child(
+                    Button::new(EDIT_ENVIRONMENTS_BUTTON, EDIT_ENVIRONMENTS_LABEL)
+                        .style(ButtonStyle::Transparent)
+                        .full_width()
+                        .on_click(cx.listener(|_picker, _, window, cx| {
+                            cx.emit(DismissEvent);
+                            window.dispatch_action(Box::new(env_editor::Open), cx);
+                        })),
+                )
+                .into_any_element(),
+        )
     }
 }
 
