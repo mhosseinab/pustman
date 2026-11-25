@@ -37,6 +37,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci-${{ matrix.os }}
+          # Save even when a test fails: a cold build writes GBs of output right before the
+          # tests, macOS then drops file events and the watcher tests see a Rescan, so a
+          # cache lost on failure keeps every following macOS run cold and failing.
+          cache-on-failure: true
           save-if: ${{ github.ref == 'refs/heads/pustman-v1/main' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 
       - name: Verify

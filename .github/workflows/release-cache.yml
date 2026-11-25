@@ -52,6 +52,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-${{ matrix.target }}
+          cache-on-failure: true
 
       - name: Build release
         run: cargo build --release --locked -p pustman
