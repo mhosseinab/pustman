@@ -49,8 +49,8 @@ mod tests;
 const COLLECTIONS_DIR: &str = "collections";
 
 /// What a freshly created item is named before the user renames it — the name Postman
-/// gives the same three creates, so the tree and the file both say what it is.
-const NEW_COLLECTION_NAME: &str = "New Collection";
+/// gives the same creates, so the tree and the file both say what it is. (A collection
+/// is named in the New Collection form instead.)
 const NEW_FOLDER_NAME: &str = "New Folder";
 const NEW_REQUEST_NAME: &str = "New Request";
 
@@ -144,6 +144,8 @@ struct RenameState {
 struct QueuedWrite {
     /// The container to expand once the write lands.
     expand: Option<ItemId>,
+    /// The item to select once the write lands (a create's new row).
+    select: Option<ItemId>,
     /// Where a failure toast goes when the write lands.
     workspace: Option<WeakEntity<Workspace>>,
     /// The write itself, run on a background task.
@@ -258,7 +260,7 @@ impl CollectionsTree {
                 let tree = tree.clone();
                 move |_event, window, cx| {
                     if tree
-                        .update(cx, |tree, cx| tree.create_collection(window, cx))
+                        .update(cx, |tree, cx| tree.open_new_collection_form(window, cx))
                         .is_err()
                     {
                         // Handled: the panel went away while the menu was open; there is
@@ -393,14 +395,15 @@ impl CollectionsTree {
         cx.notify();
     }
 
-    /// The keyboard's New Collection: the one create with no parent (REQ-UI-03).
+    /// The keyboard's New Collection: the one create with no parent (REQ-UI-03). It
+    /// opens the New Collection form ([`crate::new_collection_form`]).
     pub(crate) fn new_collection(
         &mut self,
         _: &NewCollection,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.create_collection(window, cx);
+        self.open_new_collection_form(window, cx);
     }
 
     /// The keyboard's New Folder, under the selected container (or the selected item's).
@@ -467,18 +470,28 @@ impl CollectionsTree {
         );
     }
 
-    /// Create a collection at the workspace root: the file goes in `collections/`
-    /// (REQ-WSP-01) and there is no parent's `order` to update.
-    fn create_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Create the collection the New Collection form describes at the workspace root:
+    /// the file goes in `collections/` (REQ-WSP-01) and there is no parent's `order` to
+    /// update. It goes through the tree's one write queue, and its row is selected once
+    /// it lands. A `name` a sibling already has is numbered ("Orders (2)") inside the
+    /// queued write, against the workspace as the disk holds it then — so two creates
+    /// queued back to back never produce two collections with one name.
+    pub(crate) fn create_collection(
+        &mut self,
+        name: String,
+        description: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(root) = self.writable_root(window, cx) else {
             return;
         };
         let id = ItemId::new();
-        let item = Item {
+        let mut item = Item {
             body: ItemBody::Collection(Collection {
                 id,
-                name: String::from(NEW_COLLECTION_NAME),
-                description: None,
+                name: name.clone(),
+                description,
                 auth: Auth::Inherit,
                 variables: Vec::new(),
                 order: Vec::new(),
@@ -488,8 +501,14 @@ impl CollectionsTree {
             dir: PathBuf::from(COLLECTIONS_DIR),
             path: None,
         };
-        let name = item.name();
-        self.run_write(None, window, cx, move || {
+        self.queue_write(None, Some(id), window, cx, move || {
+            let taken = workspace_store::open(&root)
+                .map(|snapshot| collection_names(&snapshot))
+                .unwrap_or_default();
+            let name = crate::new_collection_form::unique_name(&name, &taken);
+            if let ItemBody::Collection(collection) = &mut item.body {
+                collection.name = name.clone();
+            }
             let failure = match workspace_store::save_item(&root, &item) {
                 Ok(_) => None,
                 Err(error) => Some(format!(
@@ -498,6 +517,28 @@ impl CollectionsTree {
             };
             WriteReport::after_write(&root, failure)
         });
+    }
+
+    /// The names of the collections at the workspace root — what a new collection's
+    /// name is checked against.
+    pub(crate) fn collection_names(&self) -> Vec<String> {
+        collection_names(&self.snapshot)
+    }
+
+    /// Put the selection on `id`'s row, if the tree draws it.
+    fn select_item(&mut self, id: ItemId, cx: &mut Context<Self>) {
+        let Some(index) = self
+            .rows()
+            .iter()
+            .position(|row| row_item_id(row) == Some(id))
+        else {
+            return;
+        };
+        let Some(key) = self.rows().get(index).map(TreeRow::element_id) else {
+            return;
+        };
+        self.navigation.select(key, index);
+        cx.notify();
     }
 
     /// Create a folder or request under `container` — the selected container, or the
@@ -890,12 +931,25 @@ impl CollectionsTree {
         cx: &mut Context<Self>,
         work: impl FnOnce() -> WriteReport + Send + 'static,
     ) {
+        self.queue_write(expand, None, window, cx, work);
+    }
+
+    /// [`Self::run_write`], selecting `select`'s row once the write lands.
+    fn queue_write(
+        &mut self,
+        expand: Option<ItemId>,
+        select: Option<ItemId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        work: impl FnOnce() -> WriteReport + Send + 'static,
+    ) {
         let workspace = window
             .root::<Workspace>()
             .and_then(|workspace| workspace)
             .map(|workspace| workspace.downgrade());
         self.crud.queued_writes.push_back(QueuedWrite {
             expand,
+            select,
             workspace,
             work: Box::new(work),
         });
@@ -925,6 +979,9 @@ impl CollectionsTree {
                     if let Some(container) = next.expand {
                         // The new row is in there: open the container so it is drawn.
                         tree.set_expanded(container, true, cx);
+                    }
+                    if let Some(created) = next.select {
+                        tree.select_item(created, cx);
                     }
                 }
             });
@@ -959,6 +1016,16 @@ impl CollectionsTree {
             }
         }));
     }
+}
+
+/// The names of the collections at `snapshot`'s root.
+fn collection_names(snapshot: &WorkspaceSnapshot) -> Vec<String> {
+    snapshot
+        .items
+        .values()
+        .filter(|item| matches!(item.body, ItemBody::Collection(_)))
+        .map(Item::name)
+        .collect()
 }
 
 /// What a background write reports back: the workspace as it now stands on disk, and

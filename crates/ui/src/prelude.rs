@@ -28,6 +28,7 @@ pub use crate::components::button::{
 pub use crate::components::context_menu::{ContextMenu, floating_menu};
 pub use crate::components::divider::{Divider, DividerColor};
 pub use crate::components::empty_state::EmptyState;
+pub use crate::components::form_field::FormField;
 pub use crate::components::key_binding::KeyBinding;
 pub use crate::components::label::{Headline, Label, LabelSize};
 pub use crate::components::list::VirtualList;

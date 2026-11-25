@@ -14,6 +14,7 @@ pub mod button;
 pub mod context_menu;
 pub mod divider;
 pub mod empty_state;
+pub mod form_field;
 pub mod key_binding;
 pub mod label;
 pub mod list;

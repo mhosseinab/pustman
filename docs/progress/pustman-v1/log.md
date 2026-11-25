@@ -319,3 +319,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — S48u2 merged (title bar, menu bar, switcher, search; review MEDIUMs fixed with failing-first tests; VERIFY OK; LOW #332).
 - 2026-11-25 — S48u3 merged (icon rail, sidebar + New and filter, empty states, welcome screen, Environments panel; one fix cycle; conflict in workspace_open.rs resolved keeping both; VERIFY OK; LOW #333). S48u2 CI pending at merge time.
 - 2026-11-25 — S48u4 merged (request area; one fix cycle: Params scroll HIGH, 50/50 split, named environment source via scope_wiring, breadcrumb once per snapshot; VERIFY OK). S48u1 fix 1 done (non-empty folder refused, legible disabled Filled button app-wide, absolute locations); merging next.
+- 2026-11-25 — S48u1 merged (forms; human-authorized rewrite of one test; one fix cycle; ui.rs re-export conflict resolved; VERIFY OK). S48u5 and S48u6 dispatched (Claude, from ab397af).

@@ -130,7 +130,7 @@ Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub p
 | S45 | Import/export UI (Postman collection, environment, globals) | done | 0 | | | S45a, S45b, S45c merged |
 | S46 | Quick open (`Ctrl/Cmd-P`) | done | 0 | | | S46 merged |
 | S47 | Sharing AC: two clones of one Git repository | done | 0 | | | S47 merged |
-| S48u1 | New Workspace and New Collection forms (driver-added from the human's M2 UX review) | in_progress | 0 | | |  |
+| S48u1 | New Workspace and New Collection forms (driver-added from the human's M2 UX review) | done | 1 | | | S48u1 merged |
 | S48u2 | Menu bar (File/Edit/View/Request/Help; native on macOS) opening the forms and actions (driver-added) | done | 1 | | | S48u2 merged |
 | S48u3 | Icon rail, sidebar "+ New", empty states, welcome screen (driver-added) | done | 1 | | | S48u3 merged |
 | S48u4 | Request area: breadcrumb, split Send, tab badges, variable line, two-column Auth (driver-added) | done | 1 | | | S48u4 merged |

@@ -78,18 +78,34 @@ fn open_root(opened: &Entity<WorkspaceOpen>, cx: &VisualTestContext) -> Option<P
 fn create_workspace_writes_pustman_json(cx: &mut TestAppContext) {
     let directory = tempfile::tempdir().expect("the temp dir must be created");
     let chosen = directory.path().join("my-api-workspace");
-    std::fs::create_dir(&chosen).expect("the folder the user picks can be created");
     let store = open_store();
-    let (_workspace, cx) = workspace_window(cx, &store);
+    let (workspace, cx) = workspace_window(cx, &store);
 
-    // The user asks for a new workspace and picks the folder for it.
+    // The user asks for a new workspace: the New Workspace form opens (S48u1).
     cx.dispatch_action(CreateWorkspace);
     cx.run_until_parked();
     assert!(
-        cx.did_prompt_for_paths(),
-        "CreateWorkspace asks for the workspace folder in a dialog"
+        !cx.did_prompt_for_paths(),
+        "CreateWorkspace opens the New Workspace form, not a folder dialog"
     );
-    cx.simulate_path_prompt_response(|_| Some(vec![chosen.clone()]));
+    let form = cx
+        .read(|cx| {
+            workspace
+                .read(cx)
+                .modal_layer()
+                .active_modal::<crate::new_workspace_form::NewWorkspaceForm>()
+        })
+        .expect("CreateWorkspace opens the New Workspace form");
+
+    // The user names it and picks its parent folder, then presses Create.
+    let location = directory.path().to_string_lossy().into_owned();
+    cx.update(|_window, cx| {
+        let (name_input, location_input) = form.read(cx).fields();
+        name_input.update(cx, |input, cx| input.set_text("My API Workspace", cx));
+        location_input.update(cx, |input, cx| input.set_text(&location, cx));
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| form.update(cx, |form, cx| form.submit(window, cx)));
     cx.run_until_parked();
 
     let document: WorkspaceDocument = serde_json::from_slice(
@@ -97,8 +113,8 @@ fn create_workspace_writes_pustman_json(cx: &mut TestAppContext) {
     )
     .expect("the workspace file is the workspace JSON");
     assert_eq!(
-        document.name, "my-api-workspace",
-        "the new workspace takes its folder's name"
+        document.name, "My API Workspace",
+        "the new workspace takes the name typed in the form"
     );
     assert_eq!(
         document.format_version, FORMAT_VERSION,

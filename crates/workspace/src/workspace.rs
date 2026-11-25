@@ -10,6 +10,7 @@ mod autosave;
 mod dock;
 mod item;
 mod modal_layer;
+pub mod new_workspace_form;
 mod pane;
 mod pane_tabs;
 mod panel;

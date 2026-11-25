@@ -1,5 +1,5 @@
-//! Open and create workspaces (PRD REQ-WSP-04/05, REQ-COLLAB-06): the folder dialogs
-//! behind `OpenWorkspace` and `CreateWorkspace`, the workspace folder one window holds
+//! Open and create workspaces (PRD REQ-WSP-04/05, REQ-COLLAB-06): the folder dialog
+//! behind `OpenWorkspace`, the create behind `CreateWorkspace`'s form, the workspace folder one window holds
 //! ([`WorkspaceOpen`], one per window — REQ-WSP-05), and the recent list the launch
 //! reopen reads. [`workspace_store`] does the file work — [`workspace_store::open`] reads
 //! a folder, [`workspace_store::save_item`] writes `pustman.json` — and `storage`'s
@@ -21,8 +21,12 @@
 //! one (REQ-WSP-05's "the last workspace reopens at launch"). v1 has one window, so a new
 //! window *is* a launch; a multi-window build would give each window its own restore.
 //!
-//! `Decision:` a created workspace takes its folder's name. A name dialog is a modal this
-//! step does not build, and renaming an item already exists in the tree (S40a).
+//! `Decision:` `CreateWorkspace` opens the New Workspace form
+//! ([`crate::new_workspace_form`], S48u1) instead of a folder dialog: the user names the
+//! workspace and picks the parent folder, and the workspace is created at
+//! `<location>/<slug of name>` under the name typed. [`WorkspaceOpen::create_named`] is
+//! the one create path; [`WorkspaceOpen::create_folder`] (the folder takes its own name)
+//! stays for callers that already hold a folder. `OpenWorkspace` is still a folder dialog.
 //!
 //! `Decision:` "CreateWorkspace writes `pustman.json` + layout" is the workspace file plus
 //! the PRD §6.1 folder layout — `collections/` and `environments/`. The *UI* layout is
@@ -212,27 +216,16 @@ impl WorkspaceOpen {
 
     /// Ask for the folder to open as this window's workspace (the `OpenWorkspace` action).
     pub fn prompt_open(&mut self, cx: &mut Context<Self>) {
-        self.prompt_folder(FolderPrompt::Open, cx);
+        self.prompt_folder(cx);
     }
 
-    /// Ask for the folder to create this window's new workspace in (the `CreateWorkspace`
-    /// action).
-    pub fn prompt_create(&mut self, cx: &mut Context<Self>) {
-        self.prompt_folder(FolderPrompt::Create, cx);
-    }
-
-    /// The platform folder dialog both actions ask their question with.
-    fn prompt_folder(&mut self, kind: FolderPrompt, cx: &mut Context<Self>) {
+    /// The platform folder dialog `OpenWorkspace` asks its question with.
+    fn prompt_folder(&mut self, cx: &mut Context<Self>) {
         let receiver = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some(match kind {
-                FolderPrompt::Open => SharedString::new_static("Open workspace"),
-                FolderPrompt::Create => {
-                    SharedString::new_static("Choose the folder for the new workspace")
-                }
-            }),
+            prompt: Some(SharedString::new_static("Open workspace")),
         });
         self.prompt = Some(cx.spawn(async move |this, cx| {
             let chosen = match receiver.await {
@@ -260,11 +253,8 @@ impl WorkspaceOpen {
             };
             // A window that closed between the choice and this callback has nothing to
             // open into.
-            this.update(cx, |opener, cx| match kind {
-                FolderPrompt::Open => opener.open_folder(root, cx),
-                FolderPrompt::Create => opener.create_folder(root, cx),
-            })
-            .ok();
+            this.update(cx, |opener, cx| opener.open_folder(root, cx))
+                .ok();
         }));
     }
 
@@ -283,24 +273,69 @@ impl WorkspaceOpen {
         }));
     }
 
-    /// Create a workspace in the folder at `root` and open it here (REQ-WSP-05).
+    /// Create a workspace in the folder at `root`, named after the folder, and open it
+    /// here (REQ-WSP-05). Failures reach the user as a toast.
     pub fn create_folder(&mut self, root: PathBuf, cx: &mut Context<Self>) {
-        let store = Self::local_store(cx);
         let name = workspace_name(&root);
+        self.create(root, name, false, |_finished, _cx| false, cx);
+    }
+
+    /// Create a workspace called `name` in the folder at `root` and open it here
+    /// (REQ-WSP-05, REQ-COLLAB-06's note included). `on_finish` hears how it went once the
+    /// disk work is done: `Ok` after the workspace is open, `Err` with the reason it
+    /// could not be created. It returns whether it showed a failure to the user itself
+    /// (the New Workspace form shows it inline); a failure nobody showed becomes a toast,
+    /// so it always reaches the user.
+    ///
+    /// `root` is a NEW workspace folder: one that already exists with anything in it is
+    /// refused ([`CreateWorkspaceError::NotEmpty`]), checked again here on the background
+    /// task, so a folder that filled up after the form validated it is still not adopted.
+    pub fn create_named(
+        &mut self,
+        root: PathBuf,
+        name: String,
+        on_finish: impl FnOnce(Result<(), SharedString>, &mut App) -> bool + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        self.create(root, name, true, on_finish, cx);
+    }
+
+    /// The one create path behind [`Self::create_folder`] and [`Self::create_named`].
+    /// `require_empty` refuses a folder that exists with anything in it.
+    fn create(
+        &mut self,
+        root: PathBuf,
+        name: String,
+        require_empty: bool,
+        on_finish: impl FnOnce(Result<(), SharedString>, &mut App) -> bool + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        let store = Self::local_store(cx);
         self.opening = Some(cx.spawn(async move |this, cx| {
             let (outcome, in_repository) = cx
                 .background_executor()
                 .spawn(async move {
                     let in_repository = inside_git_repository(&root);
-                    (create_off_foreground(root, name, store), in_repository)
+                    (
+                        create_off_foreground(root, name, require_empty, store),
+                        in_repository,
+                    )
                 })
                 .await;
-            let created = matches!(outcome, Outcome::Landed { .. });
-            // The window closed before its new workspace could be shown.
-            this.update(cx, |opener, cx| opener.land(outcome, cx)).ok();
-            if !created {
+            if let Outcome::Failed { message, level } = outcome {
+                let reason = SharedString::from(message.clone());
+                let shown = cx.update(|cx| on_finish(Err(reason), cx));
+                if !shown {
+                    // The window closed before the failure could be shown.
+                    this.update(cx, |opener, cx| {
+                        opener.land(Outcome::Failed { message, level }, cx);
+                    })
+                    .ok();
+                }
                 return;
             }
+            // The window closed before its new workspace could be shown.
+            this.update(cx, |opener, cx| opener.land(outcome, cx)).ok();
             // REQ-COLLAB-06's note, for a workspace created inside a repository. The
             // probe ran with the create's own disk work (see [`inside_git_repository`]);
             // a window that closed meanwhile cannot show the note.
@@ -310,6 +345,8 @@ impl WorkspaceOpen {
                 })
                 .ok();
             }
+            // Success needs no message from the caller: the open workspace is the news.
+            cx.update(|cx| on_finish(Ok(()), cx));
         }));
     }
 
@@ -383,13 +420,6 @@ impl WorkspaceOpen {
 
 impl EventEmitter<WorkspaceOpenEvent> for WorkspaceOpen {}
 
-/// Which question the `OpenWorkspace`/`CreateWorkspace` dialogs ask.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FolderPrompt {
-    Open,
-    Create,
-}
-
 /// Wire the workspace-opening actions and the per-window state into the app's init order.
 /// Registered app-level (`init` → `App::on_action`), the shape `request_editor::save`
 /// uses: this module's Edits keep `workspace.rs` to `mod`/init lines, so there is no
@@ -439,9 +469,23 @@ fn open_workspace_action(_: &OpenWorkspace, cx: &mut App) {
     with_active_opener(cx, |opener, cx| opener.prompt_open(cx));
 }
 
-/// The `CreateWorkspace` answer in the active window.
+/// The `CreateWorkspace` answer in the active window: the New Workspace form.
 fn create_workspace_action(_: &CreateWorkspace, cx: &mut App) {
-    with_active_opener(cx, |opener, cx| opener.prompt_create(cx));
+    let Some(window_handle) = cx.active_window() else {
+        return;
+    };
+    // Deferred like [`with_active_opener`]: the dispatch runs with the window on the
+    // update stack.
+    cx.defer(move |cx| {
+        let opened = window_handle.update(cx, |root, window, cx| {
+            if let Ok(workspace) = root.downcast::<Workspace>() {
+                crate::new_workspace_form::open(&workspace, window, cx);
+            }
+        });
+        if opened.is_err() {
+            // Handled: the window closed before the action ran; there is no one to ask.
+        }
+    });
 }
 
 /// Ask the active window's [`WorkspaceOpen`] to run `prompt`. Deferred like
@@ -546,6 +590,30 @@ pub fn create_workspace(root: &Path, name: &str) -> Result<OpenedWorkspace, Crea
     })
 }
 
+/// [`create_workspace`] for a folder the user named as new: it may be missing or empty,
+/// but a folder with anything in it is refused rather than adopted. A folder that already
+/// holds `pustman.json` is still [`CreateWorkspaceError::AlreadyAWorkspace`].
+pub fn create_workspace_in_new_folder(
+    root: &Path,
+    name: &str,
+) -> Result<OpenedWorkspace, CreateWorkspaceError> {
+    if !root.join(WORKSPACE_FILE).exists() && folder_has_entries(root) {
+        return Err(CreateWorkspaceError::NotEmpty(root.to_path_buf()));
+    }
+    create_workspace(root, name)
+}
+
+/// Whether `path` exists as anything other than an empty folder — a file there, or a
+/// folder with at least one entry. A path that cannot be inspected at all counts as not
+/// occupied: the create then fails on it and reports the real reason.
+pub(crate) fn folder_has_entries(path: &Path) -> bool {
+    match std::fs::metadata(path) {
+        Ok(metadata) if !metadata.is_dir() => true,
+        Ok(_) => std::fs::read_dir(path).is_ok_and(|mut entries| entries.next().is_some()),
+        Err(_) => false,
+    }
+}
+
 /// The PRD §6.1 folder layout and the deterministic `pustman.json` write — everything
 /// between claiming the workspace name and the folder being a workspace
 /// (see [`create_workspace`]).
@@ -608,6 +676,9 @@ pub enum CreateWorkspaceError {
     /// The folder already holds a `pustman.json`; creating would overwrite a workspace.
     #[error("{0} already holds a workspace — open it instead")]
     AlreadyAWorkspace(PathBuf),
+    /// The new workspace's folder already exists with something in it.
+    #[error("{0} already exists and isn't empty. Choose another name or location.")]
+    NotEmpty(PathBuf),
     /// The workspace file or its layout could not be written.
     #[error("{root} could not be created: {reason}")]
     Unwritable { root: PathBuf, reason: String },
@@ -631,14 +702,20 @@ fn open_off_foreground(root: PathBuf, store: Option<Arc<Mutex<LocalStore>>>) -> 
 }
 
 /// The disk and database work of one create, off the foreground thread (AGENTS.md ›
-/// async). The name comes with it: the dialog answer is one path, and the folder names
-/// the workspace (the module docs).
+/// async). The name comes with it: the form's Name, or the folder's own name for
+/// [`WorkspaceOpen::create_folder`] (the module docs).
 fn create_off_foreground(
     root: PathBuf,
     name: String,
+    require_empty: bool,
     store: Option<Arc<Mutex<LocalStore>>>,
 ) -> Outcome {
-    match create_workspace(&root, &name) {
+    let created = if require_empty {
+        create_workspace_in_new_folder(&root, &name)
+    } else {
+        create_workspace(&root, &name)
+    };
+    match created {
         Ok(workspace) => Outcome::Landed {
             recorded: record_recent(&root, store.as_deref()),
             workspace,
