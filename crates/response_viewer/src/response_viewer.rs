@@ -25,6 +25,7 @@ pub mod pretty;
 mod preview;
 mod request_as_sent;
 mod save_body;
+pub mod session_store;
 pub mod set_secret;
 mod status_line;
 mod table_cells;
