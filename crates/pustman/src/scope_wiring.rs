@@ -42,24 +42,28 @@
 //! is known, the picker's, quick-look's and environment editor's inputs are removed, so
 //! none of them can act on the previous folder's.
 //!
-//! `Decision:` (fix 2, fix 3) a request editor is bound to the open workspace only when
-//! that workspace's snapshot holds its request with the same URL template its draft has —
-//! an id alone can be reused by a crafted folder or a fork to aim a restored draft at its
-//! own host — or when it was built as a fresh request (nothing but a name and a method,
-//! what New Request builds: whatever host and variables it gets are typed while this
-//! workspace is open). A restored draft with no URL but with headers, a body or auth is
-//! not fresh: those came from wherever it was saved. Restored tabs
-//! and history entries are saved with no folder, so one from folder A, reopened while B
-//! is open, stays unbound until a snapshot holding its request opens. Once bound, an
-//! editor keeps that workspace: a tab left open from folder A after folder B opens gets
-//! no scopes and no keychain. Either way its secrets stay unresolved and the pre-send
-//! check warns, rather than resolving B's secrets into a request to A's host.
+//! `Decision:` (fix 2, fix 3, fix 4) a request editor is bound to the open workspace only
+//! when that workspace's snapshot holds its request with the same URL template and the
+//! same settings its draft has — an id alone can be reused by a crafted folder or a fork
+//! to aim a restored draft at its own host, or to turn TLS verification off or keep the
+//! Authorization header across redirects — or when it was built as a fresh request and
+//! still is one when it binds (nothing but a name and a method, what New Request builds:
+//! whatever host and variables it gets are typed while this workspace is open). A
+//! restored draft with no URL but with headers, a body or auth is not fresh: those came
+//! from wherever it was saved; nor is a fresh one filled in before any folder opened.
+//! Restored tabs and history entries are saved with no folder, so one from folder A,
+//! reopened while B is open, stays unbound until a snapshot holding its request opens.
+//! Once bound, an editor keeps that workspace: a tab left open from folder A after folder
+//! B opens gets no scopes and no keychain. Either way its secrets stay unresolved and the
+//! pre-send check warns, rather than resolving B's secrets into a request to A's host.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use api_model::{Auth, Body, Environment, HttpRequest, ItemId, Request, VariableKind};
+use api_model::{
+    Auth, Body, Environment, HttpRequest, ItemId, Request, RequestSettings, VariableKind,
+};
 use environment_picker::env_editor::{self, EditTarget, EnvEditorInputs};
 use environment_picker::quick_look::{self, QuickLookInputs};
 use environment_picker::secret_values::{self, SecretInputs};
@@ -119,21 +123,57 @@ struct WorkspaceIdentity {
     root: PathBuf,
 }
 
+/// What makes a draft the request a snapshot holds (module docs): its URL template and
+/// its settings — what it sends to, and how.
+#[derive(Clone, PartialEq)]
+struct RequestTarget {
+    url: String,
+    settings: Option<RequestSettings>,
+}
+
+impl RequestTarget {
+    fn of(request: &HttpRequest) -> Self {
+        Self {
+            url: request.url.clone(),
+            settings: request.settings.clone(),
+        }
+    }
+}
+
+/// What binding reads of an editor's draft, taken without cloning its body.
+struct DraftBinding {
+    id: ItemId,
+    target: RequestTarget,
+    fresh: bool,
+}
+
+impl DraftBinding {
+    fn of(draft: &HttpRequest) -> Self {
+        Self {
+            id: draft.id,
+            target: RequestTarget::of(draft),
+            fresh: is_fresh_request(draft),
+        }
+    }
+}
+
 /// One request editor and the workspace it belongs to (module docs): `None` until a
-/// workspace whose snapshot holds its request at the URL its draft has opens — or, for
-/// an editor built as a fresh request (`fresh`), until any workspace opens.
+/// workspace whose snapshot holds its request at the URL and settings its draft has
+/// opens — or, for an editor built as a fresh request (`built_fresh`) that still is one,
+/// until any workspace opens.
 struct WiredEditor {
     editor: WeakEntity<RequestEditor>,
     workspace: Option<WorkspaceIdentity>,
-    fresh: bool,
+    built_fresh: bool,
 }
 
 impl WiredEditor {
     /// Bind this editor, whose draft is `draft`, to `open` when it may be (module docs);
     /// whether it belongs to it.
-    fn bind(&mut self, draft: &HttpRequest, open: &OpenScopes) -> bool {
+    fn bind(&mut self, draft: &DraftBinding, open: &OpenScopes) -> bool {
         if self.workspace.is_none()
-            && (self.fresh || open.requests.get(&draft.id) == Some(&draft.url))
+            && ((self.built_fresh && draft.fresh)
+                || open.requests.get(&draft.id) == Some(&draft.target))
         {
             self.workspace = Some(open.identity.clone());
         }
@@ -258,9 +298,9 @@ struct OpenScopes {
     collections: BTreeMap<ItemId, EditTarget>,
     /// Which collection each request belongs to, through any folders.
     collection_of: BTreeMap<ItemId, ItemId>,
-    /// Every HTTP request the snapshot holds, with its URL template: the editors that may
-    /// bind to it (module docs).
-    requests: BTreeMap<ItemId, String>,
+    /// Every HTTP request the snapshot holds, with its URL template and settings: the
+    /// editors that may bind to it (module docs).
+    requests: BTreeMap<ItemId, RequestTarget>,
     local_values: Vec<LocalValue>,
     active: Option<ItemId>,
     /// The secret keys the keychain holds an entry for (module docs).
@@ -372,15 +412,14 @@ pub fn init(cx: &mut App) {
         cx.observe_new::<RequestEditor>(|editor, _window, cx| {
             let entity = cx.entity();
             let request_id = editor.draft().id;
+            let draft = DraftBinding::of(editor.draft());
             let mut wired = WiredEditor {
                 editor: entity.downgrade(),
                 workspace: None,
-                fresh: is_fresh_request(editor.draft()),
+                built_fresh: draft.fresh,
             };
             let open = cx.global::<ScopeWiring>().open.clone();
-            let bound = open
-                .as_ref()
-                .is_some_and(|open| wired.bind(editor.draft(), open));
+            let bound = open.as_ref().is_some_and(|open| wired.bind(&draft, open));
             cx.global_mut::<ScopeWiring>().editors.push(wired);
             let Some(open) = open.filter(|_| bound) else {
                 return;
@@ -557,7 +596,9 @@ fn scopes_of(snapshot: &WorkspaceSnapshot) -> Option<OpenScopes> {
             .items
             .iter()
             .filter_map(|(id, item)| match &item.body {
-                ItemBody::Request(Request::Http(request)) => Some((*id, request.url.clone())),
+                ItemBody::Request(Request::Http(request)) => {
+                    Some((*id, RequestTarget::of(request)))
+                }
                 _ => None,
             })
             .collect(),
@@ -1003,9 +1044,14 @@ fn apply(cx: &mut App) {
     };
     install_inputs(&open, cx);
     let editors = live_editors(cx);
-    let drafts: HashMap<EntityId, HttpRequest> = editors
+    let drafts: HashMap<EntityId, DraftBinding> = editors
         .iter()
-        .map(|editor| (editor.entity_id(), editor.read(cx).draft().clone()))
+        .map(|editor| {
+            (
+                editor.entity_id(),
+                DraftBinding::of(editor.read(cx).draft()),
+            )
+        })
         .collect();
     let bound: HashSet<EntityId> = cx
         .global_mut::<ScopeWiring>()

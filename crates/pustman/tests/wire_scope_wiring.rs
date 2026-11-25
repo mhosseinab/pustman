@@ -20,13 +20,13 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use api_model::{
-    Auth, Body, Collection, Environment, HttpRequest, ItemId, KeyValue, Method, Request, Variable,
-    VariableKind,
+    Auth, Body, Collection, Environment, HttpRequest, ItemId, KeyValue, Method, Request,
+    RequestSettings, Variable, VariableKind,
 };
 use environment_picker::env_editor::{EnvEditor, Open as OpenEnvEditor};
 use environment_picker::secret_values::{self, SecretInputs};
@@ -1478,4 +1478,281 @@ fn wire_unkeyable_secret_is_reported_when_the_folder_key_fails(cx: &mut TestAppC
             .is_some(),
         "the unkeyable secret is reported"
     );
+}
+
+/// A keychain stand-in for presence-check races: while `stale` is set its reads answer as
+/// the keychain did before any write (a check that read it just before the app saved a
+/// secret), and it names every variable it was read for.
+struct GatedKeychain {
+    inner: MemorySecretStore,
+    stale: AtomicBool,
+    read_names: Mutex<Vec<String>>,
+}
+
+impl GatedKeychain {
+    fn new() -> Self {
+        Self {
+            inner: MemorySecretStore::new(),
+            stale: AtomicBool::new(false),
+            read_names: Mutex::default(),
+        }
+    }
+
+    fn was_read_for(&self, name: &str) -> bool {
+        self.read_names
+            .lock()
+            .expect("the lock is free")
+            .iter()
+            .any(|read| read == name)
+    }
+}
+
+impl SecretStore for GatedKeychain {
+    fn get(&self, key: &SecretKey) -> Result<SecretValue, SecretError> {
+        self.read_names
+            .lock()
+            .expect("the lock is free")
+            .push(key.variable_key().to_string());
+        if self.stale.load(Ordering::SeqCst) {
+            return Err(SecretError::NotFound { key: key.clone() });
+        }
+        self.inner.get(key)
+    }
+
+    fn set(&self, key: &SecretKey, value: &SecretValue) -> Result<(), SecretError> {
+        self.inner.set(key, value)
+    }
+
+    fn delete(&self, key: &SecretKey) -> Result<(), SecretError> {
+        self.inner.delete(key)
+    }
+}
+
+/// Hand the window `fixture`'s snapshot with one more secret variable, `name`, in Alpha —
+/// a new set of secret keys, so a presence check starts. Nothing is run: the check is
+/// left in flight.
+fn add_alpha_secret_variable(
+    cx: &mut VisualTestContext,
+    workspace: &Entity<Workspace>,
+    fixture: &Fixture,
+    name: &str,
+) {
+    let mut snapshot = workspace_store::open(&fixture.root).expect("the fixture folder opens");
+    for item in snapshot.items.values_mut() {
+        if let ItemBody::Environment(environment) = &mut item.body
+            && environment.id == fixture.alpha
+        {
+            environment
+                .variables
+                .push(variable(name, None, VariableKind::Secret));
+        }
+    }
+    let opened = opener(workspace, cx);
+    cx.update(|_, cx| opened.update(cx, |opener, cx| opener.set_snapshot(snapshot, cx)));
+}
+
+/// A secret saved while a presence check is in flight — the check having read the
+/// keychain before the save — still resolves at the next send: the landing check does
+/// not undo the write.
+#[gpui::test]
+fn wire_secret_saved_during_a_presence_check_resolves_at_next_send(cx: &mut TestAppContext) {
+    let fixture = fixture_workspace();
+    let store = shared_store();
+    let keychain = Arc::new(GatedKeychain::new());
+    let (workspace, transport, cx) = boot_with(cx, &store, &fixture, keychain.clone());
+    select_environment(cx, "Alpha");
+    let editor = open_collection_request(cx, &workspace);
+
+    keychain.stale.store(true, Ordering::SeqCst);
+    add_alpha_secret_variable(cx, &workspace, &fixture, "extra");
+    // What the environment editor's save does, while that check is in flight.
+    let key = SecretKey::new(
+        installation_key(&fixture),
+        fixture.alpha.to_string(),
+        "token",
+    )
+    .expect("the fixture ids are valid keychain ids");
+    cx.update(|_, cx| {
+        let keychain = secret_values::store(cx).expect("the keychain is installed");
+        keychain
+            .set(&key, &SecretValue::new(FAKE_SECRET))
+            .expect("the secret stores");
+        let inputs = cx.global_mut::<environment_picker::env_editor::EnvEditorInputs>();
+        inputs.local_values = inputs.local_values.clone();
+    });
+    cx.run_until_parked();
+    assert!(
+        keychain.was_read_for("extra"),
+        "the presence check ran while the save was made"
+    );
+    keychain.stale.store(false, Ordering::SeqCst);
+
+    send(&editor, cx);
+    assert_eq!(
+        warned_names(&editor, cx),
+        None,
+        "the secret saved during the check is resolved"
+    );
+    assert!(sent_secret(&transport), "the saved secret is sent");
+}
+
+/// A presence check superseded by a newer one: the newer set of keys is read and its
+/// answer lands, and the superseded set is not taken as checked — returning to it reads
+/// the keychain again.
+#[gpui::test]
+fn wire_superseded_presence_check_reads_and_lands_the_newer_key_set(cx: &mut TestAppContext) {
+    let fixture = fixture_workspace();
+    let store = shared_store();
+    let keychain = Arc::new(GatedKeychain::new());
+    let (workspace, transport, cx) = boot_with(cx, &store, &fixture, keychain.clone());
+    select_environment(cx, "Alpha");
+    let editor = open_collection_request(cx, &workspace);
+    // Stored outside the app (another device, the OS's own tool): only a read finds it.
+    seed_secret(&keychain.inner, &fixture);
+
+    add_alpha_secret_variable(cx, &workspace, &fixture, "superseded");
+    add_alpha_secret_variable(cx, &workspace, &fixture, "newer");
+    cx.run_until_parked();
+    assert!(keychain.was_read_for("newer"), "the newer key set is read");
+
+    send(&editor, cx);
+    assert_eq!(
+        warned_names(&editor, cx),
+        None,
+        "the newer check's answer resolves the secret"
+    );
+    assert!(sent_secret(&transport), "the secret is sent");
+
+    keychain
+        .read_names
+        .lock()
+        .expect("the lock is free")
+        .clear();
+    add_alpha_secret_variable(cx, &workspace, &fixture, "superseded");
+    cx.run_until_parked();
+    assert!(
+        keychain.was_read_for("superseded"),
+        "the superseded key set was never checked, so it is read now"
+    );
+}
+
+/// [`boot_with`] without opening a folder: the app as it launches into an empty window.
+fn boot_unopened<'a>(
+    cx: &'a mut TestAppContext,
+    store: &Arc<Mutex<LocalStore>>,
+    keychain: Arc<dyn SecretStore>,
+) -> (Entity<Workspace>, FakeTransport, &'a mut VisualTestContext) {
+    cx.update(|cx| pustman::init_with_store(cx, StoreLocation::Shared(Arc::clone(store))));
+    let transport = FakeTransport::new(cx.executor());
+    for _ in 0..4 {
+        transport.push_response(Duration::ZERO, 200, b"ok".to_vec());
+    }
+    let client = cx.new(|_| HttpClient::new(Arc::new(transport.clone())));
+    cx.update(|cx| set_http_client(client, cx));
+    let (workspace, cx) = cx.add_window_view(Workspace::new);
+    cx.update(|_window, cx| StartupProblems::attach_workspace(&workspace, cx));
+    cx.update(|window, _cx| window.activate_window());
+    cx.run_until_parked();
+    cx.update(|_window, cx| secret_values::install_inputs(cx, SecretInputs { store: keychain }));
+    cx.run_until_parked();
+    (workspace, transport, cx)
+}
+
+/// A request with nothing but a name and a method: what `NewRequest` builds.
+fn empty_request() -> HttpRequest {
+    HttpRequest {
+        headers: Vec::new(),
+        auth: Auth::None,
+        ..token_request("")
+    }
+}
+
+/// A New Request tab with a `{{token}}` request pasted into it before any folder opened
+/// is no longer fresh when one opens: it does not bind to it.
+#[gpui::test]
+fn wire_new_request_filled_before_a_folder_opens_never_sends_the_secret(cx: &mut TestAppContext) {
+    let fixture = fixture_workspace();
+    let store = shared_store();
+    let keychain = memory_keychain(&fixture, true);
+    let (workspace, transport, cx) = boot_unopened(cx, &store, keychain);
+
+    let editor = new_request(cx, &workspace, &format!("{TOKEN_TARGET}?key={{{{token}}}}"));
+    open_folder(cx, &workspace, &fixture);
+    select_environment(cx, "Alpha");
+    assert_never_sends_the_secret(&editor, &transport, cx);
+}
+
+/// A restored all-empty draft edited before any folder opened is no longer fresh when
+/// one opens: it does not bind to it.
+#[gpui::test]
+fn wire_restored_empty_draft_edited_before_a_folder_opens_never_sends_the_secret(
+    cx: &mut TestAppContext,
+) {
+    let fixture = fixture_workspace();
+    let store = shared_store();
+    let restored = empty_request();
+    restore_tab(&store, &restored);
+    let keychain = memory_keychain(&fixture, true);
+    let (workspace, transport, cx) = boot_unopened(cx, &store, keychain);
+
+    let editor = active_editor(&workspace, cx);
+    assert_eq!(
+        cx.read(|cx| editor.read(cx).draft().id),
+        restored.id,
+        "the restored tab is the one on screen"
+    );
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| editor.focus_url_bar(window, cx));
+    });
+    cx.simulate_input(&format!("{TOKEN_TARGET}?key={{{{token}}}}"));
+    cx.run_until_parked();
+    open_folder(cx, &workspace, &fixture);
+    select_environment(cx, "Alpha");
+    assert_never_sends_the_secret(&editor, &transport, cx);
+}
+
+/// A restored draft with its request's id and URL but other settings — TLS verification
+/// off and the Authorization header kept across redirects — is not that request: it does
+/// not bind.
+#[gpui::test]
+fn wire_restored_tab_with_its_requests_url_but_other_settings_never_sends_the_secret(
+    cx: &mut TestAppContext,
+) {
+    let fixture = fixture_workspace();
+    // A literal host, so the unbound draft still resolves and the pre-send check names
+    // `token` alone.
+    let mut snapshot = workspace_store::open(&fixture.root).expect("the fixture folder opens");
+    let mut item = snapshot
+        .items
+        .values_mut()
+        .find(|item| matches!(item.body, ItemBody::Request(Request::Http(_))))
+        .expect("the fixture holds a request")
+        .clone();
+    if let ItemBody::Request(Request::Http(request)) = &mut item.body {
+        request.url = TOKEN_TARGET.to_string();
+    }
+    save(&fixture.root, item);
+    let store = shared_store();
+    let mut crafted = collection_request(&fixture);
+    assert_eq!(
+        crafted.url, TOKEN_TARGET,
+        "the folder's request has the literal host"
+    );
+    crafted.settings = Some(RequestSettings {
+        verify_tls: Some(false),
+        keep_authorization: Some(true),
+        ..RequestSettings::default()
+    });
+    restore_tab(&store, &crafted);
+    let keychain = memory_keychain(&fixture, true);
+    let (workspace, transport, cx) = boot(cx, &store, &fixture, keychain);
+    select_environment(cx, "Alpha");
+
+    let editor = active_editor(&workspace, cx);
+    assert_eq!(
+        cx.read(|cx| editor.read(cx).draft().id),
+        crafted.id,
+        "the restored tab is the one on screen"
+    );
+    assert_never_sends_the_secret(&editor, &transport, cx);
 }
