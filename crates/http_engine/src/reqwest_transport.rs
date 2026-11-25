@@ -30,6 +30,7 @@ use crate::body::user_header_is_set;
 use crate::cookie_transport;
 use crate::cookies::CookieJar;
 use crate::error::TransportError;
+use crate::event_stream::{self, EventStream};
 use crate::request::{
     self, Header, MultipartField, MultipartValue, RequestBody, ResolvedRequest, SendSettings,
 };
@@ -122,10 +123,11 @@ impl Transport for ReqwestTransport {
 
 /// The settings a [`reqwest::Client`] is built for (REQ-HTTP-09/10). Redirects are not
 /// part of it: the client never follows them, so every send uses the same redirect
-/// policy and [`execute`] walks the chain itself, hop by hop (REQ-NET-03).
+/// policy and [`execute`] walks the chain itself, hop by hop (REQ-NET-03). Nor is the
+/// timeout: [`exchange`] applies it, because a client-wide timeout also covers the body
+/// and would cut every event stream off after it (REQ-SSE-01).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct ClientKey {
-    timeout: Duration,
     http_version: HttpVersion,
     verify_tls: bool,
 }
@@ -133,7 +135,6 @@ struct ClientKey {
 impl ClientKey {
     fn for_settings(settings: &SendSettings) -> Self {
         Self {
-            timeout: settings.timeout,
             http_version: settings.http_version,
             verify_tls: settings.verify_tls,
         }
@@ -166,7 +167,6 @@ fn build_client(key: ClientKey) -> Result<reqwest::Client, TransportError> {
     // hops included — and the `Cookie` header actually sent is part of the request record
     // (REQ-HTTP-08, REQ-NET-04, `cookie_transport.rs`).
     let mut builder = reqwest::Client::builder()
-        .timeout(key.timeout)
         .tls_info(true)
         .redirect(reqwest::redirect::Policy::none());
     builder = match key.http_version {
@@ -367,10 +367,16 @@ async fn exchange(
         request.headers_mut().insert(CONTENT_TYPE, value);
     }
 
+    // The request's timeout covers the whole hop — connect, head and body — except the
+    // body of an event stream, which runs until the server closes it or the user stops it
+    // (REQ-SSE-01). `tokio::time::timeout` treats a deadline too far to represent as none.
+    let timed_out = || TransportError::Timeout {
+        after: settings.timeout,
+    };
     let started = Instant::now();
-    let response = client
-        .execute(request)
+    let response = tokio::time::timeout(settings.timeout, client.execute(request))
         .await
+        .map_err(|_elapsed| timed_out())?
         .map_err(|error| map_error(error, settings.timeout, url))?;
     let first_byte = started.elapsed();
     let status = response.status();
@@ -379,8 +385,36 @@ async fn exchange(
     // The extensions carry the connection facts and go away with the response, so they
     // are read before the body consumes it.
     let network = network_info(&response, url, settings.verify_tls);
+    if response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(event_stream::is_event_stream)
+    {
+        // The body is never buffered or spilled: it streams into the session events
+        // until the server closes it or the user stops it, so there is no download
+        // phase to time and no total yet.
+        let body = open_event_stream(response, settings.timeout, url);
+        return Ok(Exchange {
+            status,
+            http_version,
+            headers,
+            body,
+            timings: Timings {
+                first_byte: Some(first_byte),
+                ..Timings::default()
+            },
+            network,
+        });
+    }
     let download_started = Instant::now();
-    let body = read_body(response, spill_limit, settings.timeout, url).await?;
+    let remaining = settings.timeout.saturating_sub(started.elapsed());
+    let body = tokio::time::timeout(
+        remaining,
+        read_body(response, spill_limit, settings.timeout, url),
+    )
+    .await
+    .map_err(|_elapsed| timed_out())??;
     let download = download_started.elapsed();
 
     Ok(Exchange {
@@ -396,6 +430,20 @@ async fn exchange(
         },
         network,
     })
+}
+
+/// Hand `response`'s body to an [`EventStream`] and run its pump on this tokio runtime.
+/// The pump ends — dropping the body, which closes the connection — when the server
+/// closes the stream, when it is stopped, or when every handle to it is gone
+/// (`event_stream.rs`). Must run inside the runtime, as [`exchange`] does.
+fn open_event_stream(response: reqwest::Response, timeout: Duration, url: &Url) -> ResponseBody {
+    let url = url.clone();
+    let (stream, pump) = EventStream::open(response.bytes_stream(), move |error| {
+        map_error(error, timeout, &url).user_message()
+    });
+    // Not awaited and not aborted from here: the pump's own stop signal ends it.
+    drop(tokio::spawn(pump));
+    ResponseBody::EventStream(stream)
 }
 
 /// The body of one hop, streamed as it arrives through a [`SpillWriter`] (REQ-RESP-06):

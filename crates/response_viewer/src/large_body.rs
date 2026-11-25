@@ -98,7 +98,7 @@ pub(crate) fn pretty_limit_mb(cx: &App) -> u64 {
 /// (REQ-RESP-06). The value is for that button alone (see the module docs).
 pub(crate) fn file_path(body: &ResponseBody) -> Option<PathBuf> {
     match body {
-        ResponseBody::Bytes(_) => None,
+        ResponseBody::Bytes(_) | ResponseBody::EventStream(_) => None,
         ResponseBody::File { path, .. } => Some(path.clone()),
         ResponseBody::Spilled { file, .. } => Some(file.path().to_owned()),
     }

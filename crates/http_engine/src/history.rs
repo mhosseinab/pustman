@@ -598,6 +598,8 @@ fn body_window_and_size(body: &ResponseBody, secrets: &SecretValues) -> (Vec<u8>
             *total_len,
             true,
         ),
+        // An event stream holds no body: its events are the session log's, not History's.
+        ResponseBody::EventStream(_) => (Vec::new(), 0, true),
     };
     let may_continue = !size_known || u64::try_from(window.len()).unwrap_or(u64::MAX) < size;
     (window, size, may_continue)
