@@ -121,6 +121,13 @@ enum Outcome {
 /// docs). Not `Default`: absent means "not installed", which is not a failure.
 pub(crate) struct OpenStore(Arc<Mutex<LocalStore>>);
 
+/// Bumped every time a window opens a workspace — the recent list just gained (or
+/// re-dated) a row, so whatever shows that list (the welcome pane) reads it again.
+#[derive(Default)]
+pub(crate) struct RecentsChanged(u64);
+
+impl Global for RecentsChanged {}
+
 impl Global for OpenStore {}
 
 /// The app-wide wiring: the init guard, the [`WorkspaceOpen`] of every window, and the
@@ -349,6 +356,7 @@ impl WorkspaceOpen {
         self.open = Some(workspace);
         cx.emit(WorkspaceOpenEvent::Opened { root });
         cx.notify();
+        cx.update_default_global::<RecentsChanged, _>(|changed, _cx| changed.0 += 1);
         if !recorded {
             self.report(RECENT_FAILURE_MESSAGE, Severity::Warning, cx);
         }

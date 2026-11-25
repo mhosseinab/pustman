@@ -28,7 +28,9 @@ use ui::prelude::*;
 
 use crate::Workspace;
 use crate::item::Item;
-use crate::workspace_open::{OpenStore, RecentListError, WorkspaceOpen, recent_folders};
+use crate::workspace_open::{
+    OpenStore, RecentListError, RecentsChanged, WorkspaceOpen, recent_folders,
+};
 
 #[cfg(test)]
 #[path = "welcome_tests.rs"]
@@ -52,6 +54,9 @@ pub(crate) const NEW_COLLECTION_ID: &str = "welcome-new-collection";
 
 /// The panel whose "＋ New" the open-workspace state offers as New collection….
 const COLLECTIONS_PANEL_ID: &str = "collections";
+
+/// What a Recent click says when this window cannot open a workspace.
+const NO_OPENER_MESSAGE: &str = "This window cannot open a workspace — use Open workspace… instead";
 
 /// How many recent folders the welcome lists; the rest are a `workspace::OpenRecent` away.
 const MAX_RECENT_ROWS: usize = 5;
@@ -89,9 +94,11 @@ impl Welcome {
         let mut welcome = Self {
             recent: Recent::Unknown,
             _loading: None,
-            _subscriptions: vec![cx.observe_global::<OpenStore>(|welcome, cx| {
-                welcome.load_recent(cx);
-            })],
+            _subscriptions: vec![
+                cx.observe_global::<OpenStore>(|welcome, cx| welcome.load_recent(cx)),
+                // A workspace opened anywhere re-dated the list: read it again.
+                cx.observe_global::<RecentsChanged>(|welcome, cx| welcome.load_recent(cx)),
+            ],
         };
         welcome.load_recent(cx);
         welcome
@@ -446,8 +453,14 @@ fn recent_row(
                 .truncate()
                 .child(path),
         )
-        .on_click(move |_, _window, cx| {
+        .on_click(move |_, window, cx| {
             let Some(opener) = opener.as_ref() else {
+                // Errors reach the user: a click that cannot open anything says so.
+                if let Some(workspace) = window.root::<Workspace>().flatten() {
+                    workspace.update(cx, |workspace, cx| {
+                        workspace.show_toast(NO_OPENER_MESSAGE, Severity::Error, None, cx);
+                    });
+                }
                 return;
             };
             let folder = folder.clone();

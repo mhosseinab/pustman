@@ -219,3 +219,105 @@ fn test_with_a_workspace_open_new_collection_runs_the_panels_create_action(
         "New collection… runs the Collections panel's own create action in the panel"
     );
 }
+
+#[gpui::test]
+fn test_with_the_sidebar_hidden_new_collection_still_runs_in_the_panel(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().expect("the temp dir is created");
+    let root = workspace_folder(directory.path(), "commerce");
+    let store = open_store();
+    record_recent(&store, &root, 1);
+
+    cx.update(init_test);
+    cx.update(|cx| {
+        init(cx);
+        WorkspaceOpen::install_local_store(Arc::clone(&store), cx);
+    });
+    let (workspace, cx) = cx.add_window_view(Workspace::new);
+    let probes = Rc::new(Cell::new(0));
+    let panel = cx.update(|_window, cx| {
+        let probes = probes.clone();
+        cx.new(|cx| ProbePanel {
+            focus_handle: cx.focus_handle(),
+            probes,
+        })
+    });
+    cx.update(|window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.register_panel(panel.clone(), window, cx);
+            workspace
+                .left_dock()
+                .update(cx, |dock, cx| dock.set_open(false, cx));
+        });
+    });
+    cx.run_until_parked();
+    draw_window(cx);
+
+    click(cx, NEW_COLLECTION_ID);
+    draw_window(cx);
+    cx.run_until_parked();
+    let (open, focused) = cx.update(|window, cx| {
+        (
+            workspace.read(cx).left_dock().read(cx).is_open(),
+            panel.read(cx).focus_handle.is_focused(window),
+        )
+    });
+    assert!(open, "the hidden sidebar comes back on the panel");
+    assert!(focused, "with the keyboard in the panel");
+    assert_eq!(
+        probes.get(),
+        1,
+        "and the panel's create action runs even though the sidebar was hidden"
+    );
+}
+
+#[gpui::test]
+fn test_the_recent_list_follows_the_workspaces_opened_since_it_was_read(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().expect("the temp dir is created");
+    let first = workspace_folder(directory.path(), "billing");
+    let second = workspace_folder(directory.path(), "commerce");
+    let store = open_store();
+    record_recent(&store, &first, 1);
+
+    cx.update(init_test);
+    cx.update(|cx| {
+        init(cx);
+        WorkspaceOpen::install_local_store(Arc::clone(&store), cx);
+    });
+    let (workspace, cx) = cx.add_window_view(Workspace::new);
+    cx.run_until_parked();
+    let opener = cx
+        .update(|_window, cx| WorkspaceOpen::for_window(workspace.entity_id(), cx))
+        .expect("the window has an opener");
+    for folder in [second.clone(), first.clone()] {
+        opener.update(cx, |opener, cx| opener.open_folder(folder, cx));
+        cx.run_until_parked();
+    }
+    draw_window(cx);
+    assert_eq!(open_root(&workspace, cx), Some(first));
+    assert!(
+        cx.debug_bounds(recent_row_id(&second).leak()).is_some(),
+        "a workspace opened after the list was first read is listed"
+    );
+}
+
+#[gpui::test]
+fn test_a_recent_click_with_nothing_to_open_it_says_so(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().expect("the temp dir is created");
+    let folder = workspace_folder(directory.path(), "billing");
+    let store = open_store();
+    record_recent(&store, &folder, 1);
+    cx.update(init_test);
+    // No `workspace::init`: the window has no opener to open the folder with.
+    cx.update(|cx| WorkspaceOpen::install_local_store(Arc::clone(&store), cx));
+    let (workspace, cx) = cx.add_window_view(Workspace::new);
+    cx.run_until_parked();
+    draw_window(cx);
+    let before = cx.update(|_window, cx| workspace.read(cx).toasts().read(cx).len());
+    click(cx, recent_row_id(&folder).leak());
+    let after = cx.update(|_window, cx| workspace.read(cx).toasts().read(cx).len());
+    assert_eq!(
+        after,
+        before + 1,
+        "the click is answered with a toast, not silence"
+    );
+}

@@ -136,8 +136,8 @@ impl Workspace {
     /// Run `panel_id`'s "＋ New" ([`Panel::create_action`]) in the panel itself: the
     /// sidebar opens on that panel with the keyboard in it, and the action is dispatched
     /// on the panel's focus handle — so the panel's own handler answers it even though
-    /// the click came from outside the panel. A sidebar that was hidden is drawn first
-    /// and the action follows on the next frame, once the panel is in the dispatch tree.
+    /// the click came from outside the panel. A sidebar that was hidden is drawn first,
+    /// so the panel is in the dispatch tree when the action reaches it.
     pub fn run_panel_create(
         &mut self,
         panel_id: &'static str,
@@ -147,7 +147,6 @@ impl Workspace {
         let Some(action) = self.panel_create_action(panel_id, cx) else {
             return;
         };
-        let was_open = self.left_dock.read(cx).is_open();
         self.left_dock.update(cx, |dock, cx| {
             dock.set_open(true, cx);
             dock.activate_panel(panel_id, window, cx);
@@ -163,17 +162,20 @@ impl Workspace {
             return;
         };
         cx.notify();
-        if was_open {
-            // Deferred: this runs inside the workspace's own update, and the panel's
-            // handler may reach back into the workspace (a toast, a modal).
-            window.defer(cx, move |window, cx| {
-                focus_handle.dispatch_action(action.as_ref(), window, cx);
-            });
-        } else {
-            window.on_next_frame(move |window, cx| {
-                focus_handle.dispatch_action(action.as_ref(), window, cx);
-            });
-        }
+        // Deferred: this runs inside the workspace's own update, and the panel's handler
+        // may reach back into the workspace (a toast, a modal).
+        window.defer(cx, move |window, cx| {
+            // A sidebar that was hidden has not drawn its panel yet, and an action
+            // dispatched on a focus handle reaches only a panel in the drawn frame — so
+            // draw it now (nothing is leased in a deferred callback) instead of waiting
+            // for a frame. `refresh` again so the platform presents what was drawn.
+            if !focus_handle.is_rendered(window) {
+                window.refresh();
+                window.draw(cx).clear(cx);
+                window.refresh();
+            }
+            focus_handle.dispatch_action(action.as_ref(), window, cx);
+        });
     }
 }
 
