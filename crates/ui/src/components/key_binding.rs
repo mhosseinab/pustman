@@ -6,7 +6,7 @@
 
 use gpui::{
     Action, App, IntoElement, Keystroke, Modifiers, OperatingSystem, ParentElement, RenderOnce,
-    Styled, Window, div,
+    SharedString, Styled, Window, div,
 };
 use theme::ActiveTheme;
 
@@ -88,6 +88,25 @@ impl KeyBinding {
             Some(keys.join(" "))
         }
     }
+}
+
+/// The keys the keymap binds `action` to, whatever has focus — what an application
+/// menu shows beside an entry. A menu is opened from anywhere, so the binding is looked
+/// up in the whole keymap rather than under the focused element's key contexts (which is
+/// what [`KeyBinding`] does): `request::Send`'s `Ctrl+Enter` shows even while the focus
+/// is in the sidebar. The binding added last wins, as GPUI's own keymap docs order it
+/// for display. [`None`] when nothing binds the action.
+pub fn keymap_binding_text(action: &dyn Action, cx: &App) -> Option<SharedString> {
+    let keymap = cx.key_bindings();
+    let keymap = keymap.borrow();
+    let binding = keymap.bindings_for_action(action).next_back()?;
+    let os = cx.platform_info().os;
+    let keys: Vec<String> = binding
+        .keystrokes()
+        .iter()
+        .map(|keystroke| keystroke_label(keystroke.modifiers(), keystroke.key(), os))
+        .collect();
+    Some(SharedString::from(keys.join(" ")))
 }
 
 /// One keystroke as a hint spells it: `Ctrl+Shift+Tab` on Linux and Windows, GPUI's native

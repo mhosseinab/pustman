@@ -21,7 +21,7 @@ use crate::actions::{Activate, Cancel, SelectNext, SelectPrevious};
 use crate::color::Color;
 use crate::components::button::ClickHandler;
 use crate::components::divider::Divider;
-use crate::components::label::Label;
+use crate::components::label::{Label, LabelSize};
 use crate::elevation::StyledExt;
 use crate::h_flex;
 use crate::spacing::DynamicSpacing;
@@ -36,6 +36,10 @@ pub(crate) const MENU_CONTEXT: &str = "Menu";
 /// Test hook: the menu container itself — what the floating layer anchors and snaps
 /// (`VisualTestContext::debug_bounds`, the entries' key hooks below).
 pub const MENU_SELECTOR: &str = "context-menu";
+
+/// Test hook: an entry's hint sits under its key with this suffix
+/// (`"Save"` → `"Save-hint"`).
+pub const HINT_SUFFIX: &str = "-hint";
 
 /// The narrowest a menu grows, so a two-word entry never wraps.
 const MIN_WIDTH_PX: f32 = 160.;
@@ -61,6 +65,9 @@ enum MenuItem {
         /// A label colour of the caller's choosing (a method verb). [`None`] draws the
         /// row's own text color.
         color: Option<Color>,
+        /// Muted text at the row's end — an application menu's key binding, or the `▸`
+        /// of an entry that opens a submenu. [`None`] draws nothing there.
+        hint: Option<SharedString>,
         disabled: bool,
         on_click: Option<ClickHandler>,
     },
@@ -96,6 +103,7 @@ impl MenuItem {
                 key,
                 label,
                 color,
+                hint,
                 disabled,
                 ..
             } => {
@@ -122,14 +130,34 @@ impl MenuItem {
                         colors.text
                     })
                     .when(selected, |this| this.bg(colors.element_selected))
-                    .child(Label::new(label.clone()).truncate().map(|label| {
-                        // The entry's color is its identity (a method verb), not its
-                        // state: the highlight still marks the selection, by fill.
-                        match color {
-                            Some(color) => label.color(*color),
-                            None => label,
-                        }
-                    }))
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Label::new(label.clone()).truncate().map(|label| {
+                                // The entry's color is its identity (a method verb), not its
+                                // state: the highlight still marks the selection, by fill.
+                                match color {
+                                    Some(color) => label.color(*color),
+                                    None => label,
+                                }
+                            }),
+                        ),
+                    )
+                    .when_some(hint.clone(), |row, hint| {
+                        let hint_key = format!("{key}{HINT_SUFFIX}");
+                        row.child(
+                            div()
+                                .debug_selector(move || hint_key.clone())
+                                .flex_none()
+                                .pl(DynamicSpacing::Base08.rems(cx))
+                                .child(Label::new(hint).size(LabelSize::XSmall).color(
+                                    if disabled {
+                                        Color::Disabled
+                                    } else {
+                                        Color::Muted
+                                    },
+                                )),
+                        )
+                    })
                     .map(|this| {
                         if disabled {
                             this.cursor_not_allowed().opacity(0.6)
@@ -192,6 +220,7 @@ impl ContextMenu {
             key,
             label,
             color: None,
+            hint: None,
             disabled: false,
             on_click: Some(Rc::new(on_click)),
         });
@@ -215,6 +244,7 @@ impl ContextMenu {
             key,
             label,
             color: Some(color),
+            hint: None,
             disabled: false,
             on_click: Some(Rc::new(on_click)),
         });
@@ -232,9 +262,20 @@ impl ContextMenu {
             key,
             label,
             color: None,
+            hint: None,
             disabled: true,
             on_click: None,
         });
+        self
+    }
+
+    /// Give the entry added last a muted `hint` at its end: the key binding an
+    /// application menu shows beside an entry, or the `▸` of an entry that opens a
+    /// submenu. A separator takes no hint, so after one this does nothing.
+    pub fn hint(mut self, hint: impl Into<SharedString>) -> Self {
+        if let Some(MenuItem::Entry { hint: slot, .. }) = self.items.last_mut() {
+            *slot = Some(hint.into());
+        }
         self
     }
 
@@ -444,3 +485,7 @@ mod occlusion_tests;
 #[cfg(test)]
 #[path = "context_menu_floating_tests.rs"]
 mod floating_menu_tests;
+
+#[cfg(test)]
+#[path = "context_menu_hint_tests.rs"]
+mod hint_tests;
