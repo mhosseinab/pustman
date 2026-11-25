@@ -21,6 +21,7 @@ mod hex_view;
 mod json_copy;
 mod json_syntax;
 mod large_body;
+pub mod log_toolbar;
 pub mod pretty;
 mod preview;
 mod request_as_sent;

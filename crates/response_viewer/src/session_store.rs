@@ -9,8 +9,11 @@
 //! - The filter's matching rows are computed by [`SessionStore::set_filter`] and extended
 //!   by each [`SessionStore::push`]: the view reads [`SessionStore::filtered`] and never
 //!   searches in `render`.
-//! - [`SessionStore::clear`] and dropping the store delete the temp files: the last
-//!   [`SpilledFile`] handle drops, and its `TempPath` removes the file (`spill.rs`).
+//! - Dropping the store deletes the temp files: the last [`SpilledFile`] handle drops,
+//!   and its `TempPath` removes the file (`spill.rs`). [`SessionStore::clear`] hands the
+//!   handles back so the caller drops them off the foreground.
+//! - [`SessionStore::snapshot`] copies the events and shares the spill files, so an
+//!   export on a background task reads files a concurrent clear cannot delete.
 //! - [`SessionStore::export_jsonl`] writes one [`to_jsonl_line`] per event. A spilled
 //!   payload is copied from its file in chunks into the line, never loaded whole.
 //!
@@ -199,27 +202,28 @@ impl SessionStore {
         &self.filtered
     }
 
-    /// Forget every event and delete the spill files.
-    pub fn clear(&mut self) {
+    /// Forget every event. The spill files are handed back: dropping them deletes the
+    /// files, so a view drops them on a background task (deleting is file IO).
+    pub fn clear(&mut self) -> Vec<SpilledFile> {
         self.events.clear();
-        self.spill_files.clear();
         self.filtered.clear();
         self.inline_bytes = 0;
+        std::mem::take(&mut self.spill_files)
+    }
+
+    /// The session as it is now, for an export off the foreground. The snapshot shares
+    /// the spill files, so a [`Self::clear`] while it is written deletes nothing it reads.
+    pub fn snapshot(&self) -> SessionSnapshot {
+        SessionSnapshot {
+            events: self.events.clone(),
+            _spill_files: self.spill_files.clone(),
+        }
     }
 
     /// Write the session as JSON lines, copying spilled payloads from their files in
     /// chunks. Blocking IO: run it on a background task.
     pub fn export_jsonl(&self, writer: &mut impl Write) -> io::Result<()> {
-        for event in &self.events {
-            match message_of(event).map(|message| (message.kind, &message.payload)) {
-                Some((kind, Payload::Spilled { path, prefix, .. })) => {
-                    write_spilled_line(writer, event, kind, prefix, path)?;
-                }
-                _ => writer.write_all(to_jsonl_line(event).as_bytes())?,
-            }
-            writer.write_all(b"\n")?;
-        }
-        writer.flush()
+        export_events(&self.events, writer)
     }
 
     fn matches(&self, event: &SessionEvent) -> bool {
@@ -245,6 +249,35 @@ impl SessionStore {
                 .any(|bytes| matcher.is_match(bytes))
         })
     }
+}
+
+/// A copy of a session's events that keeps their spill files alive
+/// ([`SessionStore::snapshot`]); `Send`, so a background task can export it.
+pub struct SessionSnapshot {
+    events: Vec<SessionEvent>,
+    _spill_files: Vec<SpilledFile>,
+}
+
+impl SessionSnapshot {
+    /// [`SessionStore::export_jsonl`] for the snapshot. Blocking IO: run it on a
+    /// background task.
+    pub fn export_jsonl(&self, writer: &mut impl Write) -> io::Result<()> {
+        export_events(&self.events, writer)
+    }
+}
+
+/// One [`to_jsonl_line`] per event, a spilled payload copied from its file in chunks.
+fn export_events(events: &[SessionEvent], writer: &mut impl Write) -> io::Result<()> {
+    for event in events {
+        match message_of(event).map(|message| (message.kind, &message.payload)) {
+            Some((kind, Payload::Spilled { path, prefix, .. })) => {
+                write_spilled_line(writer, event, kind, prefix, path)?;
+            }
+            _ => writer.write_all(to_jsonl_line(event).as_bytes())?,
+        }
+        writer.write_all(b"\n")?;
+    }
+    writer.flush()
 }
 
 fn message_of(event: &SessionEvent) -> Option<&Message> {

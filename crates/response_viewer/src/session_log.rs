@@ -38,12 +38,13 @@
 //! carry no timestamp of their own (`api_model::SessionEvent`), so they show none.
 //! Absolute time is the UTC time of day, the History panel's clock.
 //!
-//! `Decision:` the log follows every new row to the bottom. Pausing the follow is
-//! REQ-LOG-03's control and lands with it.
+//! `Decision:` the log follows every new row to the bottom unless the toolbar's Pause
+//! holds it (REQ-LOG-03, [`crate::log_toolbar`]). The toolbar sits in the header, after
+//! the time toggle; this file only mounts it and registers its actions.
 
 use std::collections::BTreeMap;
 use std::io::Read as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -62,6 +63,7 @@ use ui::prelude::*;
 
 use crate::child_id;
 use crate::hex_view::HexRows;
+use crate::log_toolbar::ToolbarState;
 use crate::pretty::Formatter;
 use crate::session_store::SessionStore;
 
@@ -85,7 +87,7 @@ const OPEN_FULL_PAYLOAD: &str = "Open full payload";
 
 /// The largest spilled payload "Open full payload" loads into memory. Its lines and
 /// their strings take a few times its size, so a bigger one is left to the export.
-const FULL_PAYLOAD_CAP: u64 = 64 * 1024 * 1024;
+pub(crate) const FULL_PAYLOAD_CAP: u64 = 64 * 1024 * 1024;
 /// The largest payload that is pretty-printed: the formatted copy and its lines are
 /// several times the payload, so a bigger JSON document is shown as the text it is.
 const PRETTY_CAP: usize = 8 * 1024 * 1024;
@@ -344,13 +346,15 @@ impl DetailLine<'_> {
 
 /// The Message log: a [`SessionStore`] as a virtualized, expandable list.
 pub struct SessionLog {
-    store: Entity<SessionStore>,
-    base: ElementId,
+    pub(crate) store: Entity<SessionStore>,
+    pub(crate) base: ElementId,
     focus_handle: FocusHandle,
     scroll: UniformListScrollHandle,
     time_mode: TimeMode,
     expanded: BTreeMap<usize, Detail>,
-    selected: Option<usize>,
+    pub(crate) selected: Option<usize>,
+    /// The search field, filters, pause and pending export/copy ([`crate::log_toolbar`]).
+    pub(crate) toolbar: ToolbarState,
     /// When the session's first message happened, the zero of relative time.
     origin: Option<u64>,
     /// How far the store's events were searched for [`Self::origin`].
@@ -370,6 +374,7 @@ impl SessionLog {
             time_mode: TimeMode::Absolute,
             expanded: BTreeMap::new(),
             selected: None,
+            toolbar: ToolbarState::default(),
             origin: None,
             origin_scanned: 0,
             seen_len: 0,
@@ -550,14 +555,7 @@ impl SessionLog {
         detail._task = Some(cx.spawn(async move |this, cx| {
             let loaded = cx
                 .background_spawn(async move {
-                    // One buffer, sized once: the prefix, then the file read into it,
-                    // never past the cap however the file has grown.
-                    let mut bytes = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
-                    bytes.extend_from_slice(&prefix);
-                    let held = u64::try_from(prefix.len()).unwrap_or(u64::MAX);
-                    std::fs::File::open(&path)?
-                        .take(FULL_PAYLOAD_CAP.saturating_sub(held))
-                        .read_to_end(&mut bytes)?;
+                    let bytes = read_spilled(&path, &prefix, len)?;
                     Ok::<_, std::io::Error>(format_payload(kind, Arc::new(bytes), true))
                 })
                 .await;
@@ -606,16 +604,21 @@ impl SessionLog {
             self.origin_scanned = 0;
         }
         self.scan_origin(cx);
-        if len > self.seen_len && rows > self.seen_rows {
-            let filtered = store.read(cx).filtered();
-            let lines = line_count(filtered.len(), &segments(filtered, &self.expanded));
-            if let Some(last) = lines.checked_sub(1) {
-                self.scroll.scroll_to_item(last, ScrollStrategy::Bottom);
-            }
+        if len > self.seen_len && rows > self.seen_rows && !self.toolbar.paused() {
+            self.scroll_to_end(cx);
         }
         self.seen_len = len;
         self.seen_rows = rows;
         cx.notify();
+    }
+
+    /// Scroll the list to its last line.
+    pub(crate) fn scroll_to_end(&self, cx: &App) {
+        let filtered = self.store.read(cx).filtered();
+        let lines = line_count(filtered.len(), &segments(filtered, &self.expanded));
+        if let Some(last) = lines.checked_sub(1) {
+            self.scroll.scroll_to_item(last, ScrollStrategy::Bottom);
+        }
     }
 
     /// Find the session's first message, looking only at events not searched yet.
@@ -680,6 +683,8 @@ impl SessionLog {
         let view = cx.entity().downgrade();
         h_flex()
             .w_full()
+            .items_start()
+            .gap(DynamicSpacing::Base03.rems(cx))
             .px(DynamicSpacing::Base04.rems(cx))
             .py(DynamicSpacing::Base02.rems(cx))
             .border_b_1()
@@ -701,6 +706,7 @@ impl SessionLog {
                         }
                     }),
             )
+            .child(div().flex_1().min_w_0().child(self.render_toolbar(cx)))
             .into_any_element()
     }
 }
@@ -713,11 +719,12 @@ impl Focusable for SessionLog {
 
 impl Render for SessionLog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.ensure_toolbar(window, cx);
         let header = self.render_header(cx);
+        let root = Self::register_toolbar_actions(v_flex().id(child_id(&self.base, "root")), cx);
         let store = self.store.read(cx);
         let focused = self.focus_handle.contains_focused(window, cx);
-        let root = v_flex()
-            .id(child_id(&self.base, "root"))
+        let root = root
             .size_full()
             .min_w_0()
             .min_h_0()
@@ -1304,6 +1311,19 @@ fn text_lines(text: &str) -> DetailBody {
 
 /// `line`, cut at [`LINE_CHARS`] with a note of how many characters were left out, so
 /// no single line is shaped whole on the foreground.
+/// A spilled payload whole: its in-memory `prefix`, then its file, in one buffer sized
+/// once and never read past [`FULL_PAYLOAD_CAP`] however the file has grown. Blocking IO:
+/// run it on a background task.
+pub(crate) fn read_spilled(path: &Path, prefix: &[u8], len: u64) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::with_capacity(usize::try_from(len.min(FULL_PAYLOAD_CAP)).unwrap_or(0));
+    bytes.extend_from_slice(prefix);
+    let held = u64::try_from(prefix.len()).unwrap_or(u64::MAX);
+    std::fs::File::open(path)?
+        .take(FULL_PAYLOAD_CAP.saturating_sub(held))
+        .read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
 fn cut_line(line: &str) -> SharedString {
     match line.char_indices().nth(LINE_CHARS) {
         Some((cut, _)) => {

@@ -145,7 +145,7 @@ pub fn write_body(path: &Path, body: &[u8]) -> anyhow::Result<()> {
 /// reaches it the same way). The update is deferred: a window cannot be updated while it
 /// is on the update stack. A window whose root is not a [`Workspace`] (a bare test
 /// window) has no toast layer, so there is nothing to show anything on.
-fn show_toast(
+pub(crate) fn show_toast(
     window_handle: AnyWindowHandle,
     message: impl Into<SharedString>,
     level: Severity,

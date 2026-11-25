@@ -38,6 +38,21 @@ const EXPECTED_ACTIONS: &[&str] = &[
     "cookies::Manage",
     "import_export::Import",
     "import_export::Export",
+    "message_log::FocusSearch",
+    "message_log::FilterSent",
+    "message_log::FilterReceived",
+    "message_log::FilterText",
+    "message_log::FilterJson",
+    "message_log::FilterBinary",
+    "message_log::FilterEvents",
+    "message_log::ClearFilters",
+    "message_log::Pause",
+    "message_log::Resume",
+    "message_log::Clear",
+    "message_log::ConfirmClear",
+    "message_log::CancelClear",
+    "message_log::CopyPayload",
+    "message_log::Export",
 ];
 
 /// The namespaces this crate declares actions under.

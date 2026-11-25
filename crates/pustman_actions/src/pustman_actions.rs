@@ -166,6 +166,45 @@ pub mod console {
     );
 }
 
+/// The Message log of a streaming session (REQ-LOG-03).
+pub mod message_log {
+    gpui::actions!(
+        message_log,
+        [
+            /// Moves focus to the Message log's search field.
+            FocusSearch,
+            /// Lists only sent messages, or every direction again.
+            FilterSent,
+            /// Lists only received messages, or every direction again.
+            FilterReceived,
+            /// Lists only text messages, or every type again.
+            FilterText,
+            /// Lists only JSON messages, or every type again.
+            FilterJson,
+            /// Lists only binary messages, or every type again.
+            FilterBinary,
+            /// Lists only protocol events, or every type again.
+            FilterEvents,
+            /// Removes the search text and every filter.
+            ClearFilters,
+            /// Stops the Message log following new messages to the bottom.
+            Pause,
+            /// Follows new messages to the bottom again.
+            Resume,
+            /// Asks to remove every message from the Message log.
+            Clear,
+            /// Removes every message from the Message log.
+            ConfirmClear,
+            /// Keeps the messages after all.
+            CancelClear,
+            /// Copies the selected message's payload.
+            CopyPayload,
+            /// Exports the session as JSON lines.
+            Export,
+        ]
+    );
+}
+
 /// Cookie jar.
 pub mod cookies {
     gpui::actions!(
