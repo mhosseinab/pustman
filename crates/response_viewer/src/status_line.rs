@@ -188,7 +188,7 @@ pub(crate) fn body_size(body: &ResponseBody) -> Option<u64> {
     match body {
         ResponseBody::Bytes(bytes) => u64::try_from(bytes.len()).ok(),
         ResponseBody::Spilled { total_len, .. } => Some(*total_len),
-        ResponseBody::File { .. } => None,
+        ResponseBody::File { .. } | ResponseBody::EventStream(_) => None,
     }
 }
 

@@ -96,3 +96,6 @@ mod retention;
 
 /// GraphQL over the HTTP engine (REQ-GQL-01).
 pub mod graphql;
+
+/// A `text/event-stream` response streamed as session events (REQ-SSE-01).
+pub mod event_stream;

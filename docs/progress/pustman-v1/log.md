@@ -382,3 +382,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — S51d merged (message log toolbar; UI fix 1; authorized EXPECTED_ACTIONS edit, ledger row now used; VERIFY OK; LOW #347).
 - 2026-11-25 — S51d merged. Dispatched S51e (one Console entry per session; http-engine-engineer; carries #338). Running: S54b, S51e. Disk 36 GB.
 - 2026-11-25 — S54b security review CHANGES_REQUESTED (MEDIUM: another owner's send drops a live stream's handle so cancel fails and the client keeps streams alive; MEDIUM: timeout change untested; MEDIUM: SSE queue bounded by count not bytes, ~1 GiB) → fix cycle. Note for S54c: the interim empty-200 view with no Stop must go.
+- 2026-11-25 — S54b merged (event-stream responses; security fix 1; VERIFY OK).

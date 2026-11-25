@@ -148,7 +148,7 @@ impl SessionStore {
                 payload
             }
             ResponseBody::Bytes(bytes) => Payload::Inline(bytes),
-            ResponseBody::File { .. } => {
+            ResponseBody::File { .. } | ResponseBody::EventStream(_) => {
                 return Err(io::Error::other(
                     "The message payload could not be moved to a temp file",
                 ));

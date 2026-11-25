@@ -14,6 +14,7 @@ use variables::{DynamicValues, ScopeKind, ScopeStack};
 
 use crate::body::resolve_body_files;
 use crate::error::TransportError;
+use crate::event_stream::OpenStream;
 use crate::graphql::{self, GraphQlError, GraphQlSendInput};
 use crate::history::{HistoryDraft, HistoryRecorder};
 use crate::pipeline::{PipelineError, Warning};
@@ -170,6 +171,9 @@ struct PendingSend {
     /// The [`SendEvent`] emitted when the send is dropped (REQ-HTTP-12): which send it is
     /// and the protocol it is listed under.
     cancelled: SendEvent,
+    /// The event stream the send's response opened, if it did (REQ-SSE-01): it outlives
+    /// the task, so a cancel stops it here.
+    stream: OpenStream,
 }
 
 impl PendingSend {
@@ -294,7 +298,16 @@ impl HttpClient {
                 protocol: None,
             },
             None,
-            move || transport.send(request),
+            move |stream| {
+                let send = transport.send(request);
+                async move {
+                    let outcome = send.await;
+                    if let Ok(response) = &outcome {
+                        stream.hold(&response.body);
+                    }
+                    outcome
+                }
+            },
             Err(TransportError::Cancelled),
         )
     }
@@ -419,7 +432,7 @@ impl HttpClient {
             owner,
             cancelled,
             draft,
-            move || async move {
+            move |stream| async move {
                 let SendInput {
                     request,
                     ancestors,
@@ -485,6 +498,7 @@ impl HttpClient {
                         let sent = resolved.clone();
                         match transport.send(resolved).await {
                             Ok(response) => {
+                                stream.hold(&response.body);
                                 if let Some(draft) = &recorded {
                                     draft.record_response(&request, &response, &secrets_used);
                                 }
@@ -514,7 +528,7 @@ impl HttpClient {
     /// The one cancel/replace/oneshot pipeline behind both send shapes: cancel `owner`'s
     /// send in flight and no one else's (emitting [`SendEvent::Cancelled`]), keep the new
     /// one in `owner`'s slot with its history row `history`, build the work through
-    /// `make_work` —
+    /// `make_work` — handing it the slot its response's event stream is held in —
     /// which lets [`HttpClient::send`] record its request only once the previous send is
     /// gone — run it on the background executor, and hand the caller a task that resolves
     /// with the outcome or `cancelled` once this entity drops the send.
@@ -530,12 +544,15 @@ impl HttpClient {
     where
         T: Send + 'static,
         Work: Future<Output = T> + Send + 'static,
-        MakeWork: FnOnce() -> Work,
+        MakeWork: FnOnce(OpenStream) -> Work,
     {
         self.cancel_pending(owner, cx);
         // A finished send of a tab that has since closed would otherwise stay forever.
-        self.owned_sends.retain(|_, pending| pending.is_running());
-        let work = make_work();
+        // A send whose response is still streaming stays: its owner can still cancel it.
+        self.owned_sends
+            .retain(|_, pending| pending.is_running() || pending.stream.is_open());
+        let stream = OpenStream::default();
+        let work = make_work(stream.clone());
         let (sender, receiver) = oneshot::channel();
         let task = cx.background_spawn(async move {
             let outcome = work.await;
@@ -549,6 +566,7 @@ impl HttpClient {
                 task,
                 history,
                 cancelled: cancelled_event,
+                stream,
             },
         );
         cx.background_spawn(async move { receiver.await.unwrap_or(cancelled) })
@@ -560,8 +578,9 @@ impl HttpClient {
     }
 
     /// Drop `owner`'s send in flight, which aborts its connection, and leave nothing
-    /// pending for it (REQ-HTTP-12). Other owners' sends keep running. A send that
-    /// already finished is not reported as cancelled.
+    /// pending for it (REQ-HTTP-12). An event stream its response opened is stopped,
+    /// which closes that connection too (REQ-SSE-01). Other owners' sends keep running.
+    /// A send that already finished is not reported as cancelled.
     pub fn cancel_as(&mut self, owner: SendOwner, cx: &mut Context<HttpClient>) {
         self.cancel_pending(owner, cx);
     }
@@ -576,6 +595,7 @@ impl HttpClient {
             task,
             history: draft,
             cancelled: event,
+            stream,
         }) = self.take_pending(owner)
         else {
             return;
@@ -583,6 +603,9 @@ impl HttpClient {
         let was_sending = !task.is_ready();
         // Dropping the task cancels the send, which aborts its connection.
         drop(task);
+        // After the task: a response it was still handing over is stopped on arrival.
+        // The stream reports its own close, so no `SendEvent` is emitted for it.
+        stream.stop();
         // The dropped task can no longer record its own row, so the cancelled row is
         // written on a background task of its own (REQ-HIST-01 records every send) and
         // the event follows it — never blocking the foreground on SQLite.

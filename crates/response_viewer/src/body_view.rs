@@ -525,8 +525,11 @@ impl BodyView {
         let file_path = large_body::file_path(&response.body);
         self.apply_large_body_fallback(body_size(&response.body), limit_mb, file_path.clone(), cx);
         match &response.body {
-            ResponseBody::Bytes(bytes) => {
-                self.bytes = Arc::new(bytes.clone());
+            // An event stream holds no bytes (`as_bytes` is empty): it shows as an empty
+            // in-memory body, its events being the session log's.
+            ResponseBody::Bytes(_) | ResponseBody::EventStream(_) => {
+                let bytes = response.body.as_bytes();
+                self.bytes = Arc::new(bytes.to_vec());
                 let (text, lossy) = decode(bytes);
                 self.lines = Arc::new(split_lines(&text));
                 self.lossy = lossy;
@@ -1563,6 +1566,8 @@ fn split_lines(text: &str) -> Vec<SharedString> {
 pub(crate) fn body_bytes(response: &Response) -> std::io::Result<Vec<u8>> {
     match &response.body {
         ResponseBody::Bytes(bytes) => Ok(bytes.clone()),
+        // An event stream holds no bytes: its events are read from the stream.
+        ResponseBody::EventStream(_) => Ok(Vec::new()),
         ResponseBody::File { path, .. } => std::fs::read(path),
         ResponseBody::Spilled { prefix, file, .. } => {
             let remainder = std::fs::read(file.path())?;

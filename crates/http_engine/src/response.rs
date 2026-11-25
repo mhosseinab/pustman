@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use url::Url;
 
+use crate::event_stream::EventStream;
 use crate::request::Header;
 use crate::spill::SpilledFile;
 
@@ -130,15 +131,20 @@ pub enum ResponseBody {
         file: SpilledFile,
         total_len: u64,
     },
+    /// A `text/event-stream` body (REQ-SSE-01), read as it arrives: its events come out
+    /// of the stream as session events, and nothing of it is held here.
+    EventStream(EventStream),
 }
 
 impl ResponseBody {
-    /// The bytes held in memory: all of them, or the prefix of a streamed body.
+    /// The bytes held in memory: all of them, or the prefix of a streamed body. An event
+    /// stream holds none: its events are read from the stream.
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             ResponseBody::Bytes(bytes) => bytes,
             ResponseBody::File { prefix, .. } => prefix,
             ResponseBody::Spilled { prefix, .. } => prefix,
+            ResponseBody::EventStream(_) => &[],
         }
     }
 }
@@ -166,6 +172,10 @@ impl fmt::Debug for ResponseBody {
                 .field("prefix_bytes", &prefix.len())
                 .field("total_len", total_len)
                 .finish(),
+            // `EventStream`'s `Debug` shows no event.
+            ResponseBody::EventStream(stream) => {
+                f.debug_tuple("EventStream").field(stream).finish()
+            }
         }
     }
 }
