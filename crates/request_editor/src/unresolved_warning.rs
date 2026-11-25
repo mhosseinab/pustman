@@ -123,7 +123,7 @@ impl RequestEditor {
     /// value: every keychain read can prompt the user (macOS). A key with nothing
     /// stored still passes — `prepare` then fails the send as an unresolved secret,
     /// which reaches the user.
-    fn keychain_resolves(&self, name: &str) -> bool {
+    pub(super) fn keychain_resolves(&self, name: &str) -> bool {
         let Some(binding) = self.scopes.find(name) else {
             return false;
         };
@@ -150,6 +150,7 @@ impl RequestEditor {
     pub(super) fn recheck_unresolved(&mut self, cx: &mut Context<Self>) {
         // Every draft edit lands here, so the tab strip's badges follow it too.
         self.refresh_tab_badges(cx);
+        self.refresh_variable_line(cx);
         let ancestors = self.auth_ancestors(cx);
         let checked = match self.presend_check(&ancestors) {
             Ok(warnings) => {

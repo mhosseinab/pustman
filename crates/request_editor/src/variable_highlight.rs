@@ -109,6 +109,7 @@ impl RequestEditor {
     pub(super) fn refresh_highlights(&mut self, cx: &mut Context<Self>) {
         // A whole-request replacement lands here too: the tab badges follow the draft.
         self.refresh_tab_badges(cx);
+        self.refresh_variable_line(cx);
         let scopes = self.scopes.clone();
         self.url_bar
             .update(cx, |bar, cx| bar.set_scopes(scopes.clone(), cx));

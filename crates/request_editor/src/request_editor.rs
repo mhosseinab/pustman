@@ -32,6 +32,7 @@ pub mod url_bar;
 pub mod variable_autocomplete;
 mod variable_highlight;
 mod variable_hover;
+pub mod variable_line;
 
 use std::sync::Arc;
 
@@ -112,6 +113,8 @@ pub struct RequestEditor {
     location: Option<Vec<String>>,
     /// Keeps the breadcrumb following the window's workspace (`breadcrumb`).
     _location_subscription: Option<Subscription>,
+    /// Each `{{variable}}` the request uses and what it resolves to (`variable_line`).
+    variable_line: Vec<variable_line::VariableLineEntry>,
     /// The counts and dots the tab strip shows (`request_tabs`).
     tab_badges: request_tabs::TabBadges,
     /// The Params tab: the query and path-variable tables (S27a).
@@ -287,6 +290,7 @@ impl RequestEditor {
             tab_bar,
             active_tab: PARAMS_TAB_INDEX,
             tab_badges,
+            variable_line: Vec::new(),
             location: None,
             _location_subscription: None,
             params,
@@ -661,19 +665,25 @@ impl Render for RequestEditor {
                     .flex_1()
                     .min_h_0()
                     .min_w_0()
+                    .gap(DynamicSpacing::Base04.rems(cx))
                     .map(|this| {
                         // Compare's side-by-side field diff takes the content region
                         // while it is open (`disk_change`).
                         if let Some(compare) = self.render_compare(cx) {
                             this.child(compare)
                         } else {
-                            match self.active_tab {
+                            let this = match self.active_tab {
                                 HEADERS_TAB_INDEX => this.child(self.headers.clone()),
                                 BODY_TAB_INDEX => this.child(self.body_tab.clone()),
                                 AUTH_TAB_INDEX => this.child(self.auth_tab.clone()),
                                 SETTINGS_TAB_INDEX => this.child(self.settings_tab.clone()),
                                 _ => this.child(self.params.clone()),
-                            }
+                            };
+                            // Under the active table: where each variable resolves
+                            // from (`variable_line`). Settings uses none.
+                            this.when(self.active_tab != SETTINGS_TAB_INDEX, |this| {
+                                this.children(self.render_variable_line(cx))
+                            })
                         }
                     }),
             )

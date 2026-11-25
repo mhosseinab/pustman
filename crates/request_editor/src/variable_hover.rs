@@ -746,7 +746,7 @@ pub fn scope_kind_of(scopes: &ScopeStack, name: &str) -> Option<ScopeKind> {
 
 /// How one scope kind is named on the hover's scope line (REQ-VAR-03: the scope it
 /// came from).
-fn scope_label(scope_kind: Option<ScopeKind>) -> String {
+pub(crate) fn scope_label(scope_kind: Option<ScopeKind>) -> String {
     match scope_kind {
         Some(ScopeKind::RequestLocal) => String::from("Request-local"),
         Some(ScopeKind::Data) => String::from("Data"),
