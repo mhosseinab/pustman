@@ -38,7 +38,6 @@ const COLLECTION_FILE: &str = "collection.json";
 const FOLDER_FILE: &str = "folder.json";
 const COLLECTIONS_DIR: &str = "collections";
 const ENVIRONMENTS_DIR: &str = "environments";
-const REQUEST_SUFFIX: &str = ".request.json";
 const ENVIRONMENT_SUFFIX: &str = ".environment.json";
 
 /// A merge-conflict marker at the start of a line: `^(<{7}|>{7})( |$)` (REQ-COLLAB-02).
@@ -230,7 +229,7 @@ impl Item {
     /// none means the file is simply gone and the save stands where the item thinks it is.
     ///
     /// A file is that home only when its kind matches this body's (collection ↔
-    /// `collection.json`, request ↔ `*.request.json`, …): an `Environment` carrying a
+    /// `collection.json`, request ↔ any request suffix, …): an `Environment` carrying a
     /// request's id is another item squatting on it, and following it there would delete
     /// that file and write this one where [`classify`] never reads it (REQ-COLLAB-02).
     fn repathed(&self, root: &Path) -> Result<Option<Item>, SaveError> {
@@ -670,7 +669,8 @@ enum Shape {
     Workspace,
     /// `<dir>/<slug>/collection.json` — the slug names a directory.
     Container(&'static str),
-    /// `<dir>/<slug>.request.json` — the slug names the file.
+    /// `<dir>/<slug>.request.json` — the slug names the file; a request's suffix follows its
+    /// kind (see [`suffix_for`]).
     Leaf(&'static str),
 }
 
@@ -679,7 +679,7 @@ fn shape(body: &ItemBody) -> Shape {
         ItemBody::Workspace(_) => Shape::Workspace,
         ItemBody::Collection(_) => Shape::Container(COLLECTION_FILE),
         ItemBody::Folder(_) => Shape::Container(FOLDER_FILE),
-        ItemBody::Request(_) => Shape::Leaf(REQUEST_SUFFIX),
+        ItemBody::Request(request) => Shape::Leaf(suffix_for(request)),
         ItemBody::Environment(_) => Shape::Leaf(ENVIRONMENT_SUFFIX),
     }
 }
@@ -719,7 +719,7 @@ fn classify(relative: &Path) -> Option<ItemFile> {
         COLLECTIONS_DIR if name == FOLDER_FILE && has_placement_dir(relative) => {
             Some(ItemFile::Folder)
         }
-        COLLECTIONS_DIR if name.ends_with(REQUEST_SUFFIX) => Some(ItemFile::Request),
+        COLLECTIONS_DIR if kind_for_file_name(name).is_some() => Some(ItemFile::Request),
         ENVIRONMENTS_DIR if name.ends_with(ENVIRONMENT_SUFFIX) => Some(ItemFile::Environment),
         _ => None,
     }
@@ -912,6 +912,9 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), SaveError> {
         .map_err(|error| SaveError::Io(error.error))?;
     Ok(())
 }
+
+mod request_kinds;
+pub use request_kinds::{RequestKind, kind_for_file_name, suffix_for};
 
 mod watcher;
 pub use watcher::{FsChange, WatchError, WorkspaceWatcher, watch};

@@ -354,3 +354,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — S51b merged (message log store; security PASS_WITH_ISSUES; VERIFY OK; LOW #341).
 - 2026-11-25 — Dispatched S50b (workspace files per request kind; step-implementer). Running: S50d, S50b. Disk 30 GB free.
 - 2026-11-25 — S50d UI review PASS_WITH_ISSUES: MEDIUM hint contrast (~1.7:1). Driver decision: S50d Edits extended to crates/ui/src/components/context_menu.rs for the hint colour/opacity fix only; worker resumed. LOWs filed.
+- 2026-11-25 — S50b merged (request files per kind; state-integrity PASS_WITH_ISSUES; VERIFY OK; LOW #343).
