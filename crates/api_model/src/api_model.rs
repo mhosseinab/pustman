@@ -10,6 +10,7 @@ mod collection;
 mod curl;
 mod environment;
 mod example;
+mod network;
 mod postman;
 mod protocol_request;
 mod redact;
@@ -23,6 +24,10 @@ pub use collection::{Child, Collection, Folder, Workspace};
 pub use curl::{CurlError, parse_curl, to_curl};
 pub use environment::Environment;
 pub use example::{Example, ExampleResponse};
+pub use network::{
+    ClientCertificate, ClientCertificateKind, NetworkSettings, ProxyConfig, ProxyMode, ProxyScheme,
+    SecretRef,
+};
 pub use postman::{
     ExportReport, ImportError, ImportLimits, ImportProblem, ImportReport, SecretValuesToStore,
     export_collection, import_collection, import_environment, import_globals, string_field,

@@ -141,7 +141,7 @@ Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub p
 | S49 | Declare the M3–M5 dependencies | done | 1 | | | S49 merged |
 | S50 | Protocol request kinds, files, import, New menu, open from tree | in_progress | 0 | | | S50a–S50e; S50a merged |
 | S51 | Session events, Message log store/view/toolbar, Console entry | in_progress | 0 | | | S51a–S51e; S51a merged |
-| S52 | Auth kinds and network model (proxy, client certs, CA) | pending | 0 | | | S52a, S52b |
+| S52 | Auth kinds and network model (proxy, client certs, CA) | in_progress | 0 | | | S52a, S52b; S52b merged |
 | S53 | GraphQL over the HTTP engine | pending | 0 | | |  |
 | S54 | Server-sent events: parser, streaming, viewer mode | pending | 0 | | | S54a–S54c |
 | S55 | Digest, AWS SigV4, JWT Bearer auth applied on send | pending | 0 | | | S55a–S55d |
