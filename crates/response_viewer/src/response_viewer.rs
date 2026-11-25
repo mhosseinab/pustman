@@ -391,13 +391,23 @@ pub(crate) const SEND_HINT_SELECTOR: &str = "response-empty-send-hint";
 /// keymap so it follows a rebind — "Press Ctrl+Enter or click Send.", or just "Click
 /// Send." when nothing binds `request::Send`.
 fn send_hint(cx: &App) -> impl IntoElement {
-    let text = match ui::keymap_binding_text(&pustman_actions::request::Send, cx) {
-        Some(keys) => format!("Press {keys} or click Send."),
-        None => "Click Send.".to_owned(),
-    };
+    let text = send_hint_text(cx);
+    // The text rides on a second selector so tests can read what the line says.
+    let text_selector = format!("{SEND_HINT_SELECTOR}-{text}");
     div()
         .debug_selector(|| SEND_HINT_SELECTOR.to_owned())
-        .child(Label::new(text).size(LabelSize::Small).color(Color::Muted))
+        .child(
+            div()
+                .debug_selector(move || text_selector)
+                .child(Label::new(text).size(LabelSize::Small).color(Color::Muted)),
+        )
+}
+
+pub(crate) fn send_hint_text(cx: &App) -> String {
+    match ui::keymap_binding_text(&pustman_actions::request::Send, cx) {
+        Some(keys) => format!("Press {keys} or click Send."),
+        None => "Click Send.".to_owned(),
+    }
 }
 
 #[cfg(test)]

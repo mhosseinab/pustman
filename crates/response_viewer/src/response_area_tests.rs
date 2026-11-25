@@ -190,9 +190,18 @@ fn test_the_empty_state_says_how_to_send_with_the_keymaps_binding(cx: &mut TestA
         bounds(cx, SEND_HINT_SELECTOR.to_owned()).is_some(),
         "the empty state carries its how-to-send line"
     );
-    let keys = cx.update(|_, cx| ui::keymap_binding_text(&pustman_actions::request::Send, cx));
+    let keys = cx
+        .update(|_, cx| ui::keymap_binding_text(&pustman_actions::request::Send, cx))
+        .filter(|keys| !keys.is_empty());
+    let Some(keys) = keys else {
+        panic!("the default keymap binds request::Send");
+    };
     assert!(
-        keys.is_some_and(|keys| keys.contains("Enter")),
-        "the line names the keymap's Send binding"
+        bounds(
+            cx,
+            format!("{SEND_HINT_SELECTOR}-Press {keys} or click Send.")
+        )
+        .is_some(),
+        "the line names the keymap's Send binding, {keys}"
     );
 }
