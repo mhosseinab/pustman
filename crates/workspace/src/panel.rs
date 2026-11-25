@@ -2,7 +2,7 @@
 //! [`PanelHandle`] seam the docks store, so a new panel lands with its own crate and
 //! never needs a workspace edit (S22c).
 
-use gpui::{AnyView, App, Entity, EntityId, FocusHandle, Focusable, Window};
+use gpui::{Action, AnyView, App, Entity, EntityId, FocusHandle, Focusable, Window};
 use ui::prelude::*;
 
 use crate::Workspace;
@@ -25,6 +25,13 @@ pub trait Panel: Render + Focusable {
 
     /// Which dock this panel belongs in.
     fn position(&self, cx: &App) -> DockPosition;
+
+    /// The action that adds this panel's first kind of item — the "＋ New" its section
+    /// header and the welcome pane offer — dispatched on the panel's focus handle, so
+    /// the panel's own handler answers it. `None` for a panel that creates nothing.
+    fn create_action(&self, _cx: &App) -> Option<Box<dyn Action>> {
+        None
+    }
 }
 
 /// The type-erased panel a [`crate::Dock`] stores: enough to identify, render and focus
@@ -41,6 +48,9 @@ pub trait PanelHandle {
 
     /// See [`Panel::position`].
     fn position(&self, cx: &App) -> DockPosition;
+
+    /// See [`Panel::create_action`].
+    fn create_action(&self, cx: &App) -> Option<Box<dyn Action>>;
 
     /// The panel as a view the dock can render.
     fn to_any_view(&self) -> AnyView;
@@ -67,6 +77,10 @@ impl<T: Panel> PanelHandle for Entity<T> {
 
     fn position(&self, cx: &App) -> DockPosition {
         self.read(cx).position(cx)
+    }
+
+    fn create_action(&self, cx: &App) -> Option<Box<dyn Action>> {
+        self.read(cx).create_action(cx)
     }
 
     fn to_any_view(&self) -> AnyView {
@@ -105,6 +119,56 @@ impl Workspace {
         };
         other_dock.update(cx, |dock, cx| dock.remove_panel(panel_id, cx));
         dock.update(cx, |dock, cx| dock.add_panel(Box::new(panel), cx));
+    }
+
+    /// The "＋ New" of the left-dock panel registered under `panel_id`, if it offers one
+    /// ([`Panel::create_action`]): what a button outside the panel — the welcome pane's
+    /// New collection… — runs to create there.
+    pub fn panel_create_action(&self, panel_id: &str, cx: &App) -> Option<Box<dyn Action>> {
+        self.left_dock
+            .read(cx)
+            .panels()
+            .iter()
+            .find(|panel| panel.panel_id(cx) == panel_id)
+            .and_then(|panel| panel.create_action(cx))
+    }
+
+    /// Run `panel_id`'s "＋ New" ([`Panel::create_action`]) in the panel itself: the
+    /// sidebar opens on that panel with the keyboard in it, and the action is dispatched
+    /// on the panel's focus handle — so the panel's own handler answers it even though
+    /// the click came from outside the panel. A sidebar that was hidden is drawn first
+    /// and the action follows on the next frame, once the panel is in the dispatch tree.
+    pub fn run_panel_create(&mut self, panel_id: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(action) = self.panel_create_action(panel_id, cx) else {
+            return;
+        };
+        let was_open = self.left_dock.read(cx).is_open();
+        self.left_dock.update(cx, |dock, cx| {
+            dock.set_open(true, cx);
+            dock.activate_panel(panel_id, window, cx);
+        });
+        let Some(focus_handle) = self
+            .left_dock
+            .read(cx)
+            .panels()
+            .iter()
+            .find(|panel| panel.panel_id(cx) == panel_id)
+            .map(|panel| panel.focus_handle(cx))
+        else {
+            return;
+        };
+        cx.notify();
+        if was_open {
+            // Deferred: this runs inside the workspace's own update, and the panel's
+            // handler may reach back into the workspace (a toast, a modal).
+            window.defer(cx, move |window, cx| {
+                focus_handle.dispatch_action(action.as_ref(), window, cx);
+            });
+        } else {
+            window.on_next_frame(move |window, cx| {
+                focus_handle.dispatch_action(action.as_ref(), window, cx);
+            });
+        }
     }
 }
 

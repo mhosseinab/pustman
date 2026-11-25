@@ -119,7 +119,7 @@ enum Outcome {
 
 /// The local store the recent list lives in, once the app installs one (see the module
 /// docs). Not `Default`: absent means "not installed", which is not a failure.
-struct OpenStore(Arc<Mutex<LocalStore>>);
+pub(crate) struct OpenStore(Arc<Mutex<LocalStore>>);
 
 impl Global for OpenStore {}
 
@@ -199,6 +199,8 @@ impl WorkspaceOpen {
         let root = snapshot.root.clone();
         self.open = Some(OpenedWorkspace { root, snapshot });
         cx.emit(WorkspaceOpenEvent::SnapshotChanged);
+        // Views that read this window's workspace while drawing (the welcome pane) redraw.
+        cx.notify();
     }
 
     /// Ask for the folder to open as this window's workspace (the `OpenWorkspace` action).
@@ -346,6 +348,7 @@ impl WorkspaceOpen {
         let root = workspace.root.clone();
         self.open = Some(workspace);
         cx.emit(WorkspaceOpenEvent::Opened { root });
+        cx.notify();
         if !recorded {
             self.report(RECENT_FAILURE_MESSAGE, Severity::Warning, cx);
         }
@@ -683,6 +686,27 @@ fn record_recent(root: &Path, store: Option<&Mutex<LocalStore>>) -> bool {
         Err(_poisoned) => false,
     }
 }
+
+/// The recorded workspace folders that still exist, newest first — the welcome pane's
+/// Recent list (S48u3). Runs off the foreground thread.
+pub(crate) fn recent_folders(store: &Mutex<LocalStore>) -> Result<Vec<PathBuf>, RecentListError> {
+    let recents = {
+        let store = store.lock().map_err(|_poisoned| RecentListError)?;
+        store
+            .recent_workspaces()
+            .list()
+            .map_err(|_| RecentListError)?
+    };
+    Ok(recents
+        .into_iter()
+        .map(|recent| PathBuf::from(recent.path))
+        .filter(|folder| folder.is_dir())
+        .collect())
+}
+
+/// The recent list could not be read: one fixed message is all the user sees.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RecentListError;
 
 /// The workspace folder to reopen at launch: the most recently recorded one (REQ-WSP-05).
 fn read_most_recent(store: &Mutex<LocalStore>) -> Result<Option<PathBuf>, RecentError> {
