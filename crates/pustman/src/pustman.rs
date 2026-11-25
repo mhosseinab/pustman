@@ -4,6 +4,7 @@
 //! convention 4): a later wire step appends one line per crate to [`init_with_store`].
 
 pub mod app_icon;
+pub mod app_menus;
 pub mod restore_wiring;
 pub mod scope_wiring;
 pub mod status_items;
@@ -104,7 +105,7 @@ impl StartupProblems {
 
 /// The app's init order (AGENTS.md): `settings → theme → ui → text_input → pustman_actions keymap →
 /// storage → workspace → console → command_palette → http client → response viewer → request editor →
-/// environment picker → history panel → status bar readouts → restore wiring → collections panel → git branch item → variable scopes`, one line per crate or wire
+/// environment picker → history panel → status bar readouts → restore wiring → collections panel → git branch item → variable scopes → app menus`, one line per crate or wire
 /// step so later ones append their own.
 /// This is the binary's entry point: its local store is the one in the platform config dir.
 pub fn init(cx: &mut App) {
@@ -139,6 +140,9 @@ pub fn init_with_store(cx: &mut App, store: StoreLocation) {
     git::init(cx);
     // `scope_wiring` (S43w): the opened workspace's variables and the keychain in every editor.
     scope_wiring::init(cx);
+    // `app_menus` (S48u2): the File/Edit/View/Request/Help model — native on macOS, the
+    // title bar's menu bar elsewhere.
+    app_menus::init(cx);
 }
 
 /// `http_engine`: the client every request tab sends through, built on `ReqwestTransport`
