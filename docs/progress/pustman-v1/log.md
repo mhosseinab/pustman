@@ -370,3 +370,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — S52a security review CHANGES_REQUESTED (HIGH: new kinds' extra unmasked in history; MEDIUM: import report and export warning ignore extra; MEDIUM: unknown-grant oauth2 kept tokens) → fix cycle with one shared credential helper.
 - 2026-11-25 — S51c UI review PASS_WITH_ISSUES with 4 MEDIUM (key bubbling from buttons, unbounded full-payload read, huge single lines shaped per frame, needless row-list copies) → fix cycle; LOWs filed.
 - 2026-11-25 — S52a re-review CHANGES_REQUESTED: history must keep masking Digest/OAuth2 usernames and AWS access_key (Basic rule) → fix 2, with the Digest/OAuth2 harmless-key lists corrected to stop false credential warnings.
+- 2026-11-25 — S51c merged (message log view; UI fix 1; VERIFY OK; LOW #346).
