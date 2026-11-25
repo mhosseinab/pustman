@@ -46,6 +46,10 @@ pub struct RequestSettings {
     /// is off for this request alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_cookie_jar: Option<bool>,
+    /// Connect directly for this request alone, skipping the configured proxy
+    /// (REQ-HTTP-11).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_bypass: Option<bool>,
     /// The auto headers this request leaves out of the send (REQ-HTTP-03): the names of
     /// generated headers — `Host`, `Content-Type`, … — the user switched off. An empty
     /// list is the default and never serializes, so the deterministic workspace format
