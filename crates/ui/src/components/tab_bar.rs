@@ -97,6 +97,12 @@ impl TabBar {
         cx.notify();
     }
 
+    /// Each tab's accessible name, in order — the label and count or dot meaning it
+    /// announces and draws ([`Tab::accessible_label`]).
+    pub fn accessible_labels(&self) -> Vec<gpui::SharedString> {
+        self.tabs.iter().map(Tab::accessible_label).collect()
+    }
+
     /// The index of the selected tab.
     pub fn selected(&self) -> usize {
         self.selected

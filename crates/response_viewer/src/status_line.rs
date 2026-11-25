@@ -45,6 +45,10 @@ fn status_pill_selector(label: &str) -> String {
 
 /// The debug key one labelled metric renders under (see [`response_header_selector`]),
 /// derived from the rendered label and value — "Time"/"184 ms", "Size"/"244 B".
+fn status_pill_tone_selector(status: u16, color: Hsla) -> String {
+    format!("status-pill-tone-{status}-{color:?}")
+}
+
 pub(crate) fn status_meta_selector(label: &str, value: &str) -> String {
     format!("status-meta-{label}-{value}")
 }
@@ -231,6 +235,9 @@ fn status_pill(
                 .rounded_full()
                 .border_1()
                 .text_color(code_color)
+                // The tone the pill's text is drawn in, keyed by the colour itself, so a
+                // test reads back the colour this element was given.
+                .debug_selector(move || status_pill_tone_selector(status, code_color))
                 .map(|this| match status_severity(status) {
                     Some(severity) => this
                         .bg(severity.background(cx))

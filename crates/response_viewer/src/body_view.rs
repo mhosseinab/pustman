@@ -394,22 +394,14 @@ impl BodyView {
         if !matches!(self.mode, BodyMode::Pretty | BodyMode::Raw) {
             return None;
         }
-        let total = self.shown().len();
-        if total == 0 {
-            return None;
-        }
-        let (row_height, scroll_top) = self.row_geometry()?;
-        let viewport = self
-            .list_scroll_handle
-            .0
-            .borrow()
-            .last_item_size?
-            .item
-            .height;
-        let first = ((scroll_top / row_height).floor().max(0.) as usize).min(total - 1);
-        let last =
-            (((scroll_top + viewport) / row_height).floor() as usize).clamp(first + 1, total);
-        Some((first + 1, last, total))
+        line_range_on_screen(&self.list_scroll_handle, self.shown().len())
+    }
+
+    /// The body list's scroll handle, for tests that move it the way a key or a
+    /// scrollbar does.
+    #[cfg(test)]
+    pub(crate) fn scroll_handle_for_test(&self) -> UniformListScrollHandle {
+        self.list_scroll_handle.clone()
     }
 
     fn select_all(&mut self, _: &SelectAll, _window: &mut Window, cx: &mut Context<Self>) {
@@ -970,9 +962,14 @@ impl BodyView {
                     .gap(DynamicSpacing::Base08.rems(cx))
                     .children(self.visible_line_range().map(|(first, last, total)| {
                         let text = line_range_text(first, last, total);
+                        let text_selector = format!("{LINE_RANGE_SELECTOR}-{text}");
                         div()
                             .debug_selector(|| LINE_RANGE_SELECTOR.to_owned())
-                            .child(Label::new(text).size(LabelSize::Small).color(Color::Muted))
+                            .child(
+                                div().debug_selector(move || text_selector).child(
+                                    Label::new(text).size(LabelSize::Small).color(Color::Muted),
+                                ),
+                            )
                     }))
                     .child(self.render_formatter_control(cx)),
             )
@@ -1063,12 +1060,36 @@ impl BodyView {
         )
         .track_scroll(self.list_scroll_handle.clone());
         let drag_view = cx.entity().downgrade();
+        // The readout above the lines was drawn from the scroll position this frame
+        // started with. A jump applied during the list's own layout (End, find, a
+        // scroll-to-item) or a scrollbar drag owned by another element moves it after
+        // that; this prepaint runs once the list laid out, and asks for one more frame
+        // when the lines on screen are no longer the ones the readout names. It settles:
+        // the next frame draws the readout from the position this one left.
+        let range_drawn = self.visible_line_range();
+        let range_handle = self.list_scroll_handle.clone();
+        let range_total = lines.len();
+        let range_view = cx.entity_id();
         div()
             .relative()
             .flex_1()
             .min_h_0()
             .w_full()
             .child(list)
+            .child(
+                canvas(
+                    move |_bounds, _window, cx| {
+                        if line_range_on_screen(&range_handle, range_total) != range_drawn {
+                            // Deferred: a notify during the draw is dropped (the window
+                            // is mid-frame); after it, it schedules the next frame.
+                            cx.defer(move |cx| cx.notify(range_view));
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_0(),
+            )
             .child(
                 // A window-wide listener for the rows' bounds: a selecting drag that
                 // leaves the rows — below the last one, or out of the pane — still
@@ -1431,6 +1452,29 @@ pub(crate) fn note(text: impl Into<SharedString>, cx: &App) -> impl IntoElement 
         .px(DynamicSpacing::Base04.rems(cx))
         .py(DynamicSpacing::Base02.rems(cx))
         .child(Label::new(text.into()).color(Color::Muted))
+}
+
+/// The lines `handle`'s list shows out of `total`, 1-based and inclusive, from the
+/// list's last layout: its uniform row height and its viewport. `None` before the list
+/// laid out or with nothing to show.
+fn line_range_on_screen(
+    handle: &UniformListScrollHandle,
+    total: usize,
+) -> Option<(usize, usize, usize)> {
+    if total == 0 {
+        return None;
+    }
+    let state = handle.0.borrow();
+    let size = state.last_item_size?;
+    let row_height = size.contents.height / total as f32;
+    if row_height <= px(0.) {
+        return None;
+    }
+    let scroll_top = -state.base_handle.offset().y;
+    let first = ((scroll_top / row_height).floor().max(0.) as usize).min(total - 1);
+    let last =
+        (((scroll_top + size.item.height) / row_height).floor() as usize).clamp(first + 1, total);
+    Some((first + 1, last, total))
 }
 
 /// The debug selector on the body toolbar's "Lines a–b of N" readout.

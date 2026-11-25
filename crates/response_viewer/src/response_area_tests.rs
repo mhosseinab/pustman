@@ -4,6 +4,8 @@
 //! carries; the body toolbar says which lines are on screen; and the empty state says
 //! how to send.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{Bounds, ElementId, Entity, Pixels, TestAppContext, VisualTestContext};
@@ -12,7 +14,7 @@ use ui::prelude::*;
 use ui::test_support::{draw_window, init_test};
 
 use super::{
-    SAVE_RESPONSE_SELECTOR, status_class_color, status_meta_selector, status_pill_selector,
+    SAVE_RESPONSE_SELECTOR, status_meta_selector, status_pill_selector, status_pill_tone_selector,
 };
 use crate::body_view::LINE_RANGE_SELECTOR;
 use crate::{ResponseView, SEND_HINT_SELECTOR};
@@ -67,18 +69,20 @@ fn test_a_404_header_shows_a_client_error_pill_then_time_dot_size_and_save(
         "Save response sits at the header's right end: size {size:?}, save {save:?}"
     );
 
-    let (client_error, success, ok_tone) = cx.update(|_, cx| {
-        (
-            status_class_color(404, cx),
-            status_class_color(200, cx),
-            cx.theme().status().http_client_error,
-        )
+    // The tone is read back from what the pill was drawn with, then held to the theme's
+    // client-error token — and shown not to be the success one.
+    let (client_error, success) = cx.update(|_, cx| {
+        let status = cx.theme().status();
+        (status.http_client_error, status.http_success)
     });
-    assert_eq!(
-        client_error, ok_tone,
-        "a 4xx draws in the client-error status token"
+    assert!(
+        bounds(cx, status_pill_tone_selector(404, client_error)).is_some(),
+        "the 404 pill's text is drawn in the client-error status token"
     );
-    assert_ne!(client_error, success, "and not in the success tone");
+    assert!(
+        bounds(cx, status_pill_tone_selector(404, success)).is_none(),
+        "and not in the success tone"
+    );
 }
 
 #[gpui::test]
@@ -108,15 +112,12 @@ fn test_the_headers_and_cookies_tabs_count_what_the_response_carries(cx: &mut Te
         bounds(cx, tab_count_selector(0)).is_none() && bounds(cx, tab_count_selector(3)).is_none(),
         "Body and Timeline count nothing"
     );
-    let counts = cx.update(|_, cx| {
-        let cookies = view.read(cx).cookies.read(cx).rows().len();
-        let headers = view
-            .read(cx)
-            .response()
-            .map(|response| response.headers.len());
-        (headers, cookies)
-    });
-    assert_eq!(counts, (Some(3), 2), "3 headers, 2 of them cookies");
+    let labels = cx.update(|_, cx| view.read(cx).tab_bar.read(cx).accessible_labels());
+    assert_eq!(
+        labels,
+        vec!["Body", "Headers, 3", "Cookies, 2", "Timeline"],
+        "the tabs read the fixture's 3 headers, 2 of them Set-Cookie"
+    );
 
     view.update(cx, |view, cx| view.clear(cx));
     draw_window(cx);
@@ -124,6 +125,8 @@ fn test_the_headers_and_cookies_tabs_count_what_the_response_carries(cx: &mut Te
         bounds(cx, tab_count_selector(1)).is_none(),
         "clearing drops the previous response's counts"
     );
+    let labels = cx.update(|_, cx| view.read(cx).tab_bar.read(cx).accessible_labels());
+    assert_eq!(labels, vec!["Body", "Headers", "Cookies", "Timeline"]);
 }
 
 #[gpui::test]
@@ -141,13 +144,41 @@ fn test_the_body_toolbar_names_the_lines_on_screen(cx: &mut TestAppContext) {
         bounds(cx, LINE_RANGE_SELECTOR.to_owned()).is_some(),
         "the readout renders"
     );
-    let range = cx.update(|_, cx| view.read(cx).body.read(cx).visible_line_range());
-    let (first, last, total) = range.expect("the range is known after layout");
-    assert_eq!(first, 1, "the top of the body is on screen");
-    assert_eq!(total, 500, "the total counts every line");
+    let shown = |cx: &mut VisualTestContext, text: &str| {
+        bounds(cx, format!("{LINE_RANGE_SELECTOR}-{text}")).is_some()
+    };
+    let (_, last, _) = cx
+        .update(|_, cx| view.read(cx).body.read(cx).visible_line_range())
+        .expect("the range is known after layout");
+    assert!(last > 1 && last < 500, "only the lines that fit: 1–{last}");
     assert!(
-        last > first && last < total,
-        "only the lines that fit are counted as on screen: {first}–{last} of {total}"
+        shown(cx, &format!("Lines 1–{last} of 500")),
+        "the toolbar draws the range from the top"
+    );
+
+    // Jump the way End, find and a scrollbar drag do: the scroll handle moves outside
+    // this view's own render.
+    let body = cx.update(|_, cx| view.read(cx).body.clone());
+    let notified = Rc::new(Cell::new(0));
+    let _observer = cx.update(|_, cx| {
+        let notified = Rc::clone(&notified);
+        cx.observe(&body, move |_, _| notified.set(notified.get() + 1))
+    });
+    cx.update(|_, cx| {
+        body.read(cx)
+            .scroll_handle_for_test()
+            .scroll_to_item_strict(300, gpui::ScrollStrategy::Top)
+    });
+    draw_window(cx);
+    assert!(
+        notified.get() > 0,
+        "the frame that applied the jump asks the body to redraw its readout"
+    );
+    draw_window(cx);
+    let height = last - 1;
+    assert!(
+        shown(cx, &format!("Lines 301–{} of 500", 301 + height)),
+        "after the jump the readout names the lines now on screen"
     );
 }
 
