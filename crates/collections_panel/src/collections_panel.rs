@@ -12,6 +12,7 @@
 pub mod crud;
 pub mod export;
 pub mod external;
+pub mod import;
 pub mod navigation;
 pub mod problems;
 pub mod reorder;
@@ -48,6 +49,12 @@ mod reorder_move_tests;
 #[cfg(test)]
 #[path = "external_lifecycle_tests.rs"]
 mod external_lifecycle_tests;
+
+// The hostile-import tests (S45a fix 1) live beside `import.rs`'s own but outside the
+// `import::` module, so the pinned `import::` filter still reports its count.
+#[cfg(test)]
+#[path = "import_hostile_tests.rs"]
+mod import_hostile_tests;
 
 // The export's dropped-content and credential tests (S45c fix 1) are wired here too:
 // outside `export::`, so the step's pinned `export::` filter still reports PASS 1.
@@ -102,6 +109,7 @@ pub fn init(cx: &mut App) {
         .push(subscription);
     navigation::init(cx);
     crud::init(cx);
+    import::init(cx);
     reorder::init(cx);
     external::init(cx);
 }

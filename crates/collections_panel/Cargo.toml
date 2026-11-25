@@ -20,11 +20,13 @@ path = "src/collections_panel.rs"
 api_model.workspace = true
 gpui.workspace = true
 log.workspace = true
+pustman_actions.workspace = true
 request_editor.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 text_input.workspace = true
 ui.workspace = true
+url.workspace = true
 workspace.workspace = true
 workspace_store.workspace = true
 

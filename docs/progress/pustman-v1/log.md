@@ -307,3 +307,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — **RESUMED** (human: "resume"). Cleanup OK (53 GB free). Dispatched the three fix briefs written at the pause: S42c fix 1 and S45a fix 1 (pi, resumed sessions), S43w fix 4 (Claude step-implementer).
 - 2026-11-25 — S42c merged (Changed-on-disk bar; review HIGH conflict-on-first-event + 4 MEDIUM fixed in one cycle; re-review PASS_WITH_ISSUES; VERIFY OK on `d09d999`; LOW #326). S42 done.
 - 2026-11-25 — S43w merged (variables, globals and the keychain wired into the running app; five review rounds, four fix cycles; final reviews both PASS_WITH_ISSUES; VERIFY OK on `0cbbdf6` after resolving a crud.rs visibility conflict; LOW #327). S43 done.
+- 2026-11-25 — S45a merged (Postman import, high-stakes; three fix cycles plus a driver test fix — the unlistable-directory test could only fail as non-root; VERIFY OK; LOWs #325, #328).
