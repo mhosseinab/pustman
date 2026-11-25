@@ -42,6 +42,28 @@ for worktree in "$root"/S*/; do
 done
 git -C "$repo" worktree prune
 
+# Each rebuild of a test target links a new `<name>-<hash>` binary in target/debug/deps and
+# never deletes the old one; a long-lived checkout piles up hundreds (31 GB once). Keep, per
+# name, every binary built within 10 minutes of that name's newest — a crate's lib and bin
+# tests share a name and are linked together — and delete the rest. Cargo relinks anything it
+# still needs.
+for deps in "$repo/target/debug/deps" "$repo"/.claude/worktrees/*/target/debug/deps \
+  "$root"/*/target/debug/deps; do
+  [ -d "$deps" ] || continue
+  pruned=$(find "$deps" -maxdepth 1 -type f -perm -u+x -regextype posix-extended \
+      -regex '.*/[A-Za-z0-9_]+-[0-9a-f]{16}' -printf '%T@ %p\n' \
+    | awk '{
+        name = $2; sub(/.*\//, "", name); sub(/-[0-9a-f]{16}$/, "", name)
+        time[NR] = $1; path[NR] = $2; key[NR] = name
+        if ($1 > newest[name]) newest[name] = $1
+      }
+      END { for (i = 1; i <= NR; i++) if (time[i] < newest[key[i]] - 600) print path[i] }')
+  [ -n "$pruned" ] || continue
+  count=$(wc -l <<<"$pruned")
+  xargs -d '\n' rm -f -- <<<"$pruned"
+  echo "PRUNED $count stale test binaries in ${deps#"$repo"/}"
+done
+
 free_gb=$(df -Pk "$repo" | awk 'NR == 2 { print int($4 / 1048576) }')
 echo "DISK ${free_gb}G free, need ${min_free_gb}G"
 if [ "$free_gb" -lt "$min_free_gb" ]; then
