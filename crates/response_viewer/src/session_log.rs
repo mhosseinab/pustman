@@ -22,6 +22,13 @@
 //! "Open full payload": that reads the spill file off the foreground and formats the
 //! whole payload; a failed read is shown on that line with the action to retry.
 //!
+//! `Decision:` memory has caps (S51c review). "Open full payload" loads at most
+//! [`FULL_PAYLOAD_CAP`] (64 MB) into one buffer; a bigger payload says it is too large
+//! to open in the log and points at the export, with no button. JSON over
+//! [`PRETTY_CAP`] (8 MB) is shown as text, not pretty-printed. Every detail line is cut
+//! at [`LINE_CHARS`] (4,000) characters with a note of how many were left out, when the
+//! detail is built, so no huge line is shaped on the foreground each frame.
+//!
 //! `Decision:` the keyboard path is the list itself, one tab stop: Up/Down (and Home/End)
 //! move the selected row, Enter or Space expands or collapses it (`timeline`'s
 //! `handle_key_down` precedent — the keymaps have no Message log context yet). A click
@@ -35,6 +42,7 @@
 //! REQ-LOG-03's control and lands with it.
 
 use std::collections::BTreeMap;
+use std::io::Read as _;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -75,6 +83,15 @@ const BINARY_PREVIEW_BYTES: usize = 16;
 /// The label of the action that loads a spilled payload whole.
 const OPEN_FULL_PAYLOAD: &str = "Open full payload";
 
+/// The largest spilled payload "Open full payload" loads into memory. Its lines and
+/// their strings take a few times its size, so a bigger one is left to the export.
+const FULL_PAYLOAD_CAP: u64 = 64 * 1024 * 1024;
+/// The largest payload that is pretty-printed: the formatted copy and its lines are
+/// several times the payload, so a bigger JSON document is shown as the text it is.
+const PRETTY_CAP: usize = 8 * 1024 * 1024;
+/// The most characters one detail line keeps; the rest is named, not shaped every frame.
+const LINE_CHARS: usize = 4_000;
+
 /// How the time column reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TimeMode {
@@ -114,47 +131,77 @@ struct Segment {
     len: usize,
 }
 
-/// Which list line is which, for the current rows and expansions. The segments come from
-/// the expanded events only — a handful — never from every row. The rows are one copy
-/// of the store's matching sequence numbers per frame (a `memcpy`, ~1 MB at 100,000
-/// events): the list's row-key closure is `'static` and cannot borrow the store, and a
-/// copy kept per push would cost the same work once per message instead of per frame.
+/// The listed events' sequence numbers, as the list's `'static` closures hold them.
+enum Rows {
+    /// No filter is hiding anything: row `n` is event `n`, so nothing is copied.
+    Identity(usize),
+    /// A filter is on: one copy of the store's matching rows per frame. The row-key
+    /// closure cannot borrow the store, and a copy kept per push would be quadratic.
+    Filtered(Arc<[usize]>),
+}
+
+impl Rows {
+    fn new(filtered: &[usize], event_count: usize) -> Self {
+        // The filtered rows are strictly increasing event indices, so as many rows as
+        // events means every event, in order.
+        if filtered.len() == event_count {
+            Self::Identity(event_count)
+        } else {
+            Self::Filtered(Arc::from(filtered))
+        }
+    }
+
+    fn get(&self, position: usize) -> Option<usize> {
+        match self {
+            Self::Identity(len) => (position < *len).then_some(position),
+            Self::Filtered(rows) => rows.get(position).copied(),
+        }
+    }
+}
+
+/// Where each expanded, listed event's summary line is and how many detail lines follow
+/// it. Built from the expanded events only (a handful), never from every row.
+fn segments(rows: &[usize], expanded: &BTreeMap<usize, Detail>) -> Vec<Segment> {
+    let mut segments = Vec::new();
+    let mut shift = 0;
+    for (&seq, detail) in expanded {
+        let Ok(position) = rows.binary_search(&seq) else {
+            continue;
+        };
+        let len = detail.line_count();
+        segments.push(Segment {
+            seq,
+            summary_line: position + shift,
+            len,
+        });
+        shift += len;
+    }
+    segments
+}
+
+/// How many list lines the rows and their expansions take.
+fn line_count(row_count: usize, segments: &[Segment]) -> usize {
+    row_count + segments.iter().map(|segment| segment.len).sum::<usize>()
+}
+
+/// The list line of the event's summary row, when the event is listed.
+fn summary_line(rows: &[usize], segments: &[Segment], seq: usize) -> Option<usize> {
+    let position = rows.binary_search(&seq).ok()?;
+    let shift: usize = segments
+        .iter()
+        .take_while(|segment| segment.seq < seq)
+        .map(|segment| segment.len)
+        .sum();
+    Some(position + shift)
+}
+
+/// Which list line is which, for one frame.
 struct Layout {
-    rows: Arc<[usize]>,
+    rows: Rows,
     segments: Vec<Segment>,
 }
 
 impl Layout {
-    fn new(rows: &[usize], expanded: &BTreeMap<usize, Detail>) -> Self {
-        let mut segments = Vec::new();
-        let mut shift = 0;
-        for (&seq, detail) in expanded {
-            let Ok(position) = rows.binary_search(&seq) else {
-                continue;
-            };
-            let len = detail.line_count();
-            segments.push(Segment {
-                seq,
-                summary_line: position + shift,
-                len,
-            });
-            shift += len;
-        }
-        Self {
-            rows: Arc::from(rows),
-            segments,
-        }
-    }
-
-    fn line_count(&self) -> usize {
-        self.rows.len()
-            + self
-                .segments
-                .iter()
-                .map(|segment| segment.len)
-                .sum::<usize>()
-    }
-
     fn line(&self, index: usize) -> Option<LineRef> {
         let mut shift = 0;
         for segment in &self.segments {
@@ -169,20 +216,8 @@ impl Layout {
             }
             shift += segment.len;
         }
-        let seq = *self.rows.get(index.checked_sub(shift)?)?;
+        let seq = self.rows.get(index.checked_sub(shift)?)?;
         Some(LineRef::Summary { seq })
-    }
-
-    /// The list line of the event's summary row, when the event is listed.
-    fn summary_line(&self, seq: usize) -> Option<usize> {
-        let position = self.rows.binary_search(&seq).ok()?;
-        let shift: usize = self
-            .segments
-            .iter()
-            .take_while(|segment| segment.seq < seq)
-            .map(|segment| segment.len)
-            .sum();
-        Some(position + shift)
     }
 }
 
@@ -200,6 +235,8 @@ enum DetailBody {
 struct SpillSource {
     path: PathBuf,
     prefix: Arc<Vec<u8>>,
+    /// The whole payload's size, at most [`FULL_PAYLOAD_CAP`].
+    len: u64,
     kind: SessionMessageKind,
     loading: bool,
     error: Option<SharedString>,
@@ -425,22 +462,30 @@ impl SessionLog {
             Payload::Inline(bytes) => (Arc::new(bytes.clone()), None, None),
             Payload::Spilled { path, len, prefix } => {
                 let prefix = Arc::new(prefix.clone());
-                let note = format!(
-                    "Showing the first {} of {}.",
-                    format_size(u64::try_from(prefix.len()).unwrap_or(u64::MAX)),
-                    format_size(*len)
-                );
-                let spill = SpillSource {
-                    path: path.clone(),
-                    prefix: Arc::clone(&prefix),
-                    kind,
-                    loading: false,
-                    error: None,
+                let shown = format_size(u64::try_from(prefix.len()).unwrap_or(u64::MAX));
+                let (note, spill) = if *len > FULL_PAYLOAD_CAP {
+                    let note = format!(
+                        "Showing the first {shown} of {}. Too large to open in the log; \
+                         export the session to read it.",
+                        format_size(*len)
+                    );
+                    (note, None)
+                } else {
+                    let note = format!("Showing the first {shown} of {}.", format_size(*len));
+                    let spill = SpillSource {
+                        path: path.clone(),
+                        prefix: Arc::clone(&prefix),
+                        len: *len,
+                        kind,
+                        loading: false,
+                        error: None,
+                    };
+                    (note, Some(spill))
                 };
-                (prefix, Some(SharedString::from(note)), Some(spill))
+                (prefix, Some(SharedString::from(note)), spill)
             }
         };
-        let whole = spill.is_none();
+        let whole = matches!(message.payload, Payload::Inline(_));
         let task = self.format_in_background(seq, kind, bytes, whole, cx);
         self.expanded.insert(
             seq,
@@ -500,14 +545,19 @@ impl SessionLog {
         spill.error = None;
         let path = spill.path.clone();
         let prefix = Arc::clone(&spill.prefix);
+        let len = spill.len;
         let kind = spill.kind;
         detail._task = Some(cx.spawn(async move |this, cx| {
             let loaded = cx
                 .background_spawn(async move {
-                    let remainder = std::fs::read(&path)?;
-                    let mut bytes = Vec::with_capacity(prefix.len() + remainder.len());
+                    // One buffer, sized once: the prefix, then the file read into it,
+                    // never past the cap however the file has grown.
+                    let mut bytes = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
                     bytes.extend_from_slice(&prefix);
-                    bytes.extend_from_slice(&remainder);
+                    let held = u64::try_from(prefix.len()).unwrap_or(u64::MAX);
+                    std::fs::File::open(&path)?
+                        .take(FULL_PAYLOAD_CAP.saturating_sub(held))
+                        .read_to_end(&mut bytes)?;
                     Ok::<_, std::io::Error>(format_payload(kind, Arc::new(bytes), true))
                 })
                 .await;
@@ -557,8 +607,9 @@ impl SessionLog {
         }
         self.scan_origin(cx);
         if len > self.seen_len && rows > self.seen_rows {
-            let layout = Layout::new(store.read(cx).filtered(), &self.expanded);
-            if let Some(last) = layout.line_count().checked_sub(1) {
+            let filtered = store.read(cx).filtered();
+            let lines = line_count(filtered.len(), &segments(filtered, &self.expanded));
+            if let Some(last) = lines.checked_sub(1) {
                 self.scroll.scroll_to_item(last, ScrollStrategy::Bottom);
             }
         }
@@ -584,13 +635,15 @@ impl SessionLog {
     fn handle_key_down(
         &mut self,
         event: &KeyDownEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if event.keystroke.modifiers.modified() {
+        // Keys bubbling up from a control inside the log (the time toggle, "Open full
+        // payload") belong to that control: Enter there must not toggle the row.
+        if event.keystroke.modifiers.modified() || !self.focus_handle.is_focused(window) {
             return;
         }
-        let rows: Arc<[usize]> = Arc::from(self.store.read(cx).filtered());
+        let rows = self.store.read(cx).filtered();
         let position = self.selected.and_then(|seq| rows.binary_search(&seq).ok());
         let target = match (event.keystroke.key.as_str(), position) {
             ("down", Some(position)) => rows.get(position + 1).or(rows.get(position)),
@@ -606,13 +659,14 @@ impl SessionLog {
             }
             _ => return,
         };
-        cx.stop_propagation();
         let Some(&seq) = target else {
+            cx.stop_propagation();
             return;
         };
+        let line = summary_line(rows, &segments(rows, &self.expanded), seq);
+        cx.stop_propagation();
         self.selected = Some(seq);
-        let layout = Layout::new(&rows, &self.expanded);
-        if let Some(line) = layout.summary_line(seq) {
+        if let Some(line) = line {
             self.scroll.scroll_to_item(line, ScrollStrategy::Nearest);
         }
         cx.notify();
@@ -690,7 +744,12 @@ impl Render for SessionLog {
             return root.child(div().flex_1().min_h_0().child(empty));
         }
 
-        let layout = Rc::new(Layout::new(store.filtered(), &self.expanded));
+        let segments = segments(store.filtered(), &self.expanded);
+        let lines = line_count(store.filtered().len(), &segments);
+        let layout = Rc::new(Layout {
+            rows: Rows::new(store.filtered(), store.len()),
+            segments,
+        });
         let context = Rc::new(LineContext {
             view: cx.entity().downgrade(),
             focus_handle: self.focus_handle.clone(),
@@ -699,7 +758,7 @@ impl Render for SessionLog {
         });
         let list = VirtualList::new(
             child_id(&self.base, "rows"),
-            layout.line_count(),
+            lines,
             {
                 let layout = Rc::clone(&layout);
                 let base = self.base.clone();
@@ -1202,7 +1261,7 @@ fn detail_fields(event: &SessionEvent) -> Vec<(SharedString, SharedString)> {
     }
     fields
         .into_iter()
-        .map(|(label, value)| (SharedString::new_static(label), value.into()))
+        .map(|(label, value)| (SharedString::new_static(label), cut_line(&value)))
         .collect()
 }
 
@@ -1223,7 +1282,11 @@ fn format_payload(
         );
     }
     let mut note = None;
-    if whole && matches!(kind, SessionMessageKind::Json | SessionMessageKind::Event) {
+    let json = matches!(kind, SessionMessageKind::Json | SessionMessageKind::Event);
+    if whole && json && bytes.len() > PRETTY_CAP {
+        let size = format_size(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+        note = Some(format!("Too large to pretty-print ({size}); shown as text.").into());
+    } else if whole && json {
         match Formatter::Json.format(&bytes) {
             Ok(pretty) => return (text_lines(&pretty), None),
             Err(error) if kind == SessionMessageKind::Json => {
@@ -1236,11 +1299,20 @@ fn format_payload(
 }
 
 fn text_lines(text: &str) -> DetailBody {
-    DetailBody::Lines(Arc::new(
-        text.lines()
-            .map(|line| SharedString::from(line.to_owned()))
-            .collect(),
-    ))
+    DetailBody::Lines(Arc::new(text.lines().map(cut_line).collect()))
+}
+
+/// `line`, cut at [`LINE_CHARS`] with a note of how many characters were left out, so
+/// no single line is shaped whole on the foreground.
+fn cut_line(line: &str) -> SharedString {
+    match line.char_indices().nth(LINE_CHARS) {
+        Some((cut, _)) => {
+            let kept = line.get(..cut).unwrap_or_default();
+            let left_out = line.get(cut..).unwrap_or_default().chars().count();
+            format!("{kept}… ({left_out} more characters)").into()
+        }
+        None => SharedString::from(line.to_owned()),
+    }
 }
 
 #[cfg(test)]

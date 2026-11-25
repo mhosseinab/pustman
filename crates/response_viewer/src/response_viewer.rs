@@ -26,6 +26,9 @@ mod preview;
 mod request_as_sent;
 mod save_body;
 pub mod session_log;
+// Named apart from `session_log::` so the step's Verify filter counts only its own tests.
+#[cfg(test)]
+mod session_log_keys_tests;
 pub mod session_store;
 pub mod set_secret;
 mod status_line;
