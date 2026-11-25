@@ -36,7 +36,7 @@ pub mod variable_line;
 
 use std::sync::Arc;
 
-use api_model::{HttpRequest, RequestSettings};
+use api_model::{HttpRequest, ItemId, RequestSettings};
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render, SharedString,
     Subscription, Task, Window,
@@ -80,6 +80,15 @@ const BODY_TAB_INDEX: usize = 3;
 
 /// The Settings tab's index in the request tab strip.
 const SETTINGS_TAB_INDEX: usize = 4;
+
+/// Where a history entry was recorded: the installation key of the folder it was sent
+/// from and the id its request had there. What the scope wire binds a tab opened from
+/// it to is decided by these alone (`pustman::scope_wiring`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HistoryOrigin {
+    pub installation_key: String,
+    pub recorded_id: ItemId,
+}
 
 /// One open request: the draft the tab is editing, the URL bar that edits it, and the
 /// fields the status line area below it is drawn from (S26b).
@@ -171,6 +180,13 @@ pub struct RequestEditor {
     /// key. The default reads nothing, which is the M1 behaviour; `set_secret_sources`
     /// fills it — and the hover's own copy — when the secret stores are wired (S43w).
     secret_sources: SecretSources,
+    /// Where this tab came from when History opened it ([`RequestEditor::from_history`]);
+    /// `None` for every other tab.
+    history_origin: Option<HistoryOrigin>,
+    /// The installation key of the folder this tab is bound to, which every send
+    /// records in its history row; `None` while it is bound to none. Set by the scope
+    /// wire beside the scopes (`set_installation_key`).
+    installation_key: Option<String>,
     _url_bar_subscription: Subscription,
     _params_subscription: Subscription,
     _headers_subscription: Subscription,
@@ -313,6 +329,8 @@ impl RequestEditor {
             split_fraction: response_split::DEFAULT_SPLIT_FRACTION,
             scopes: std::sync::Arc::new(variables::ScopeStack::new()),
             secret_sources: SecretSources::default(),
+            history_origin: None,
+            installation_key: None,
             _url_bar_subscription,
             _params_subscription,
             _headers_subscription,
@@ -322,6 +340,38 @@ impl RequestEditor {
             _tab_bar_subscription: tab_bar_subscription,
             _release_subscription: release_subscription,
         }
+    }
+
+    /// A tab opened from History (REQ-HIST-02): `request` under a fresh id, remembering
+    /// `origin`, the folder and request id it was recorded under. `Decision:` the origin
+    /// is set while the editor is built, so the scope wire's `observe_new` already sees
+    /// it; what the wire binds such a tab to is its rule (`pustman::scope_wiring`).
+    pub fn from_history(
+        request: HttpRequest,
+        origin: HistoryOrigin,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self {
+            history_origin: Some(origin),
+            ..Self::new(request, window, cx)
+        }
+    }
+
+    /// Where a tab opened from History was recorded; `None` for any other tab.
+    pub fn history_origin(&self) -> Option<&HistoryOrigin> {
+        self.history_origin.as_ref()
+    }
+
+    /// The installation key of the folder this tab is bound to (`None`: none), which
+    /// its sends record in history. Set by the scope wire alongside the scopes.
+    pub fn set_installation_key(&mut self, installation_key: Option<String>) {
+        self.installation_key = installation_key;
+    }
+
+    /// The installation key this tab's sends record ([`Self::set_installation_key`]).
+    pub fn installation_key(&self) -> Option<&str> {
+        self.installation_key.as_deref()
     }
 
     /// The request this tab is editing.

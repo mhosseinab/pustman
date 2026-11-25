@@ -18,7 +18,7 @@ use std::time::Duration;
 use api_model::{HttpRequest, ItemId};
 use gpui::{App, Entity, Window};
 use http_engine::{Header, Response, ResponseBody, Timings};
-use request_editor::RequestEditor;
+use request_editor::{HistoryOrigin, RequestEditor};
 use serde::Deserialize;
 use storage::HistoryEntry;
 use ui::prelude::*;
@@ -47,22 +47,45 @@ pub fn open_entry(
     window: &mut Window,
     cx: &mut App,
 ) {
+    open_entry_recorded_in(entry, None, workspace, window, cx);
+}
+
+/// [`open_entry`] for an entry recorded in the folder whose installation key is
+/// `installation_key` (`None`: none known, as for every row recorded before #334). With a
+/// key the tab is built by [`RequestEditor::from_history`], carrying that key and the
+/// request id it was recorded under, so the scope wire can tell whether the folder open
+/// now is the one it was sent from; without one it is a plain tab, as before.
+pub fn open_entry_recorded_in(
+    entry: &HistoryEntry,
+    installation_key: Option<&str>,
+    workspace: &Entity<Workspace>,
+    window: &mut Window,
+    cx: &mut App,
+) {
     // `request_json` is the PRE-resolution request (`http_engine` records it that way),
     // so restoring it is a plain deserialize — the `{{var}}` templates travel through
     // untouched and resolve only when the user sends the tab.
-    let request = match serde_json::from_value::<HttpRequest>(entry.request_json.clone()) {
-        // A fresh identity: the recorded one may already name an open tab (the request
-        // itself, or this entry opened before), and two tabs with one identity make the
-        // workspace's tab save fail.
-        Ok(request) => HttpRequest {
-            id: ItemId::new(),
-            ..request
-        },
-        Err(_error) => {
-            toast(workspace, OPEN_FAILURE_MESSAGE, cx);
-            return;
-        }
-    };
+    let (request, recorded_id) =
+        match serde_json::from_value::<HttpRequest>(entry.request_json.clone()) {
+            // A fresh identity: the recorded one may already name an open tab (the
+            // request itself, or this entry opened before), and two tabs with one
+            // identity make the workspace's tab save fail. The recorded one goes along
+            // as the tab's origin.
+            Ok(request) => {
+                let recorded_id = request.id;
+                (
+                    HttpRequest {
+                        id: ItemId::new(),
+                        ..request
+                    },
+                    recorded_id,
+                )
+            }
+            Err(_error) => {
+                toast(workspace, OPEN_FAILURE_MESSAGE, cx);
+                return;
+            }
+        };
     let response = entry
         .response_summary_json
         .as_ref()
@@ -74,7 +97,14 @@ pub fn open_entry(
             }
         });
 
-    let editor = cx.new(|cx| RequestEditor::new(request, window, cx));
+    let origin = installation_key.map(|installation_key| HistoryOrigin {
+        installation_key: installation_key.to_owned(),
+        recorded_id,
+    });
+    let editor = cx.new(|cx| match origin {
+        Some(origin) => RequestEditor::from_history(request, origin, window, cx),
+        None => RequestEditor::new(request, window, cx),
+    });
     if let Some(response) = response {
         editor.update(cx, |editor, cx| {
             editor

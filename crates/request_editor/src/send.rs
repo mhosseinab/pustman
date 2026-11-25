@@ -292,7 +292,12 @@ impl RequestEditor {
         // The send is this tab's own: it replaces only this tab's previous send, never
         // another tab's (REQ-HTTP-12).
         let owner = SendOwner::from(cx.entity_id());
-        let send_task = client.update(cx, |client, cx| client.send_request_as(owner, input, cx));
+        // The history row keeps the folder this tab is bound to, if any: only a tab
+        // reopened in that same folder may resolve its variables (issue #334).
+        let installation_key = self.installation_key().map(str::to_owned);
+        let send_task = client.update(cx, |client, cx| {
+            client.send_request_recorded_in(owner, input, installation_key, cx)
+        });
         self.inline_error = None;
         self.tls_offer_error = None;
         self.pending_send = Some(cx.spawn(async move |this, cx| {
