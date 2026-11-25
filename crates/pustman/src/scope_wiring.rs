@@ -68,12 +68,15 @@ use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use api_model::{
     Auth, Body, Environment, HttpRequest, ItemId, Request, RequestSettings, VariableKind,
 };
+use environment_picker::env_editor::write::{ValueLayer, VariableWrite, WriteScope};
 use environment_picker::env_editor::{self, EditTarget, EnvEditorInputs};
 use environment_picker::quick_look::{self, QuickLookInputs};
 use environment_picker::secret_values::{self, SecretInputs};
 use environment_picker::selector::{self, SelectorInputs};
 use gpui::{App, Entity, EntityId, Global, Subscription, Task, WeakEntity};
-use request_editor::{RequestEditor, SecretSources, scope_kind_of};
+use request_editor::{
+    RequestEditor, SecretSources, VariableEdit, VariableWriter, VariableWrites, scope_kind_of,
+};
 use secrets::{KeyringStore, SecretError, SecretKey, SecretStore, SecretValue};
 use sha2::{Digest, Sha256};
 use storage::{LocalStore, LocalValue};
@@ -495,6 +498,8 @@ pub fn init(cx: &mut App) {
             editor.set_scopes(scopes, cx);
             editor.set_secret_sources(sources, cx);
             editor.set_environment_name(active_environment_name(&open), cx);
+            let writes = writes_for(&open, request_id, cx);
+            editor.set_variable_writes(writes, cx);
         }),
         cx.observe_new::<Workspace>(|_workspace, _window, cx| {
             let workspace = cx.entity();
@@ -596,6 +601,7 @@ fn close_workspace(cx: &mut App) {
             editor.set_scopes(ScopeStack::new(), cx);
             editor.set_secret_sources(SecretSources::default(), cx);
             editor.set_environment_name(None, cx);
+            editor.set_variable_writes(VariableWrites::default(), cx);
         });
     }
 }
@@ -1121,17 +1127,28 @@ fn apply(cx: &mut App) {
         .collect();
     for editor in editors {
         let of_open_workspace = bound.contains(&editor.entity_id());
-        let (scopes, sources, environment) = if of_open_workspace {
+        let (scopes, sources, environment, writes) = if of_open_workspace {
             let request_id = editor.read(cx).draft().id;
             let (scopes, sources) = scopes_for(&open, request_id, cx);
-            (scopes, sources, active_environment_name(&open))
+            (
+                scopes,
+                sources,
+                active_environment_name(&open),
+                writes_for(&open, request_id, cx),
+            )
         } else {
-            (ScopeStack::new(), SecretSources::default(), None)
+            (
+                ScopeStack::new(),
+                SecretSources::default(),
+                None,
+                VariableWrites::default(),
+            )
         };
         editor.update(cx, |editor, cx| {
             editor.set_scopes(scopes, cx);
             editor.set_secret_sources(sources, cx);
             editor.set_environment_name(environment, cx);
+            editor.set_variable_writes(writes, cx);
         });
     }
 }
@@ -1201,6 +1218,74 @@ fn install_inputs(open: &OpenScopes, cx: &mut App) {
 
 /// The scopes one request resolves against — globals, its collection, the active
 /// environment — and where its secrets come from (module docs).
+/// Where one request's `{{var}}` popover writes (S48u6): the scopes it resolves from —
+/// the globals, its collection, the active environment — each by name, and the writer
+/// that lands an edit in the matching one through the variables editor's save path
+/// ([`env_editor::write`]). With no key or local store yet nothing is writable.
+fn writes_for(open: &OpenScopes, request_id: ItemId, cx: &App) -> VariableWrites {
+    let (Some(workspace_id), Some(store)) = (
+        open.key.clone(),
+        cx.try_global::<AppStore>()
+            .map(|store| Arc::clone(&store.0)),
+    ) else {
+        return VariableWrites::default();
+    };
+    let mut targets: Vec<(ScopeKind, EditTarget)> = Vec::new();
+    if let Some(globals) = &open.globals {
+        targets.push((ScopeKind::Global, globals.clone()));
+    }
+    if let Some(collection) = open
+        .collection_of
+        .get(&request_id)
+        .and_then(|id| open.collections.get(id))
+    {
+        targets.push((ScopeKind::Collection, collection.clone()));
+    }
+    if let Some((_, environment)) = open.active_environment() {
+        targets.push((ScopeKind::Environment, environment.clone()));
+    }
+    let scope_names = targets
+        .iter()
+        .map(|(kind, target)| (*kind, target.label().to_string()))
+        .collect();
+    let workspace_root = open.identity.root.clone();
+    let write: VariableWriter = Arc::new(move |edit: VariableEdit, window, cx| {
+        let Some(target) = targets
+            .iter()
+            .find(|(kind, _)| *kind == edit.scope)
+            .map(|(_, target)| target.clone())
+        else {
+            return;
+        };
+        let Some(workspace) = window.root::<Workspace>().flatten() else {
+            // Not a workspace window: there is no workspace whose scope this is.
+            return;
+        };
+        let scope = WriteScope {
+            workspace_id: workspace_id.clone(),
+            workspace_root: workspace_root.clone(),
+            target,
+            store: Arc::clone(&store),
+        };
+        let write = VariableWrite {
+            key: edit.name,
+            value: edit.value,
+            layer: if edit.local {
+                ValueLayer::Local
+            } else {
+                ValueLayer::Shared
+            },
+        };
+        // Detached: the popover that asked has closed, and the write carries its own
+        // report (a toast either way).
+        env_editor::write::write_variable(scope, write, workspace.downgrade(), cx).detach();
+    });
+    VariableWrites {
+        scope_names,
+        write: Some(write),
+    }
+}
+
 /// The active environment's display name: what the editors' variable line names an
 /// environment source by ("Source: Development").
 fn active_environment_name(open: &OpenScopes) -> Option<String> {

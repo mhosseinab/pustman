@@ -55,7 +55,9 @@ use unresolved_warning::UnresolvedWarning;
 use url_bar::{UrlBar, UrlBarEvent};
 // Re-exported for the app's scope wire (S43w): it hands every editor its keychain
 // sources and keys local values by the winning variable's scope.
-pub use variable_hover::{SecretSources, scope_kind_of};
+pub use variable_hover::{
+    SecretSources, VariableEdit, VariableWriter, VariableWrites, scope_kind_of,
+};
 
 /// The key context the editor answers the keyboard in; `assets/keymaps/` binds
 /// `request::Send`, `request::Cancel` and `request::FocusUrlBar` against it.

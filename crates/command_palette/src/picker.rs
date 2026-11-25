@@ -99,6 +99,26 @@ pub trait PickerDelegate: Sized + 'static {
     /// The hint shown in the query field while it is empty; it is also the field's
     /// accessible label.
     fn placeholder_text(&self) -> SharedString;
+
+    /// A control drawn at the right of the query field — the environment menu's "＋"
+    /// (S48u6). Most pickers have none.
+    fn render_query_accessory(
+        &self,
+        _window: &mut Window,
+        _cx: &mut Context<Picker<Self>>,
+    ) -> Option<AnyElement> {
+        None
+    }
+
+    /// A footer drawn under the matches — the environment menu's "Edit environments…"
+    /// (S48u6). Most pickers have none.
+    fn render_footer(
+        &self,
+        _window: &mut Window,
+        _cx: &mut Context<Picker<Self>>,
+    ) -> Option<AnyElement> {
+        None
+    }
 }
 
 /// A modal picker: the query [`TextInput`], the delegate's matches as a virtualized
@@ -274,7 +294,9 @@ impl<D: PickerDelegate> Focusable for Picker<D> {
 impl<D: PickerDelegate> EventEmitter<DismissEvent> for Picker<D> {}
 
 impl<D: PickerDelegate> Render for Picker<D> {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let query_accessory = self.delegate.render_query_accessory(window, cx);
+        let footer = self.delegate.render_footer(window, cx);
         let match_count = self.delegate.match_count();
         // The picker's own element ids derive from its focus handle — its identity — so
         // two pickers can never collide in one frame.
@@ -317,12 +339,20 @@ impl<D: PickerDelegate> Render for Picker<D> {
             .p(DynamicSpacing::Base08.rems(cx))
             .gap(DynamicSpacing::Base06.rems(cx))
             .child(
-                div()
-                    .border_1()
-                    .border_color(cx.theme().colors().border)
-                    .rounded_sm()
-                    .px(DynamicSpacing::Base04.rems(cx))
-                    .child(self.query.clone()),
+                h_flex()
+                    .w_full()
+                    .gap(DynamicSpacing::Base04.rems(cx))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .border_1()
+                            .border_color(cx.theme().colors().border)
+                            .rounded_sm()
+                            .px(DynamicSpacing::Base04.rems(cx))
+                            .child(self.query.clone()),
+                    )
+                    .children(query_accessory),
             )
             .map(|picker| {
                 if match_count == 0 {
@@ -345,6 +375,14 @@ impl<D: PickerDelegate> Render for Picker<D> {
                     )
                 }
             })
+            .children(footer.map(|footer| {
+                div()
+                    .w_full()
+                    .pt(DynamicSpacing::Base04.rems(cx))
+                    .border_t_1()
+                    .border_color(cx.theme().colors().border_variant)
+                    .child(footer)
+            }))
     }
 }
 

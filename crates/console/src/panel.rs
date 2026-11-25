@@ -32,6 +32,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use api_model::MASK;
 use gpui::{AppContext, ElementId, Entity, FocusHandle, Focusable, Role, Subscription};
 use pustman_actions::console::{Clear, Pause};
 use text_input::{TextInput, TextInputEvent};
@@ -64,6 +65,14 @@ pub(crate) const DETAILS_SELECTOR: &str = "console-details";
 pub(crate) const NOTICE_SECTION_SELECTOR: &str = "console-details-notice";
 pub(crate) const REQUEST_SECTION_SELECTOR: &str = "console-details-request";
 pub(crate) const RESPONSE_SECTION_SELECTOR: &str = "console-details-response";
+/// The failed-request details (S48u6): the message line, the "Request headers"
+/// disclosure and its list.
+pub(crate) const ERROR_MESSAGE_SELECTOR: &str = "console-error-message";
+pub(crate) const REQUEST_HEADERS_TOGGLE: &str = "console-request-headers-toggle";
+pub(crate) const REQUEST_HEADERS_SELECTOR: &str = "console-request-headers";
+const REQUEST_HEADERS_LABEL: &str = "Request headers";
+/// What a header value the redaction masked reads as.
+const REDACTED_LABEL: &str = "redacted";
 /// Debug selectors the toolbar tests measure the icon buttons through.
 const PAUSE_CONTROL: &str = "console-pause-control";
 const CLEAR_CONTROL: &str = "console-clear-control";
@@ -95,6 +104,9 @@ pub struct ConsolePanel {
     /// step: the expansion follows its own entry and is dropped once the entry is gone
     /// (#135).
     expanded_fingerprint: Option<u64>,
+    /// Whether the expanded error entry's "Request headers" list is open (S48u6). It
+    /// belongs to the expansion: a different entry opens with its headers folded.
+    headers_open: bool,
     /// One focus handle per visible row key (the `ui::Button` per-id focus shape): rows
     /// are tab stops, and a handle follows its key, so focus survives pushes that evict
     /// the oldest entry. Kept fresh by [`Self::sync_row_focus`], never by render.
@@ -124,6 +136,7 @@ impl ConsolePanel {
             level_bar,
             expanded: None,
             expanded_fingerprint: None,
+            headers_open: false,
             row_focus: HashMap::new(),
             _subscriptions: subscriptions,
         };
@@ -249,6 +262,7 @@ impl ConsolePanel {
     fn clear_expansion(&mut self) {
         self.expanded = None;
         self.expanded_fingerprint = None;
+        self.headers_open = false;
     }
 
     /// Keep the expansion on its own entry as the buffer changes (#135): a push over the
@@ -301,6 +315,7 @@ impl ConsolePanel {
             self.clear_expansion();
         } else {
             self.expanded = Some(entry_index);
+            self.headers_open = false;
             self.expanded_fingerprint = cx
                 .global::<ConsoleStore>()
                 .entries()
@@ -308,6 +323,33 @@ impl ConsolePanel {
                 .map(entry_fingerprint);
         }
         cx.notify();
+    }
+
+    /// Open or fold the expanded error entry's "Request headers" list (S48u6).
+    pub fn toggle_request_headers(&mut self, cx: &mut Context<Self>) {
+        self.headers_open = !self.headers_open;
+        cx.notify();
+    }
+
+    /// The expanded error entry's details exactly as the pane draws them, in order: the
+    /// error message, the "Request headers" disclosure and — while it is open — one
+    /// `Name: value` line per header. [`None`] when the expanded entry is not a failed
+    /// request. What a test reads the drawn text by.
+    pub fn expanded_error_texts(&self, cx: &App) -> Option<Vec<String>> {
+        let entry = self
+            .expanded
+            .and_then(|entry_index| cx.global::<ConsoleStore>().entries().get(entry_index))?;
+        let details = ErrorDetails::of(entry)?;
+        let mut texts = vec![details.message.clone(), REQUEST_HEADERS_LABEL.to_string()];
+        if self.headers_open {
+            texts.extend(
+                details
+                    .headers
+                    .iter()
+                    .map(|(name, value)| format!("{name}: {value}")),
+            );
+        }
+        Some(texts)
     }
 
     /// One list row: the summary line (REQ-CON-01) — level, method, status, URL, time
@@ -320,6 +362,7 @@ impl ConsolePanel {
             return div().into_any_element();
         };
         let expanded = self.expanded == Some(entry_index);
+        let failed = ErrorDetails::of(entry).is_some();
         let focus_handle = self
             .row_focus
             .get(key)
@@ -345,8 +388,17 @@ impl ConsolePanel {
             .border_color(cx.theme().colors().border_transparent)
             .focus_visible(|row| row.border_color(cx.theme().colors().border_focused))
             .cursor_pointer()
-            .when(expanded, |row| row.bg(cx.theme().colors().element_selected))
-            .hover(|row| row.bg(cx.theme().colors().element_hover))
+            .map(|row| {
+                // A failed request reads as one on the row itself (mockup section 9):
+                // the error background, with the icon and the words carrying the state
+                // too, never the colour alone.
+                if failed {
+                    row.bg(cx.theme().status().error_background)
+                } else {
+                    row.when(expanded, |row| row.bg(cx.theme().colors().element_selected))
+                        .hover(|row| row.bg(cx.theme().colors().element_hover))
+                }
+            })
             .map(|row| match focus_handle.as_ref() {
                 // The `ui::Button` shape: with a handle the handle's own tab stop decides
                 // the tab order, and GPUI turns an Enter or Space press on the focused row
@@ -360,6 +412,39 @@ impl ConsolePanel {
                     .size(IconSize::Small)
                     .color(level_color(entry.level)),
             );
+        if let Some(details) = ErrorDetails::of(entry) {
+            return row
+                .child(
+                    Icon::new(chevron(expanded))
+                        .size(IconSize::Small)
+                        .color(Color::Error),
+                )
+                .child(
+                    Label::new(
+                        entry
+                            .method
+                            .as_ref()
+                            .map(ToString::to_string)
+                            .unwrap_or_else(|| entry.protocol.clone()),
+                    )
+                    .color(Color::Error),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(Label::new(entry.url.clone()).color(Color::Error).truncate()),
+                )
+                .child(
+                    div().flex_1().min_w_0().child(
+                        Label::new(details.message)
+                            .size(LabelSize::Small)
+                            .color(Color::Error)
+                            .truncate(),
+                    ),
+                )
+                .into_any_element();
+        }
         if let Some(notice) = entry.notice() {
             return row
                 .child(
@@ -369,7 +454,14 @@ impl ConsolePanel {
                 )
                 .into_any_element();
         }
+        // The disclosure says the row opens (mockup section 9) — every wire entry has
+        // raw text to expand into.
         row.child(
+            Icon::new(chevron(expanded))
+                .size(IconSize::Small)
+                .color(Color::Muted),
+        )
+        .child(
             Label::new(
                 entry
                     .method
@@ -397,13 +489,16 @@ impl ConsolePanel {
 
     /// The raw text of the expanded entry (REQ-CON-03) below the list — or a notice's
     /// message under its own `Notice` section, never under a response's (#115).
-    fn render_details(&self, cx: &App) -> AnyElement {
+    fn render_details(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(entry) = self
             .expanded
             .and_then(|entry_index| cx.global::<ConsoleStore>().entries().get(entry_index))
         else {
             return div().into_any_element();
         };
+        if let Some(details) = ErrorDetails::of(entry) {
+            return self.render_error_details(details, cx);
+        }
         v_flex()
             .id(SharedString::new_static("console-details"))
             .debug_selector(|| DETAILS_SELECTOR.to_owned())
@@ -432,6 +527,72 @@ impl ConsolePanel {
                         cx,
                     )
                 })),
+            })
+            .into_any_element()
+    }
+
+    /// A failed request's details (mockup section 9): the error message, then the
+    /// "Request headers" disclosure and — while it is open — the headers the request
+    /// carried, each value as the feed's redaction left it (a masked one reads
+    /// "redacted": a word, not a row of dots a screen reader spells out).
+    fn render_error_details(&self, details: ErrorDetails, cx: &mut Context<Self>) -> AnyElement {
+        let headers_open = self.headers_open;
+        v_flex()
+            .id(SharedString::new_static("console-details"))
+            .debug_selector(|| DETAILS_SELECTOR.to_owned())
+            // Shares the dock with the list (both grow, neither starves): in a short dock
+            // the failed row itself stays on screen above its details.
+            .flex_1()
+            .min_h_0()
+            .max_h(rems(DETAILS_HEIGHT_REMS))
+            .overflow_y_scroll()
+            .gap(DynamicSpacing::Base04.rems(cx))
+            .p(DynamicSpacing::Base08.rems(cx))
+            .border_t_1()
+            .border_color(cx.theme().colors().border)
+            .child(
+                div()
+                    .debug_selector(|| ERROR_MESSAGE_SELECTOR.to_owned())
+                    .child(Label::new(details.message).color(Color::Error)),
+            )
+            .child(
+                div()
+                    .debug_selector(|| REQUEST_HEADERS_TOGGLE.to_owned())
+                    .child(
+                        Button::new(REQUEST_HEADERS_TOGGLE, REQUEST_HEADERS_LABEL)
+                            .style(ButtonStyle::Transparent)
+                            .start_icon(Icon::new(chevron(headers_open)))
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.toggle_request_headers(cx)),
+                            ),
+                    ),
+            )
+            .when(headers_open, |pane| {
+                pane.child(
+                    v_flex()
+                        .debug_selector(|| REQUEST_HEADERS_SELECTOR.to_owned())
+                        .pl(DynamicSpacing::Base16.rems(cx))
+                        .gap(DynamicSpacing::Base02.rems(cx))
+                        .font_buffer(cx)
+                        .children(details.headers.into_iter().map(|(name, value)| {
+                            let redacted = value == REDACTED_LABEL;
+                            h_flex()
+                                .min_w_0()
+                                .gap(DynamicSpacing::Base04.rems(cx))
+                                .child(Label::new(format!("{name}:")).color(Color::Muted))
+                                .child(
+                                    div().min_w_0().child(
+                                        Label::new(value)
+                                            .color(if redacted {
+                                                Color::Error
+                                            } else {
+                                                Color::Default
+                                            })
+                                            .truncate(),
+                                    ),
+                                )
+                        })),
+                )
             })
             .into_any_element()
     }
@@ -643,6 +804,56 @@ fn entry_fingerprint(entry: &ConsoleEntry) -> u64 {
     hasher.finish()
 }
 
+/// A failed request's details (S48u6), read off its entry: the error message and the
+/// headers the feed recorded with the request ([`crate::record_error`]). An entry is one
+/// when it is an error carrying a request — a notice (no request of its own) keeps its
+/// own shape.
+struct ErrorDetails {
+    message: String,
+    /// `(name, value)` in the order the request carried them; a value the redaction
+    /// masked is [`REDACTED_LABEL`].
+    headers: Vec<(String, String)>,
+}
+
+impl ErrorDetails {
+    fn of(entry: &ConsoleEntry) -> Option<Self> {
+        if entry.level != ConsoleLevel::Error
+            || entry.method.is_none()
+            || entry.raw_request.is_empty()
+        {
+            return None;
+        }
+        let headers = entry
+            .raw_request
+            .lines()
+            // The first line is the request line; the headers follow it.
+            .skip(1)
+            .filter_map(|line| line.split_once(": "))
+            .map(|(name, value)| {
+                let value = if value == MASK {
+                    REDACTED_LABEL.to_string()
+                } else {
+                    value.to_string()
+                };
+                (name.to_string(), value)
+            })
+            .collect();
+        Some(Self {
+            message: entry.raw_response.clone(),
+            headers,
+        })
+    }
+}
+
+/// The disclosure chevron: down while open, right while folded.
+fn chevron(open: bool) -> IconName {
+    if open {
+        IconName::ChevronDown
+    } else {
+        IconName::ChevronRight
+    }
+}
+
 /// The raw request or response block of the expanded entry, or a notice's message under
 /// its own section title.
 fn raw_section(title: &'static str, selector: &'static str, raw: &str, cx: &App) -> AnyElement {
@@ -739,3 +950,7 @@ mod notice_tests;
 #[cfg(test)]
 #[path = "panel_toolbar_tests.rs"]
 mod toolbar_tests;
+
+#[cfg(test)]
+#[path = "panel_error_row_tests.rs"]
+mod error_row_tests;

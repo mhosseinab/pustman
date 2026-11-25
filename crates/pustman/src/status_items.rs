@@ -9,6 +9,7 @@ use console::ConsoleStore;
 use environment_picker::SelectorInputs;
 use environment_picker::selector::NO_ENVIRONMENT_LABEL;
 use gpui::{App, Context, EntityId, Global, Subscription, WeakEntity};
+use pustman_actions::environment::SelectEnvironment;
 use ui::prelude::*;
 use workspace::Workspace;
 
@@ -94,11 +95,17 @@ impl Render for ActiveEnvironment {
             .debug_selector(|| ENVIRONMENT_SELECTOR.to_owned())
             .min_w_0()
             .tooltip(Tooltip::text(readout.clone()).builder())
+            // The readout is the environment chip (S48u6, mockup section 6): it opens
+            // the environment menu, by mouse or by Enter/Space on the focused button.
             .child(
-                Label::new(readout)
-                    .size(LabelSize::Small)
-                    .color(Color::Muted)
-                    .truncate(),
+                Button::new("status-environment-menu", readout)
+                    .style(ButtonStyle::Transparent)
+                    .size(ButtonSize::Compact)
+                    .label_color(Color::Muted)
+                    .end_icon(Icon::new(IconName::ChevronDown).size(IconSize::XSmall))
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(SelectEnvironment), cx)
+                    }),
             )
     }
 }

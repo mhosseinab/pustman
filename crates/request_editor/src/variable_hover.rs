@@ -28,6 +28,24 @@
 //! the Params/Headers cells, the raw body and the Auth fields follow in a later wiring
 //! step, each wrapping its input the same way.
 //!
+//! S48u6 (mockup section 7) turns the hover into the place a variable is fixed: a
+//! plain value resolved from a scope the app's wire can write is an editable field
+//! (Enter or Save lands it through the wire's [`VariableWrites`] — the variables
+//! editor's own save path), a secret keeps the mask and offers "Edit secret…"
+//! (`environment::EditSecret`), and an undefined name says "<name> is not defined" with
+//! "Add to <active environment>" and "Add to Globals". The scope line carries a badge
+//! letter — E, G or C — and the scope's own name ("Environment · Development"). The
+//! popover also opens from the keyboard: with the field focused, a caret inside a
+//! `{{placeholder}}` opens it, and leaving the placeholder closes it.
+//!
+//! `Decision:` "All variables in this request →" is omitted: the variable line right
+//! under the URL bar already lists every variable the request uses, so the link would go
+//! nowhere new.
+//!
+//! `Decision:` the secret's reveal toggle (REQ-VAR-03, S33) stays — it is the user's
+//! explicit request to see their own secret — but nothing reveals by default: the mask
+//! is what the popover draws, and no tooltip, element id, toast or log carries a value.
+//!
 //! Dismissal: the popover closes when the pointer moves over the field outside every
 //! placeholder, when a move lands outside the field and the popover — the window-level
 //! mouse-move watch below, since GPUI has no element-level "mouse left" event — when
@@ -41,12 +59,13 @@ use std::sync::Arc;
 
 use api_model::{MASK, VariableKind};
 use gpui::{
-    Anchor, AnyElement, AnyView, Bounds, Context, DispatchPhase, ElementId, Entity, FocusHandle,
-    Focusable, InteractiveElement, IntoElement, MouseExitEvent, MouseMoveEvent, ParentElement,
-    Pixels, Render, Role, SharedString, StatefulInteractiveElement, Styled, Subscription, Task,
-    Window, anchored, canvas, deferred,
+    Anchor, AnyElement, AnyView, App, Bounds, Context, DispatchPhase, ElementId, Entity,
+    FocusHandle, Focusable, InteractiveElement, IntoElement, MouseExitEvent, MouseMoveEvent,
+    ParentElement, Pixels, Render, Role, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, Task, Window, anchored, canvas, deferred,
 };
 use http_engine::SecretKeyLookup;
+use pustman_actions::environment::EditSecret;
 use secrets::{SecretError, SecretKey, SecretStore, SecretValue};
 use text_input::{TextInput, TextInputEvent};
 use ui::prelude::*;
@@ -91,6 +110,87 @@ const READ_FAILURE_PREFIX: &str = "Could not read this secret — ";
 /// The width of the popover surface in pixels at the default scale — room for a long
 /// variable name and value; a longer one truncates.
 const POPOVER_WIDTH_PX: f32 = 320.;
+
+/// The placeholder the editable value field shows while it is empty.
+const VALUE_PLACEHOLDER: &str = "Value";
+
+/// The buttons the popover can carry, by what they do. Their ids derive from these.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PopoverAction {
+    /// Land the value field's text in the variable's scope.
+    Save,
+    /// Open the variables editor on the secret's masked field.
+    EditSecret,
+    /// Add the undefined name to this scope.
+    AddTo(ScopeKind),
+}
+
+/// Lands one edit from the popover: the app's wire maps the scope kind to the scope the
+/// request resolves it from and writes through the variables editor's save path
+/// (`environment_picker::env_editor::write`), reporting the outcome itself.
+pub type VariableWriter = Arc<dyn Fn(VariableEdit, &mut Window, &mut App)>;
+
+/// One edit the popover asks the wire to land (S48u6). Never a secret: the popover has
+/// no field for one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VariableEdit {
+    /// The scope kind the variable resolves from — or, for an undefined name, the one it
+    /// is added to.
+    pub scope: ScopeKind,
+    pub name: String,
+    pub value: String,
+    /// The request resolved the value from the scope's local value, so the edit sets that
+    /// one (the shared value otherwise).
+    pub local: bool,
+}
+
+/// Where the popover's edits land (S48u6): the name of each scope the request resolves
+/// from — what the scope line and the "Add to …" buttons say — and the writer. The
+/// default writes nowhere: values are read-only and an undefined name offers no Add,
+/// until the app's wire provides both.
+#[derive(Clone, Default)]
+pub struct VariableWrites {
+    /// Each writable scope kind with its scope's name ("Development", "Globals", a
+    /// collection's name).
+    pub scope_names: Vec<(ScopeKind, String)>,
+    pub write: Option<VariableWriter>,
+}
+
+impl VariableWrites {
+    fn scope_name(&self, kind: ScopeKind) -> Option<&str> {
+        self.scope_names
+            .iter()
+            .find(|(scope, _)| *scope == kind)
+            .map(|(_, name)| name.as_str())
+    }
+
+    /// Whether an edit to `kind` can land.
+    fn writable(&self, kind: ScopeKind) -> bool {
+        self.write.is_some() && self.scope_name(kind).is_some()
+    }
+}
+
+/// What the popover draws, line by line — the one model `render` and
+/// [`VariableHover::rendered_texts`] both read, so a test of the text is a test of the
+/// screen.
+struct PopoverModel {
+    name: String,
+    /// E, G or C for an environment, the globals or a collection.
+    badge: Option<&'static str>,
+    scope_line: String,
+    value: ValueLine,
+    buttons: Vec<(PopoverAction, String)>,
+}
+
+/// The popover's value line.
+enum ValueLine {
+    /// The read-only value text (the masked, unset, checking or dynamic labels too).
+    Text(String),
+    /// The editable value field.
+    Field,
+    /// "<name> is not defined".
+    NotDefined(String),
+}
 
 /// What the editor has been given about where hovered secrets live: the store the
 /// reveal reads and [`SecretKeyLookup`] (`http_engine::prepare`'s shared boundary —
@@ -255,9 +355,18 @@ pub struct VariableHover {
     /// geometry through interior mutability, never `Entity::update` from
     /// `render`/`paint`). [`None`] while no popover is painted.
     popover_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// The editable value field of a plain variable (S48u6).
+    value_input: Entity<TextInput>,
+    /// Where the popover's edits land ([`VariableWrites`]); the default writes nowhere.
+    writes: VariableWrites,
+    /// The popover was opened by the caret, not the pointer: moving the caret out of the
+    /// placeholder closes it.
+    opened_by_caret: bool,
     // Kept so the field's edits keep reaching us; dropping it would silently stop the
     // hover from closing when the text under it changes.
     _input_subscription: Subscription,
+    // The caret watch and the value field's Enter; dropping them stops both.
+    _subscriptions: Vec<Subscription>,
 }
 
 impl VariableHover {
@@ -269,6 +378,19 @@ impl VariableHover {
         cx: &mut Context<Self>,
     ) -> Self {
         let subscription = cx.subscribe_in(&input, window, Self::on_input_event);
+        let value_input = cx.new(|cx| {
+            TextInput::new(window, cx).with_placeholder(SharedString::new_static(VALUE_PLACEHOLDER))
+        });
+        let subscriptions = vec![
+            cx.observe_in(&input, window, |this, _input, window, cx| {
+                this.follow_caret(window, cx)
+            }),
+            cx.subscribe_in(&value_input, window, |this, _field, event, window, cx| {
+                if *event == TextInputEvent::Submitted {
+                    this.run_action(PopoverAction::Save, window, cx);
+                }
+            }),
+        ];
         Self {
             input,
             wrapped,
@@ -279,8 +401,176 @@ impl VariableHover {
             reveal_lookup: None,
             reveal_focus: cx.focus_handle(),
             popover_bounds: Rc::new(Cell::new(None)),
+            value_input,
+            writes: VariableWrites::default(),
+            opened_by_caret: false,
             _input_subscription: subscription,
+            _subscriptions: subscriptions,
         }
+    }
+
+    /// Store where the popover's edits land ([`VariableWrites`]) and close any open
+    /// hover — what it offered was answered by the previous writes.
+    pub fn set_variable_writes(&mut self, writes: VariableWrites, cx: &mut Context<Self>) {
+        self.writes = writes;
+        self.close(cx);
+    }
+
+    /// The editable value field, as the keyboard and a test reach it.
+    pub fn value_input(&self) -> &Entity<TextInput> {
+        &self.value_input
+    }
+
+    /// Every string the open popover draws, in order — the name, the scope badge and
+    /// line, the value (an editable field's own masked-or-plain display text), the
+    /// "not defined" line and each button's label. Empty while nothing is hovered.
+    pub fn rendered_texts(&self, cx: &App) -> Vec<String> {
+        let Some(model) = self.popover_model() else {
+            return Vec::new();
+        };
+        let mut texts = vec![model.name];
+        texts.extend(model.badge.map(str::to_string));
+        if !model.scope_line.is_empty() {
+            texts.push(model.scope_line);
+        }
+        match model.value {
+            ValueLine::Text(text) | ValueLine::NotDefined(text) => texts.push(text),
+            ValueLine::Field => texts.push(self.value_input.read(cx).display_text()),
+        }
+        if self
+            .hovered
+            .as_ref()
+            .is_some_and(|hovered| matches!(hovered.value, HoverValue::Secret(_)))
+        {
+            texts.push(String::from("Reveal"));
+        }
+        texts.extend(model.buttons.into_iter().map(|(_, label)| label));
+        texts
+    }
+
+    /// The caret moved in the field (the keyboard's way in): inside a placeholder it
+    /// opens the popover on it; out of every placeholder it closes a popover the caret
+    /// opened. A blurred field changes nothing — focus may have moved into the popover.
+    fn follow_caret(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let input = self.input.read(cx);
+        if !input.focus_handle(cx).is_focused(window) {
+            return;
+        }
+        let selection = input.selected_range();
+        if !selection.is_empty() {
+            return;
+        }
+        let caret = selection.start;
+        let text = input.text();
+        let name = spans(&text, &self.scopes)
+            .into_iter()
+            .find(|span| span.range.start < caret && caret < span.range.end)
+            .map(|span| span.name);
+        match name {
+            Some(name) => {
+                if self.hovered.as_ref().map(|hovered| hovered.name.as_str()) != Some(name.as_str())
+                {
+                    self.open_hover(&name, cx);
+                    self.opened_by_caret = true;
+                }
+            }
+            None => {
+                if self.opened_by_caret {
+                    self.close(cx);
+                }
+            }
+        }
+    }
+
+    /// The popover's model for what is hovered (see [`PopoverModel`]).
+    fn popover_model(&self) -> Option<PopoverModel> {
+        let hovered = self.hovered.as_ref()?;
+        let display = hovered.display();
+        let scope_kind = hovered.scope_kind;
+        let badge = scope_kind.and_then(scope_badge);
+        let scope_line = match scope_kind
+            .and_then(|kind| self.writes.scope_name(kind).map(|name| (kind, name)))
+        {
+            Some((ScopeKind::Global, _)) => String::from("Globals"),
+            Some((kind, name)) => format!("{} · {name}", scope_label(Some(kind))),
+            // An undefined name comes from no scope: its "not defined" line says so, and
+            // a scope line of "—" would only repeat it.
+            None if matches!(hovered.value, HoverValue::Unresolved) => String::new(),
+            None => display.scope.clone(),
+        };
+        let mut buttons = Vec::new();
+        let value = match &hovered.value {
+            HoverValue::Value(_) if scope_kind.is_some_and(|kind| self.writes.writable(kind)) => {
+                buttons.push((PopoverAction::Save, String::from("Save")));
+                ValueLine::Field
+            }
+            HoverValue::Secret(_) => {
+                buttons.push((PopoverAction::EditSecret, String::from("Edit secret…")));
+                ValueLine::Text(display.value.clone())
+            }
+            HoverValue::Unresolved => {
+                for kind in [ScopeKind::Environment, ScopeKind::Global] {
+                    if !self.writes.writable(kind) {
+                        continue;
+                    }
+                    let label = match (kind, self.writes.scope_name(kind)) {
+                        (ScopeKind::Environment, Some(name)) => format!("Add to {name}"),
+                        _ => String::from("Add to Globals"),
+                    };
+                    buttons.push((PopoverAction::AddTo(kind), label));
+                }
+                ValueLine::NotDefined(format!("{} is not defined", display.name))
+            }
+            _ => ValueLine::Text(display.value.clone()),
+        };
+        Some(PopoverModel {
+            name: display.name,
+            badge,
+            scope_line,
+            value,
+            buttons,
+        })
+    }
+
+    /// Run one of the popover's buttons (or Enter in its value field), then close it.
+    fn run_action(&mut self, action: PopoverAction, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(hovered) = self.hovered.as_ref() else {
+            return;
+        };
+        let name = hovered.name.clone();
+        let edit = match action {
+            PopoverAction::EditSecret => {
+                window.dispatch_action(Box::new(EditSecret { name }), cx);
+                self.close(cx);
+                return;
+            }
+            PopoverAction::Save => {
+                let Some(scope) = hovered.scope_kind else {
+                    return;
+                };
+                if !matches!(hovered.value, HoverValue::Value(_)) {
+                    // Only a plain value has a field; a secret is never written here.
+                    return;
+                }
+                VariableEdit {
+                    scope,
+                    local: self.scopes.local_value(&name).is_some(),
+                    value: self.value_input.read(cx).text(),
+                    name,
+                }
+            }
+            PopoverAction::AddTo(scope) => VariableEdit {
+                scope,
+                name,
+                value: String::new(),
+                local: false,
+            },
+        };
+        let Some(write) = self.writes.write.clone() else {
+            return;
+        };
+        self.close(cx);
+        write(edit, window, cx);
     }
 
     /// Store the scopes the hover resolves against and close any open hover — its
@@ -363,6 +653,11 @@ impl VariableHover {
         let hovered = self.hovered_variable(name);
         if matches!(hovered.value, HoverValue::Secret(_)) {
             self.status_lookup = Some(self.start_status_lookup(&hovered, cx));
+        }
+        if let HoverValue::Value(value) = &hovered.value {
+            let text = value.clone().unwrap_or_default();
+            self.value_input
+                .update(cx, |field, cx| field.set_text(&text, cx));
         }
         self.hovered = Some(hovered);
         self.reveal_focus.clone().tab_stop(true);
@@ -503,6 +798,7 @@ impl VariableHover {
             return;
         }
         self.hovered = None;
+        self.opened_by_caret = false;
         self.popover_bounds.set(None);
         self.status_lookup = None;
         self.reveal_lookup = None;
@@ -526,11 +822,89 @@ impl VariableHover {
             Arc::new(base_id.clone()),
             format!("hover-{}", display.name).into(),
         );
+        let model = self.popover_model()?;
         let value_row = h_flex()
             .min_w_0()
             .gap(DynamicSpacing::Base02.rems(cx))
-            .child(self.render_value(&base_id, &display, hovered))
+            .child(match &model.value {
+                ValueLine::Field => div()
+                    .flex_1()
+                    .min_w_0()
+                    .px(DynamicSpacing::Base04.rems(cx))
+                    .border_1()
+                    .border_color(cx.theme().colors().border)
+                    .rounded_sm()
+                    .font_buffer(cx)
+                    .child(self.value_input.clone())
+                    .into_any_element(),
+                ValueLine::NotDefined(text) => div()
+                    .min_w_0()
+                    .flex_1()
+                    .child(
+                        Label::new(text.clone())
+                            .size(LabelSize::Small)
+                            .color(Color::Error)
+                            .truncate(),
+                    )
+                    .into_any_element(),
+                ValueLine::Text(_) => self.render_value(&base_id, &display, hovered),
+            })
             .children(self.render_reveal(&display, hovered, cx));
+        let scope_row = h_flex()
+            .min_w_0()
+            .gap(DynamicSpacing::Base03.rems(cx))
+            .children(model.badge.map(|letter| {
+                div()
+                    .flex_none()
+                    .px(DynamicSpacing::Base02.rems(cx))
+                    .rounded_sm()
+                    .border_1()
+                    .border_color(cx.theme().colors().border)
+                    .child(
+                        Label::new(letter)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Accent),
+                    )
+            }))
+            .child(
+                div().min_w_0().flex_1().child(
+                    Label::new(model.scope_line.clone())
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted)
+                        .truncate(),
+                ),
+            );
+        let buttons = model
+            .buttons
+            .iter()
+            .enumerate()
+            .map(|(position, (action, label))| {
+                let id = ElementId::NamedChild(
+                    Arc::new(base_id.clone()),
+                    format!("{}-{}", action_id(*action), display.name).into(),
+                );
+                let action = *action;
+                let selector = popover_button_selector(action);
+                div()
+                    .debug_selector(move || selector.to_owned())
+                    .child(
+                        Button::new(id, label.clone())
+                            .size(ButtonSize::Medium)
+                            .style(if position == 0 {
+                                ButtonStyle::Filled
+                            } else {
+                                ButtonStyle::Outlined
+                            })
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.run_action(action, window, cx)
+                            })),
+                    )
+                    .into_any_element()
+            });
+        let button_row = h_flex()
+            .flex_wrap()
+            .gap(DynamicSpacing::Base04.rems(cx))
+            .children(buttons);
         let surface = v_flex()
             .id(surface_id)
             .role(Role::Tooltip)
@@ -546,12 +920,13 @@ impl VariableHover {
                     .size(LabelSize::Small)
                     .truncate(),
             )
-            .child(
-                Label::new(display.scope.clone())
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted),
-            )
+            .when(!model.scope_line.is_empty(), |surface| {
+                surface.child(scope_row)
+            })
             .child(value_row)
+            .when(!model.buttons.is_empty(), |surface| {
+                surface.child(button_row)
+            })
             .child(self.render_popover_bounds());
         Some(
             div()
@@ -714,6 +1089,14 @@ impl Render for VariableHover {
 }
 
 impl RequestEditor {
+    /// Where the `{{var}}` popover's edits land ([`VariableWrites`], S48u6): the app's
+    /// scope wire gives every bound editor the names of the scopes its request resolves
+    /// from and the writer that saves into them.
+    pub fn set_variable_writes(&mut self, writes: VariableWrites, cx: &mut Context<Self>) {
+        let hover = self.url_bar.read(cx).hover().clone();
+        hover.update(cx, |hover, cx| hover.set_variable_writes(writes, cx));
+    }
+
     /// Where a hovered secret's value comes from (REQ-VAR-03): the store the reveal
     /// reads and the one door to its keychain key ([`SecretSources`]). The later wiring
     /// step provides the workspace and scope ids the same way. Until this is called
@@ -742,6 +1125,38 @@ pub fn scope_kind_of(scopes: &ScopeStack, name: &str) -> Option<ScopeKind> {
                 .any(|variable| variable.enabled && variable.key == name)
         })
         .map(|scope| scope.kind)
+}
+
+/// The scope badge's letter (mockup section 7): E, G or C for the scopes a user edits.
+fn scope_badge(kind: ScopeKind) -> Option<&'static str> {
+    match kind {
+        ScopeKind::Environment => Some("E"),
+        ScopeKind::Global => Some("G"),
+        ScopeKind::Collection => Some("C"),
+        ScopeKind::RequestLocal | ScopeKind::Data => None,
+    }
+}
+
+/// Test hook: one popover button's debug selector.
+pub fn popover_button_selector(action: PopoverAction) -> &'static str {
+    match action {
+        PopoverAction::Save => "variable-popover-save",
+        PopoverAction::EditSecret => "variable-popover-edit-secret",
+        PopoverAction::AddTo(ScopeKind::Environment) => "variable-popover-add-environment",
+        PopoverAction::AddTo(ScopeKind::Global) => "variable-popover-add-globals",
+        PopoverAction::AddTo(_) => "variable-popover-add-scope",
+    }
+}
+
+/// The stable id part of one popover button.
+fn action_id(action: PopoverAction) -> &'static str {
+    match action {
+        PopoverAction::Save => "save",
+        PopoverAction::EditSecret => "edit-secret",
+        PopoverAction::AddTo(ScopeKind::Environment) => "add-environment",
+        PopoverAction::AddTo(ScopeKind::Global) => "add-globals",
+        PopoverAction::AddTo(_) => "add-scope",
+    }
 }
 
 /// How one scope kind is named on the hover's scope line (REQ-VAR-03: the scope it
@@ -791,3 +1206,7 @@ mod tests;
 #[cfg(test)]
 #[path = "variable_hover_pointer_leave_tests.rs"]
 mod pointer_leave_tests;
+
+#[cfg(test)]
+#[path = "variable_hover_popover_tests.rs"]
+mod popover_tests;
