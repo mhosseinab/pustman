@@ -36,7 +36,7 @@ pub mod variable_line;
 
 use std::sync::Arc;
 
-use api_model::{HttpRequest, RequestSettings};
+use api_model::{HttpRequest, ItemId, RequestSettings};
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render, SharedString,
     Subscription, Task, Window,
@@ -169,6 +169,9 @@ pub struct RequestEditor {
     /// key. The default reads nothing, which is the M1 behaviour; `set_secret_sources`
     /// fills it — and the hover's own copy — when the secret stores are wired (S43w).
     secret_sources: SecretSources,
+    /// For a tab opened from History, the id its request was recorded under
+    /// ([`RequestEditor::from_history`]); `None` for every other tab.
+    history_origin: Option<ItemId>,
     _url_bar_subscription: Subscription,
     _params_subscription: Subscription,
     _headers_subscription: Subscription,
@@ -311,6 +314,7 @@ impl RequestEditor {
             split_fraction: response_split::DEFAULT_SPLIT_FRACTION,
             scopes: std::sync::Arc::new(variables::ScopeStack::new()),
             secret_sources: SecretSources::default(),
+            history_origin: None,
             _url_bar_subscription,
             _params_subscription,
             _headers_subscription,
@@ -320,6 +324,28 @@ impl RequestEditor {
             _tab_bar_subscription: tab_bar_subscription,
             _release_subscription: release_subscription,
         }
+    }
+
+    /// A tab opened from History (REQ-HIST-02): `request` under a fresh id, remembering
+    /// `recorded_id`, the id it was recorded under. `Decision:` the mark is set while the
+    /// editor is built, so the scope wire's `observe_new` sees it and binds the tab to
+    /// the window's open workspace as one of its unsaved tabs; `recorded_id` is how the
+    /// wire tells a request that workspace holds from one recorded anywhere else.
+    pub fn from_history(
+        request: HttpRequest,
+        recorded_id: ItemId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self {
+            history_origin: Some(recorded_id),
+            ..Self::new(request, window, cx)
+        }
+    }
+
+    /// The id a tab opened from History was recorded under; `None` for any other tab.
+    pub fn history_origin(&self) -> Option<ItemId> {
+        self.history_origin
     }
 
     /// The request this tab is editing.

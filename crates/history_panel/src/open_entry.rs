@@ -50,19 +50,26 @@ pub fn open_entry(
     // `request_json` is the PRE-resolution request (`http_engine` records it that way),
     // so restoring it is a plain deserialize — the `{{var}}` templates travel through
     // untouched and resolve only when the user sends the tab.
-    let request = match serde_json::from_value::<HttpRequest>(entry.request_json.clone()) {
-        // A fresh identity: the recorded one may already name an open tab (the request
-        // itself, or this entry opened before), and two tabs with one identity make the
-        // workspace's tab save fail.
-        Ok(request) => HttpRequest {
-            id: ItemId::new(),
-            ..request
-        },
-        Err(_error) => {
-            toast(workspace, OPEN_FAILURE_MESSAGE, cx);
-            return;
-        }
-    };
+    let (request, recorded_id) =
+        match serde_json::from_value::<HttpRequest>(entry.request_json.clone()) {
+            // A fresh identity: the recorded one may already name an open tab (the request
+            // itself, or this entry opened before), and two tabs with one identity make the
+            // workspace's tab save fail. The recorded one goes along for the scope wire.
+            Ok(request) => {
+                let recorded_id = request.id;
+                (
+                    HttpRequest {
+                        id: ItemId::new(),
+                        ..request
+                    },
+                    recorded_id,
+                )
+            }
+            Err(_error) => {
+                toast(workspace, OPEN_FAILURE_MESSAGE, cx);
+                return;
+            }
+        };
     let response = entry
         .response_summary_json
         .as_ref()
@@ -74,7 +81,9 @@ pub fn open_entry(
             }
         });
 
-    let editor = cx.new(|cx| RequestEditor::new(request, window, cx));
+    // An unsaved tab of this window: it resolves the window's environment and globals
+    // like a New Request tab (`RequestEditor::from_history`).
+    let editor = cx.new(|cx| RequestEditor::from_history(request, recorded_id, window, cx));
     if let Some(response) = response {
         editor.update(cx, |editor, cx| {
             editor

@@ -60,6 +60,17 @@
 //! Once bound, an editor keeps that workspace: a tab left open from folder A after folder
 //! B opens gets no scopes and no keychain. Either way its secrets stay unresolved and the
 //! pre-send check warns, rather than resolving B's secrets into a request to A's host.
+//!
+//! `Decision:` a tab opened from History ([`RequestEditor::from_history`]) is an unsaved
+//! tab of the window it opens in: it binds to the workspace open when it is built and
+//! resolves that workspace's globals and active environment, as a New Request tab does —
+//! the entry's URL was recorded earlier, but sending it is still the user's explicit act
+//! (Postman does the same). The keychain, and the collection's scope, it gets only when
+//! that workspace's snapshot holds the request it was recorded under at the URL and
+//! settings the entry recorded — the rule above. History is saved with no folder, so an
+//! entry sent from folder A, reopened in folder B, never resolves B's secrets into A's
+//! request; its secrets stay unresolved and the pre-send check warns. One opened with no
+//! workspace open binds to none, and none that opens later.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -169,6 +180,18 @@ struct WiredEditor {
     editor: WeakEntity<RequestEditor>,
     workspace: Option<WorkspaceIdentity>,
     built_fresh: bool,
+    /// Set for a tab opened from History (module docs).
+    history: Option<HistoryTab>,
+}
+
+/// A tab opened from History, as the wire bound it (module docs).
+#[derive(Clone, Copy)]
+struct HistoryTab {
+    /// The id its request was recorded under.
+    recorded_id: ItemId,
+    /// Whether the workspace it bound to holds that request at the recorded URL and
+    /// settings: only then does it resolve the keychain and the collection's scope.
+    recorded_here: bool,
 }
 
 impl WiredEditor {
@@ -182,6 +205,16 @@ impl WiredEditor {
             self.workspace = Some(open.identity.clone());
         }
         self.workspace.as_ref() == Some(&open.identity)
+    }
+
+    /// The request id whose collection this editor resolves against, and whether it may
+    /// resolve the keychain (module docs); `draft_id` is its draft's id.
+    fn resolves_as(&self, draft_id: ItemId) -> (ItemId, bool) {
+        match self.history {
+            Some(history) if history.recorded_here => (history.recorded_id, true),
+            Some(_) => (draft_id, false),
+            None => (draft_id, true),
+        }
     }
 }
 
@@ -480,18 +513,27 @@ pub fn init(cx: &mut App) {
             let entity = cx.entity();
             let request_id = editor.draft().id;
             let draft = DraftBinding::of(editor.draft());
+            let open = cx.global::<ScopeWiring>().open.clone();
+            let history = editor.history_origin().map(|recorded_id| HistoryTab {
+                recorded_id,
+                recorded_here: open
+                    .as_ref()
+                    .is_some_and(|open| open.requests.get(&recorded_id) == Some(&draft.target)),
+            });
             let mut wired = WiredEditor {
                 editor: entity.downgrade(),
-                workspace: None,
+                // A history tab is an unsaved tab of the workspace open now (module docs).
+                workspace: history.and(open.as_ref()).map(|open| open.identity.clone()),
                 built_fresh: draft.fresh,
+                history,
             };
-            let open = cx.global::<ScopeWiring>().open.clone();
             let bound = open.as_ref().is_some_and(|open| wired.bind(&draft, open));
+            let (scope_request, with_secrets) = wired.resolves_as(request_id);
             cx.global_mut::<ScopeWiring>().editors.push(wired);
             let Some(open) = open.filter(|_| bound) else {
                 return;
             };
-            let (scopes, sources) = scopes_for(&open, request_id, cx);
+            let (scopes, sources) = scopes_for(&open, scope_request, with_secrets, cx);
             editor.set_scopes(scopes, cx);
             editor.set_secret_sources(sources, cx);
             editor.set_environment_name(active_environment_name(&open), cx);
@@ -1109,25 +1151,26 @@ fn apply(cx: &mut App) {
             )
         })
         .collect();
-    let bound: HashSet<EntityId> = cx
+    let bound: HashMap<EntityId, (ItemId, bool)> = cx
         .global_mut::<ScopeWiring>()
         .editors
         .iter_mut()
         .filter_map(|wired| {
             let entity_id = wired.editor.entity_id();
             let draft = drafts.get(&entity_id)?;
-            wired.bind(draft, &open).then_some(entity_id)
+            wired
+                .bind(draft, &open)
+                .then(|| (entity_id, wired.resolves_as(draft.id)))
         })
         .collect();
     for editor in editors {
-        let of_open_workspace = bound.contains(&editor.entity_id());
-        let (scopes, sources, environment) = if of_open_workspace {
-            let request_id = editor.read(cx).draft().id;
-            let (scopes, sources) = scopes_for(&open, request_id, cx);
-            (scopes, sources, active_environment_name(&open))
-        } else {
-            (ScopeStack::new(), SecretSources::default(), None)
-        };
+        let (scopes, sources, environment) =
+            if let Some(&(scope_request, with_secrets)) = bound.get(&editor.entity_id()) {
+                let (scopes, sources) = scopes_for(&open, scope_request, with_secrets, cx);
+                (scopes, sources, active_environment_name(&open))
+            } else {
+                (ScopeStack::new(), SecretSources::default(), None)
+            };
         editor.update(cx, |editor, cx| {
             editor.set_scopes(scopes, cx);
             editor.set_secret_sources(sources, cx);
@@ -1199,8 +1242,6 @@ fn install_inputs(open: &OpenScopes, cx: &mut App) {
     }
 }
 
-/// The scopes one request resolves against — globals, its collection, the active
-/// environment — and where its secrets come from (module docs).
 /// The active environment's display name: what the editors' variable line names an
 /// environment source by ("Source: Development").
 fn active_environment_name(open: &OpenScopes) -> Option<String> {
@@ -1208,7 +1249,15 @@ fn active_environment_name(open: &OpenScopes) -> Option<String> {
         .map(|(environment, _)| environment.name.clone())
 }
 
-fn scopes_for(open: &OpenScopes, request_id: ItemId, cx: &App) -> (ScopeStack, SecretSources) {
+/// The scopes one request resolves against — globals, its collection, the active
+/// environment — and where its secrets come from: the keychain only `with_secrets`,
+/// nowhere otherwise (module docs).
+fn scopes_for(
+    open: &OpenScopes,
+    request_id: ItemId,
+    with_secrets: bool,
+    cx: &App,
+) -> (ScopeStack, SecretSources) {
     let mut layers: Vec<(ScopeKind, &EditTarget)> = Vec::new();
     if let Some(globals) = &open.globals {
         layers.push((ScopeKind::Global, globals));
@@ -1260,7 +1309,7 @@ fn scopes_for(open: &OpenScopes, request_id: ItemId, cx: &App) -> (ScopeStack, S
         scopes.set_local_value(&name, &value);
     }
     let sources = match (secret_values::store(cx), open.key.clone()) {
-        (Some(store), Some(workspace_key)) => {
+        (Some(store), Some(workspace_key)) if with_secrets => {
             // Read at call time, not captured as a snapshot (S43x): the closure outlives
             // the wiring that built it — the `UnresolvedSecret` panel re-checks a failed
             // send's own inputs after a save has added keys.
