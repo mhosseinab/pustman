@@ -88,8 +88,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use api_model::{
-    Auth, Body, Child, Collection, HttpRequest, ImportError, ImportLimits, ImportProblem,
-    ImportReport, ItemId, Request, import_collection,
+    Auth, Body, Child, Collection, ImportError, ImportLimits, ImportProblem, ImportReport, ItemId,
+    KeyValue, Request, import_collection,
 };
 use gpui::{
     AnyWindowHandle, App, Context, DismissEvent, ElementId, Entity, EventEmitter, FocusHandle,
@@ -104,6 +104,10 @@ use workspace_store::{Item, ItemBody};
 #[cfg(test)]
 #[path = "import_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "graphql_io_tests.rs"]
+mod graphql_io_tests;
 
 /// The directory top-level collections live in (REQ-WSP-01), the same one the CRUD
 /// creates use.
@@ -616,6 +620,8 @@ const MODELLED_KEYS: &[&str] = &[
     "http_version",
     "disable_cookie_jar",
     "disabled_auto_headers",
+    "query",
+    "operation_name",
 ];
 
 /// Make the imported tree safe to write (fix 1): every `extra` key that names a
@@ -684,18 +690,38 @@ fn harden_request(request: &mut Request, problems: &mut Vec<ImportProblem>) {
                 }
                 harden_request(&mut example.request, problems);
             }
-            if carries_literal_credential(http) {
-                problems.push(ImportProblem {
-                    path: http.name.clone(),
-                    detail: String::from(
-                        "a literal credential is imported as plain text — move it to a secret variable",
-                    ),
-                });
+            if carries_literal_credential(
+                &http.auth,
+                &http.url,
+                http.params.iter().chain(&http.headers),
+            ) {
+                problems.push(credential_problem(&http.name));
+            }
+        }
+        // Hardened like HTTP: its own extras and rows lose modelled keys, and a literal
+        // credential — auth, header, URL, or a credential-named key in the variables
+        // text when that text is JSON — is reported by name.
+        Request::GraphQl(graphql) => {
+            sanitize_name(&mut graphql.name, problems);
+            strip_extra(&mut graphql.extra, &graphql.name, problems);
+            for row in &mut graphql.headers {
+                strip_extra(&mut row.extra, &graphql.name, problems);
+            }
+            harden_auth(&mut graphql.auth, &graphql.name, problems);
+            if let Some(settings) = &mut graphql.settings {
+                strip_extra(&mut settings.extra, &graphql.name, problems);
+            }
+            let variables_carry_credential = serde_json::from_str::<Value>(&graphql.variables)
+                .is_ok_and(|variables| raw_carries_credential(&variables));
+            if variables_carry_credential
+                || carries_literal_credential(&graphql.auth, &graphql.url, graphql.headers.iter())
+            {
+                problems.push(credential_problem(&graphql.name));
             }
         }
         // Not hardened field by field yet: made inert exactly like Unsupported. A value
         // that does not serialize becomes `null`, which the writer refuses with a reason.
-        Request::GraphQl(_) | Request::WebSocket(_) | Request::SocketIo(_) | Request::Grpc(_) => {
+        Request::WebSocket(_) | Request::SocketIo(_) | Request::Grpc(_) => {
             *request = Request::Unsupported(serde_json::to_value(&*request).unwrap_or(Value::Null));
             harden_request(request, problems);
         }
@@ -960,20 +986,18 @@ fn raw_carries_credential(value: &Value) -> bool {
     }
 }
 
-/// Whether the request carries a literal credential (fix 2): its auth, a credential
-/// header, its URL's `user:pass@` or a query parameter named like one. The report names
-/// the request only; the value never leaves the request (AGENTS.md › Security).
-fn carries_literal_credential(request: &HttpRequest) -> bool {
-    auth_carries_credential(&request.auth)
-        || url_carries_credential(&request.url)
-        || request
-            .params
-            .iter()
-            .any(|row| row_carries_credential(&row.key, &row.value))
-        || request
-            .headers
-            .iter()
-            .any(|row| row_carries_credential(&row.key, &row.value))
+/// Whether a request carries a literal credential (fix 2): its auth, a credential
+/// header, its URL's `user:pass@` or a query parameter named like one. One check for
+/// every typed request kind; the report names the request only and the value never
+/// leaves it (AGENTS.md › Security).
+fn carries_literal_credential<'a>(
+    auth: &Auth,
+    url: &str,
+    mut rows: impl Iterator<Item = &'a KeyValue>,
+) -> bool {
+    auth_carries_credential(auth)
+        || url_carries_credential(url)
+        || rows.any(|row| row_carries_credential(&row.key, &row.value))
 }
 
 /// Show what an import produced: the report modal, or the one message the user gets for

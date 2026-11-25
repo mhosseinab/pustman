@@ -270,14 +270,16 @@ fn assemble_children(
                     // The one skip REQ-IO-03 names: v2.1 has no request shape for a
                     // kind this build does not model. `export_collection` drops the
                     // same children; this walk names them.
-                    // GraphQL, WebSocket, Socket.IO and gRPC have no v2.1 shape either:
-                    // skipped exactly like Unsupported.
-                    Request::GraphQl(_)
-                    | Request::WebSocket(_)
+                    // WebSocket, Socket.IO and gRPC have no v2.1 shape either: skipped
+                    // exactly like Unsupported. GraphQL has one (`body.mode = "graphql"`).
+                    Request::WebSocket(_)
                     | Request::SocketIo(_)
                     | Request::Grpc(_)
                     | Request::Unsupported(_) => {
                         skipped.push(format!("“{name}”: a request kind v2.1 cannot represent"));
+                    }
+                    Request::GraphQl(graphql) => {
+                        note_dropped_settings(&name, graphql.settings.as_ref(), skipped);
                     }
                     // What `export_collection` drops below the child level: saved
                     // examples and request settings never reach a v2.1 file, so the
@@ -287,13 +289,7 @@ fn assemble_children(
                             skipped
                                 .push(format!("“{name}”: {} saved examples", http.examples.len()));
                         }
-                        if http
-                            .settings
-                            .as_ref()
-                            .is_some_and(|settings| settings != &RequestSettings::default())
-                        {
-                            skipped.push(format!("“{name}”: request settings"));
-                        }
+                        note_dropped_settings(&name, http.settings.as_ref(), skipped);
                     }
                 }
                 children.push(Child::Request(request.clone()));
@@ -302,6 +298,18 @@ fn assemble_children(
         }
     }
     children
+}
+
+/// Name a request whose non-default settings `export_collection` cannot write (S45c
+/// fix 1): v2.1 has no place for them.
+fn note_dropped_settings(
+    name: &str,
+    settings: Option<&RequestSettings>,
+    skipped: &mut Vec<String>,
+) {
+    if settings.is_some_and(|settings| settings != &RequestSettings::default()) {
+        skipped.push(format!("“{name}”: request settings"));
+    }
 }
 
 /// The warnings-list line for an `order` entry no folder or request file backs.
@@ -330,22 +338,30 @@ fn scan_literal_children(children: &[Child], carrying: &mut Vec<String>) {
                 scan_literal_children(&folder.children, carrying);
             }
             Child::Request(Request::Http(http)) => {
-                if http.headers.iter().any(is_literal_credential_header) {
-                    note_literal_credential(carrying, &http.name);
-                }
-                scan_literal_auth(&http.name, &http.auth, carrying);
+                scan_literal_request(&http.name, &http.headers, &http.auth, carrying);
+            }
+            Child::Request(Request::GraphQl(graphql)) => {
+                scan_literal_request(&graphql.name, &graphql.headers, &graphql.auth, carrying);
             }
             // Never exported (skipped above), so nothing of theirs reaches a file: like
             // Unsupported.
             Child::Request(
-                Request::GraphQl(_)
-                | Request::WebSocket(_)
+                Request::WebSocket(_)
                 | Request::SocketIo(_)
                 | Request::Grpc(_)
                 | Request::Unsupported(_),
             ) => {}
         }
     }
+}
+
+/// Flag an exported request once when a credential header or its auth holds a value
+/// typed literally — one check for every request kind the export writes.
+fn scan_literal_request(name: &str, headers: &[KeyValue], auth: &Auth, carrying: &mut Vec<String>) {
+    if headers.iter().any(is_literal_credential_header) {
+        note_literal_credential(carrying, name);
+    }
+    scan_literal_auth(name, auth, carrying);
 }
 
 /// Flag `name` once when `auth` holds a credential value typed literally.
