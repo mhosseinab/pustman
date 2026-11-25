@@ -94,7 +94,8 @@ pub fn init(cx: &mut App) {
         let workspace = cx.entity();
         cx.defer(move |cx| {
             let registered = cx.with_window(workspace.entity_id(), |window, cx| {
-                let panel = cx.new(|cx| CollectionsTree::new(empty_snapshot(), cx));
+                let panel =
+                    cx.new(|cx| CollectionsTree::new_in_window(empty_snapshot(), window, cx));
                 workspace.update(cx, |workspace, cx| {
                     workspace.register_panel(panel, window, cx);
                 });
