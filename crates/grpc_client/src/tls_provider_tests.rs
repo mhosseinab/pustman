@@ -4,9 +4,7 @@ use rustls::crypto::CryptoProvider;
 use tokio::net::TcpListener;
 use tonic::service::Routes;
 use tonic::transport::server::TcpIncoming;
-use tonic::transport::{
-    Certificate, ClientTlsConfig, Endpoint, Identity, Server, ServerTlsConfig,
-};
+use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity, Server, ServerTlsConfig};
 
 use super::ensure_crypto_provider;
 
@@ -25,12 +23,12 @@ async fn tonic_channel_and_reqwest_share_one_crypto_provider() {
     ensure_crypto_provider();
     let after_second_call = CryptoProvider::get_default().expect("a process-default provider");
     assert!(
-        Arc::ptr_eq(&installed, &after_second_call),
+        Arc::ptr_eq(installed, after_second_call),
         "a second call must not replace the provider"
     );
     // reqwest's `rustls` feature is aws-lc-rs: the default must be that provider.
     assert_eq!(
-        suite_names(&installed),
+        suite_names(installed),
         suite_names(&rustls::crypto::aws_lc_rs::default_provider())
     );
 
@@ -55,9 +53,7 @@ async fn tonic_channel_and_reqwest_share_one_crypto_provider() {
     // tonic: an eager connect is TCP, TLS and the HTTP/2 preface.
     let _channel = Endpoint::from_shared(format!("https://127.0.0.1:{port}"))
         .expect("an endpoint")
-        .tls_config(
-            ClientTlsConfig::new().ca_certificate(Certificate::from_pem(&certificate_pem)),
-        )
+        .tls_config(ClientTlsConfig::new().ca_certificate(Certificate::from_pem(&certificate_pem)))
         .expect("a TLS endpoint")
         .connect()
         .await

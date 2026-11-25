@@ -20,7 +20,10 @@ fn self_signed() -> (tokio_rustls::TlsAcceptor, CertificateDer<'static>) {
         .with_no_client_auth()
         .with_single_cert(vec![certificate.clone()], key)
         .expect("a TLS server config");
-    (tokio_rustls::TlsAcceptor::from(Arc::new(config)), certificate)
+    (
+        tokio_rustls::TlsAcceptor::from(Arc::new(config)),
+        certificate,
+    )
 }
 
 fn suite_names(provider: &CryptoProvider) -> Vec<rustls::CipherSuite> {
@@ -38,12 +41,12 @@ async fn websocket_and_reqwest_share_one_crypto_provider() {
     ensure_crypto_provider();
     let after_second_call = CryptoProvider::get_default().expect("a process-default provider");
     assert!(
-        Arc::ptr_eq(&installed, &after_second_call),
+        Arc::ptr_eq(installed, after_second_call),
         "a second call must not replace the provider"
     );
     // reqwest's `rustls` feature is aws-lc-rs: the default must be that provider.
     assert_eq!(
-        suite_names(&installed),
+        suite_names(installed),
         suite_names(&rustls::crypto::aws_lc_rs::default_provider())
     );
 
