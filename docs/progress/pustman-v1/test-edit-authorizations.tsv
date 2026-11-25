@@ -19,3 +19,4 @@ crates/workspace_store/tests/watcher_symlinked_root.rs	used	d15413a	2026-11-25	#
 crates/workspace/src/dock_header_tests.rs	open		2026-11-25	#333: drop the header switches that duplicate the icon rail ("do them all"); not used yet
 crates/pustman_actions/src/pustman_actions_tests.rs	used	S50d	2026-11-25	S50d: add exactly its four New<Kind>Request action names to EXPECTED_ACTIONS ("Authorize")
 crates/api_model/src/request_tests.rs	used	S50a	2026-11-25	S50a: unknown_request_type_roundtrips example kind websocket -> mqtt (and its websocket-only field to an mqtt-shaped one); nothing else ("Authorize")
+crates/pustman_actions/src/pustman_actions_tests.rs	open		2026-11-25	S51d: add exactly its 15 message_log::* action names to EXPECTED_ACTIONS ("Authorize")
