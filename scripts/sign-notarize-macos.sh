@@ -32,6 +32,22 @@ security import "$work/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" -T /us
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
 security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
 
+# Fail fast on the wrong certificate: notarization accepts only "Developer ID
+# Application", and an Apple Development or Apple Distribution identity is otherwise only
+# rejected by Apple after the whole build and upload. The check reads the certificate the
+# identity resolves to (by name or SHA-1) in the temporary keychain.
+identities="$(security find-identity -v -p codesigning "$keychain")"
+match="$(printf '%s\n' "$identities" | grep -F -- "$MACOS_SIGN_IDENTITY" || true)"
+if [[ -z "$match" ]]; then
+    echo "::error::MACOS_SIGN_IDENTITY matches no signing identity in the imported .p12"
+    printf '%s\n' "$identities" | sed -E 's/"[^"]*"/"<name>"/'
+    exit 1
+fi
+if ! printf '%s\n' "$match" | grep -q '"Developer ID Application: '; then
+    echo "::error::MACOS_SIGN_IDENTITY is not a Developer ID Application certificate; notarization would reject it"
+    exit 1
+fi
+
 # Hardened runtime + secure timestamp: both are required for notarization.
 codesign --force --deep --options runtime --timestamp \
     --keychain "$keychain" --sign "$MACOS_SIGN_IDENTITY" "$app"
