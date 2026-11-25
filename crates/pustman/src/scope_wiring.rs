@@ -68,14 +68,17 @@ use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use api_model::{
     Auth, Body, Environment, HttpRequest, ItemId, Request, RequestSettings, VariableKind,
 };
-use environment_picker::env_editor::write::{ValueLayer, VariableWrite, WriteScope};
+use environment_picker::env_editor::write::{
+    ValueLayer, VariableChange, VariableWrite, WriteScope,
+};
 use environment_picker::env_editor::{self, EditTarget, EnvEditorInputs};
 use environment_picker::quick_look::{self, QuickLookInputs};
 use environment_picker::secret_values::{self, SecretInputs};
 use environment_picker::selector::{self, SelectorInputs};
 use gpui::{App, Entity, EntityId, Global, Subscription, Task, WeakEntity};
 use request_editor::{
-    RequestEditor, SecretSources, VariableEdit, VariableWriter, VariableWrites, scope_kind_of,
+    EditChange, RequestEditor, SecretSources, VariableEdit, VariableWriter, VariableWrites,
+    scope_kind_of,
 };
 use secrets::{KeyringStore, SecretError, SecretKey, SecretStore, SecretValue};
 use sha2::{Digest, Sha256};
@@ -1267,14 +1270,22 @@ fn writes_for(open: &OpenScopes, request_id: ItemId, cx: &App) -> VariableWrites
             target,
             store: Arc::clone(&store),
         };
+        let change = match edit.change {
+            EditChange::Set { value, local } => VariableChange::Edit {
+                value,
+                layer: if local {
+                    ValueLayer::Local
+                } else {
+                    ValueLayer::Shared
+                },
+            },
+            EditChange::Add => VariableChange::Add {
+                value: String::new(),
+            },
+        };
         let write = VariableWrite {
             key: edit.name,
-            value: edit.value,
-            layer: if edit.local {
-                ValueLayer::Local
-            } else {
-                ValueLayer::Shared
-            },
+            change,
         };
         // Detached: the popover that asked has closed, and the write carries its own
         // report (a toast either way).

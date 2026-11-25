@@ -138,10 +138,22 @@ pub struct VariableEdit {
     /// is added to.
     pub scope: ScopeKind,
     pub name: String,
-    pub value: String,
-    /// The request resolved the value from the scope's local value, so the edit sets that
-    /// one (the shared value otherwise).
-    pub local: bool,
+    pub change: EditChange,
+}
+
+/// What one popover edit means (S48u6 fix 1): explicit, so an "Add to …" can never
+/// become an overwrite of a variable the scope already holds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EditChange {
+    /// The value field: set the resolved variable's value.
+    Set {
+        value: String,
+        /// The request resolved the value from the scope's local value, so the edit sets
+        /// that one (the shared value otherwise).
+        local: bool,
+    },
+    /// "Add to <scope>": add the undefined name, with an empty value.
+    Add,
 }
 
 /// Where the popover's edits land (S48u6): the name of each scope the request resolves
@@ -554,16 +566,17 @@ impl VariableHover {
                 }
                 VariableEdit {
                     scope,
-                    local: self.scopes.local_value(&name).is_some(),
-                    value: self.value_input.read(cx).text(),
+                    change: EditChange::Set {
+                        local: self.scopes.local_value(&name).is_some(),
+                        value: self.value_input.read(cx).text(),
+                    },
                     name,
                 }
             }
             PopoverAction::AddTo(scope) => VariableEdit {
                 scope,
                 name,
-                value: String::new(),
-                local: false,
+                change: EditChange::Add,
             },
         };
         let Some(write) = self.writes.write.clone() else {
@@ -593,6 +606,12 @@ impl VariableHover {
     /// reads it by. [`None`] while no placeholder is hovered.
     pub fn hovered(&self) -> Option<HoverDisplay> {
         self.hovered.as_ref().map(HoveredVariable::display)
+    }
+
+    /// Where the popover's edits land right now, as the app's wire installed them — what
+    /// a wiring test invokes the writer through.
+    pub fn variable_writes(&self) -> &VariableWrites {
+        &self.writes
     }
 
     /// The reveal toggle, as the keyboard reaches it: what a test (and later wiring)

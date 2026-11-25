@@ -209,3 +209,56 @@ fn test_edit_environments_closes_the_menu_for_the_editor(cx: &mut TestAppContext
         "the menu makes way for the variables editor"
     );
 }
+
+/// The environment names written under `root`'s environments folder, sorted.
+fn environment_names(root: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(root.join("environments"))
+        .expect("the environments folder exists")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| {
+            let bytes = std::fs::read(entry.path()).expect("the file reads");
+            let document: serde_json::Value =
+                serde_json::from_slice(&bytes).expect("the file is JSON");
+            document["name"]
+                .as_str()
+                .expect("an environment has a name")
+                .to_string()
+        })
+        .collect();
+    names.sort();
+    names
+}
+
+#[gpui::test]
+fn test_the_sidebar_and_the_menu_share_one_reservation_of_new_names(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let root = workspace_folder(directory.path());
+    let store = open_store(&directory.path().join("pustman.db"));
+    let inputs = SelectorInputs {
+        workspace_id: "workspace-shared-names".to_string(),
+        environments: Vec::new(),
+        active: None,
+        store,
+    };
+    let (workspace, cx) = open_menu(Some(&root), inputs, cx);
+
+    // The sidebar's "＋ New" first; the installed inputs do not list its environment
+    // yet (no workspace re-read here), so only the shared reservation can tell the
+    // menu's "＋" that "New Environment" is taken.
+    let weak = workspace.downgrade();
+    cx.update(|_window, cx| {
+        if let Some((_name, created)) = crate::environments_panel::create_environment(weak, cx) {
+            created.detach();
+        }
+    });
+    click(cx, NEW_ENVIRONMENT_BUTTON);
+
+    assert_eq!(
+        environment_names(&root),
+        vec![
+            "New Environment".to_string(),
+            "New Environment 2".to_string()
+        ],
+        "two quick creates from the sidebar and the menu get distinct names"
+    );
+}

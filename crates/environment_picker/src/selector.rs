@@ -166,7 +166,7 @@ impl EnvironmentSelector {
     /// detached — the menu closes right after — and carries its own report (a toast
     /// either way).
     fn new_environment(&self, cx: &mut App) {
-        if let Some((_name, created)) = create_environment(self.workspace.clone(), &[], cx) {
+        if let Some((_name, created)) = create_environment(self.workspace.clone(), cx) {
             created.detach();
         }
     }

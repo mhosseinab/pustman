@@ -20,8 +20,8 @@ use ui::test_support::{draw_window, init_test, press_key};
 use variables::{ScopeKind, ScopeStack};
 
 use super::{
-    PopoverAction, SecretSources, VARIABLE_HOVER_TARGET_SELECTOR, VariableEdit, VariableWrites,
-    popover_button_selector,
+    EditChange, PopoverAction, SecretSources, VARIABLE_HOVER_TARGET_SELECTOR, VariableEdit,
+    VariableWrites, popover_button_selector,
 };
 use crate::RequestEditor;
 
@@ -177,8 +177,10 @@ fn test_a_plain_value_is_edited_in_the_popover_and_saved_to_its_scope(cx: &mut T
         &[VariableEdit {
             scope: ScopeKind::Environment,
             name: String::from("base_url"),
-            value: String::from("https://api.staging.example.test/v1"),
-            local: false,
+            change: EditChange::Set {
+                value: String::from("https://api.staging.example.test/v1"),
+                local: false,
+            },
         }],
         "Enter lands the edit in the scope base_url resolves from"
     );
@@ -247,8 +249,7 @@ fn test_an_undefined_variable_is_added_to_the_active_environment(cx: &mut TestAp
         &[VariableEdit {
             scope: ScopeKind::Environment,
             name: String::from("page_size"),
-            value: String::new(),
-            local: false,
+            change: EditChange::Add,
         }],
         "Add to Development writes the variable into the environment"
     );
