@@ -182,7 +182,8 @@ pub(crate) fn client_frame(
 /// window — the drag area and the window controls.
 ///
 /// `Decision:` the menu bar draws the app's one menu model, the [`gpui::Menu`]s the app
-/// installs with [`install_app_menus`] (`cx.set_menus`, read back with `cx.get_menus`).
+/// installs with [`install_app_menus`] (`cx.set_menus`, read back once with `cx.get_menus`
+/// and cached).
 /// macOS shows that same model in its native menu bar, so the in-window bar is drawn
 /// everywhere else only. An entry is enabled when its action has a handler where the user
 /// was when the menu opened (the focused element's dispatch path, or an app-level
@@ -329,7 +330,18 @@ pub fn install_app_menus(menus: Vec<Menu>, cx: &mut App) {
         cx.bind_keys(bindings);
     }
     cx.set_menus(menus);
+    // Read back once, here: the bar draws from this copy instead of asking the platform
+    // for the model on every frame (#332).
+    let installed = cx.get_menus().unwrap_or_default();
+    cx.set_global(InstalledMenus(installed));
 }
+
+/// The app's menu model as [`install_app_menus`] last installed it: what the in-window
+/// bar draws its titles and menus from.
+#[derive(Default)]
+struct InstalledMenus(Vec<OwnedMenu>);
+
+impl Global for InstalledMenus {}
 
 /// Bind the arrows that walk the menu bar while one of its menus has the keyboard.
 pub(crate) fn init(cx: &mut App) {
@@ -381,13 +393,15 @@ pub(crate) fn switcher_label(name: &str) -> SharedString {
     SharedString::from(format!("{}…", kept.trim_end()))
 }
 
-/// The application menus the in-window bar draws; none on macOS, whose native bar shows
-/// the same model.
-fn in_window_menus(cx: &App) -> Vec<OwnedMenu> {
+/// The application menus the in-window bar draws — the model cached when it was
+/// installed; none on macOS, whose native bar shows the same model.
+fn in_window_menus(cx: &App) -> &[OwnedMenu] {
     if native_menu_bar(cx) {
-        return Vec::new();
+        return &[];
     }
-    cx.get_menus().unwrap_or_default()
+    cx.try_global::<InstalledMenus>()
+        .map(|menus| menus.0.as_slice())
+        .unwrap_or_default()
 }
 
 /// Whether `action` can run from where the user was: a handler on the focused element's
@@ -489,7 +503,11 @@ impl TitleBar {
             open: None,
             closed_by_press: None,
             // A new recent list redraws the switcher and the File › Open recent entries.
-            _subscriptions: vec![cx.observe_global::<RecentWorkspaces>(|_bar, cx| cx.notify())],
+            _subscriptions: vec![
+                cx.observe_global::<RecentWorkspaces>(|_bar, cx| cx.notify()),
+                // A reinstalled menu model redraws the titles.
+                cx.observe_global::<InstalledMenus>(|_bar, cx| cx.notify()),
+            ],
         }
     }
 
@@ -530,11 +548,11 @@ impl TitleBar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let name = in_window_menus(cx).into_iter().find_map(|menu| {
+        let name = in_window_menus(cx).iter().find_map(|menu| {
             menu.name
                 .to_lowercase()
                 .starts_with(mnemonic)
-                .then_some(menu.name)
+                .then(|| menu.name.clone())
         });
         if let Some(name) = name {
             self.open_menu(name, window, cx);
@@ -543,13 +561,14 @@ impl TitleBar {
 
     /// Open the top-level menu `name` under its title.
     fn open_menu(&mut self, name: SharedString, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(model) = in_window_menus(cx)
-            .into_iter()
+        let Some(items) = in_window_menus(cx)
+            .iter()
             .find(|menu| menu.name == name)
+            .map(|menu| menu.items.clone())
         else {
             return;
         };
-        self.show(PopoverAnchor::Menu(name), &model.items, window, cx);
+        self.show(PopoverAnchor::Menu(name), &items, window, cx);
     }
 
     /// Replace the open menu with one of its submenus, in place (File › Open recent).
@@ -735,8 +754,8 @@ impl TitleBar {
             return;
         };
         let names: Vec<SharedString> = in_window_menus(cx)
-            .into_iter()
-            .map(|menu| menu.name)
+            .iter()
+            .map(|menu| menu.name.clone())
             .collect();
         let Some(index) = names.iter().position(|name| *name == current) else {
             return;
@@ -1015,8 +1034,8 @@ impl Render for TitleBar {
             "Maximize"
         };
         let menu_names: Vec<SharedString> = in_window_menus(cx)
-            .into_iter()
-            .map(|menu| menu.name)
+            .iter()
+            .map(|menu| menu.name.clone())
             .collect();
 
         let bar = h_flex()
@@ -1129,3 +1148,7 @@ mod menu_tests;
 #[cfg(test)]
 #[path = "title_bar_focus_tests.rs"]
 mod focus_tests;
+
+#[cfg(test)]
+#[path = "title_bar_installed_menus_tests.rs"]
+mod installed_menus_tests;
