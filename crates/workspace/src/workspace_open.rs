@@ -59,6 +59,7 @@ use ui::prelude::*;
 use workspace_store::{FORMAT_VERSION, Item, ItemBody, OpenError, WorkspaceSnapshot};
 
 use crate::Workspace;
+use crate::recent_workspaces::{decode_recent_path, encode_recent_path};
 
 #[cfg(test)]
 #[path = "workspace_open_tests.rs"]
@@ -761,7 +762,7 @@ fn record_recent(root: &Path, store: Option<&Mutex<LocalStore>>) -> bool {
         return true;
     };
     let recent = RecentWorkspace {
-        path: root.to_string_lossy().into_owned(),
+        path: encode_recent_path(root),
         opened_at: OffsetDateTime::now_utc(),
     };
     match store.lock() {
@@ -779,7 +780,7 @@ fn read_most_recent(store: &Mutex<LocalStore>) -> Result<Option<PathBuf>, Recent
     Ok(recents
         .into_iter()
         .next()
-        .map(|recent| PathBuf::from(recent.path)))
+        .map(|recent| decode_recent_path(&recent.path)))
 }
 
 /// The name a created workspace takes: its folder's name (the module docs).

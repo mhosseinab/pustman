@@ -43,8 +43,7 @@ pub fn app_menus(recents: &[RecentEntry]) -> Vec<Menu> {
                 Some(path) => format!("{} — {path}", recent.name),
                 None => recent.name.clone(),
             };
-            let path = recent.path.to_string_lossy().into_owned();
-            MenuItem::action(label, OpenRecentWorkspace { path })
+            MenuItem::action(label, OpenRecentWorkspace::for_folder(&recent.path))
         })
         .collect();
     if !open_recent.is_empty() {

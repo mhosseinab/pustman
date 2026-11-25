@@ -18,8 +18,12 @@
 //! a readable name falls back to the folder's name. A newer refresh replaces — cancels —
 //! an older one still in flight, so a slow read can never install a stale list.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 
 use gpui::{App, BorrowAppContext, Global, SharedString, Subscription, Task};
 use storage::LocalStore;
@@ -43,9 +47,72 @@ use gpui::private::schemars;
 #[derive(Clone, PartialEq, Eq, Debug, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
 #[action(namespace = workspace)]
 pub struct OpenRecentWorkspace {
-    /// The workspace folder to open.
+    /// The workspace folder to open, in [`encode_recent_path`]'s lossless form.
     #[serde(default)]
     pub path: String,
+}
+
+impl OpenRecentWorkspace {
+    /// The action that opens `folder` — any folder name the platform allows, UTF-8 or
+    /// not (#332).
+    pub fn for_folder(folder: &Path) -> Self {
+        Self {
+            path: encode_recent_path(folder),
+        }
+    }
+
+    /// The folder this action opens, exactly as it was recorded.
+    pub fn folder(&self) -> PathBuf {
+        decode_recent_path(&self.path)
+    }
+}
+
+/// What marks a path [`encode_recent_path`] stored as base64 bytes. No absolute path
+/// starts with it, and a path that does is encoded too, so decoding is never ambiguous.
+const ENCODED_PATH_PREFIX: &str = "base64:";
+
+/// `path` as the text the recent list stores and its menu actions carry (#332): a UTF-8
+/// path as itself — every row recorded before stays readable — and any other path (a
+/// non-UTF-8 folder name on Linux) as base64 of its bytes, so it reopens exactly instead
+/// of as a lossy look-alike that does not exist.
+pub fn encode_recent_path(path: &Path) -> String {
+    match path.to_str() {
+        Some(text) if !text.starts_with(ENCODED_PATH_PREFIX) => text.to_owned(),
+        _ => format!("{ENCODED_PATH_PREFIX}{}", STANDARD.encode(path_bytes(path))),
+    }
+}
+
+/// The path [`encode_recent_path`] stored as `text`. Text that is not an encoded path
+/// is a plain path.
+pub fn decode_recent_path(text: &str) -> PathBuf {
+    text.strip_prefix(ENCODED_PATH_PREFIX)
+        .and_then(|encoded| STANDARD.decode(encoded).ok())
+        .map(path_from_bytes)
+        .unwrap_or_else(|| PathBuf::from(text))
+}
+
+#[cfg(unix)]
+fn path_bytes(path: &Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+    path.as_os_str().as_bytes().to_vec()
+}
+
+#[cfg(unix)]
+fn path_from_bytes(bytes: Vec<u8>) -> PathBuf {
+    use std::os::unix::ffi::OsStringExt;
+    PathBuf::from(OsString::from_vec(bytes))
+}
+
+/// Off Unix a path's bytes have no safe, stable form, and a non-Unicode path there is
+/// carried as its lossy text: the one platform where such names are common is Linux.
+#[cfg(not(unix))]
+fn path_bytes(path: &Path) -> Vec<u8> {
+    path.to_string_lossy().into_owned().into_bytes()
+}
+
+#[cfg(not(unix))]
+fn path_from_bytes(bytes: Vec<u8>) -> PathBuf {
+    PathBuf::from(OsString::from(String::from_utf8_lossy(&bytes).into_owned()))
 }
 
 /// One recent workspace: its folder and the name its `pustman.json` gives it.
@@ -186,7 +253,7 @@ fn read_existing_workspaces(store: &Arc<Mutex<LocalStore>>) -> Option<Vec<Recent
             .list()
             .ok()?
             .into_iter()
-            .map(|recent| PathBuf::from(recent.path))
+            .map(|recent| decode_recent_path(&recent.path))
             .collect()
     };
     Some(
@@ -226,10 +293,14 @@ fn workspace_name(folder: &Path) -> String {
 
 /// The [`OpenRecentWorkspace`] answer in the active window.
 fn open_recent_workspace(action: &OpenRecentWorkspace, cx: &mut App) {
-    let folder = PathBuf::from(&action.path);
+    let folder = action.folder();
     with_active_opener(cx, move |opener, cx| opener.open_folder(folder, cx));
 }
 
 #[cfg(test)]
 #[path = "recent_single_source_tests.rs"]
 mod single_source_tests;
+
+#[cfg(all(test, unix))]
+#[path = "recent_non_utf8_tests.rs"]
+mod non_utf8_tests;

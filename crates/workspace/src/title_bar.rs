@@ -666,9 +666,7 @@ impl TitleBar {
         let menu = cx.new(|cx| {
             let mut menu = ContextMenu::new(cx);
             for (index, recent) in recents.iter().enumerate() {
-                let action = OpenRecentWorkspace {
-                    path: recent.path.to_string_lossy().into_owned(),
-                };
+                let action = OpenRecentWorkspace::for_folder(&recent.path);
                 let target = restore_focus.clone();
                 menu = menu.entry(recent.name.clone(), move |_event, window, cx| {
                     run_from(&target, Box::new(action.clone()), window, cx);
