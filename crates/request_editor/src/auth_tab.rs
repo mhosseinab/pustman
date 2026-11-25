@@ -76,6 +76,15 @@ const FORM_MAX_WIDTH_REMS: f32 = 40.;
 /// Test hook: the inherited-source line under the type picker.
 pub const INHERITED_SOURCE_SELECTOR: &str = "auth-inherited-source";
 
+/// Test hook: the help column on the left of the tab (mockup section 8).
+pub const AUTH_HELP_SELECTOR: &str = "auth-help";
+
+/// The help column's width in pixels at the default scale (the mockup's 300 px).
+const HELP_COLUMN_WIDTH_PX: f32 = 280.;
+
+/// The sentence every help paragraph ends with: where secret values live.
+const KEYCHAIN_NOTE: &str = "Use a secret variable such as {{api_key}} for credentials: secret values are kept in your OS keychain, never in the workspace files.";
+
 /// Test hook: the REQ-VAR-SHARE-03 hint under the type's fields.
 pub const SECRET_HINT_SELECTOR: &str = "auth-secret-hint";
 
@@ -674,23 +683,8 @@ impl AuthTab {
     /// The active type's form rows under the type row: a note in the control column
     /// for a type with nothing to edit, otherwise one row per field.
     fn render_type_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let note = |text: &'static str| {
-            vec![form_row(
-                None,
-                muted_note(text).into_any_element(),
-                None,
-                cx,
-            )]
-        };
         match self.auth_type {
-            AuthType::Inherit => note(
-                "This request uses the auth its folder or collection sets — the source \
-                 is named above.",
-            ),
-            AuthType::None => note(
-                "This request is sent without credentials: no Authorization header is \
-                 added to the send.",
-            ),
+            AuthType::Inherit | AuthType::None | AuthType::Unsupported => Vec::new(),
             AuthType::Basic => vec![
                 self.render_field("username", "Username", &self.basic_username_input, cx),
                 self.render_field("password", "Password", &self.basic_password_input, cx),
@@ -708,11 +702,57 @@ impl AuthTab {
                     cx,
                 ),
             ],
-            AuthType::Unsupported => note(
-                "This auth uses a type Pustman does not edit yet (for example Digest or \
-                 OAuth 2.0). It is kept exactly as imported until you choose a type above.",
-            ),
         }
+    }
+
+    /// What the chosen type does on send — the help column's first paragraph.
+    fn type_help(&self) -> &'static str {
+        match self.auth_type {
+            AuthType::Inherit => {
+                "This request uses the auth its folder or collection sets — the source \
+                 is named under the type."
+            }
+            AuthType::None => {
+                "This request is sent without credentials: no Authorization header is \
+                 added to the send."
+            }
+            AuthType::Basic => {
+                "Pustman adds a Basic Authorization header built from the username and \
+                 password when you send the request."
+            }
+            AuthType::Bearer => {
+                "Pustman adds an Authorization: Bearer header with the token when you \
+                 send the request."
+            }
+            AuthType::ApiKey => {
+                "Pustman adds the key to the header or query parameter you choose when \
+                 you send the request."
+            }
+            AuthType::Unsupported => {
+                "This auth uses a type Pustman does not edit yet (for example Digest or \
+                 OAuth 2.0). It is kept exactly as imported until you choose a type."
+            }
+        }
+    }
+
+    /// The help column's text, as it reads — what a test checks.
+    pub fn help_text(&self) -> String {
+        format!("{} {KEYCHAIN_NOTE}", self.type_help())
+    }
+
+    /// The left column: how the chosen type is sent, and where secret values live.
+    fn render_help(&self, cx: &App) -> AnyElement {
+        v_flex()
+            .debug_selector(|| AUTH_HELP_SELECTOR.to_string())
+            .flex_none()
+            .w(px_to_rems(HELP_COLUMN_WIDTH_PX))
+            .p(DynamicSpacing::Base08.rems(cx))
+            .gap(DynamicSpacing::Base04.rems(cx))
+            .border_r_1()
+            .border_color(cx.theme().colors().border_variant)
+            .child(muted_note(self.type_help()))
+            .child(muted_note(KEYCHAIN_NOTE))
+            .into_any_element()
     }
 
     /// One labelled field: its name in the name column, its framed input in the
@@ -769,7 +809,7 @@ impl AuthTab {
 impl Render for AuthTab {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let type_row = form_row(
-            Some(("type", "Type")),
+            Some(("type", "Auth type")),
             self.render_type_control(cx),
             // Only Inherit takes its auth from a parent; for any other type the
             // source line would name a chain the send never reads.
@@ -785,6 +825,9 @@ impl Render for AuthTab {
             )
         });
         let rows = self.render_type_rows(cx);
+        // Two columns (mockup section 8): the help on the left, the label/field grid on
+        // the right. `Decision:` the type picker stays the grid's first row, not the
+        // left column — every row of the tab shares one name and one control column.
         v_flex()
             .id(ElementId::Name(SharedString::new_static("auth-tab")))
             .size_full()
@@ -792,15 +835,27 @@ impl Render for AuthTab {
             .min_h_0()
             .min_w_0()
             .overflow_y_scroll()
+            .py(DynamicSpacing::Base06.rems(cx))
             .child(
-                v_flex()
+                h_flex()
+                    .items_start()
                     .w_full()
-                    .max_w(rems(FORM_MAX_WIDTH_REMS))
-                    .gap(DynamicSpacing::Base06.rems(cx))
-                    .py(DynamicSpacing::Base06.rems(cx))
-                    .child(type_row)
-                    .children(rows)
-                    .children(hint),
+                    .max_w(rems(FORM_MAX_WIDTH_REMS) + px_to_rems(HELP_COLUMN_WIDTH_PX))
+                    .border_1()
+                    .border_color(cx.theme().colors().border_variant)
+                    .rounded_md()
+                    .bg(cx.theme().colors().surface_background)
+                    .child(self.render_help(cx))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .p(DynamicSpacing::Base08.rems(cx))
+                            .gap(DynamicSpacing::Base06.rems(cx))
+                            .child(type_row)
+                            .children(rows)
+                            .children(hint),
+                    ),
             )
     }
 }
@@ -925,6 +980,10 @@ fn literal_between(text: &str, start: usize, end: usize) -> bool {
 #[cfg(test)]
 #[path = "auth_tab_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "auth_tab_columns_tests.rs"]
+mod columns_tests;
 
 #[cfg(test)]
 #[path = "auth_tab_layout_tests.rs"]
