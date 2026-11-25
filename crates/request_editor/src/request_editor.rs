@@ -658,6 +658,11 @@ impl Render for RequestEditor {
             // The request tab strip over the tab content: the selection decides which
             // tab's content shows below.
             .child(self.render_tab_strip(cx))
+            // Where each `{{variable}}` resolves from (`variable_line`), between the strip
+            // and the tab's table: always on screen, never under a tall table.
+            .when(self.active_tab != SETTINGS_TAB_INDEX, |this| {
+                this.children(self.render_variable_line(cx))
+            })
             .child(
                 v_flex()
                     .debug_selector(|| REQUEST_TAB_CONTENT_SELECTOR.to_owned())
@@ -672,18 +677,14 @@ impl Render for RequestEditor {
                         if let Some(compare) = self.render_compare(cx) {
                             this.child(compare)
                         } else {
-                            let this = match self.active_tab {
-                                HEADERS_TAB_INDEX => this.child(self.headers.clone()),
-                                BODY_TAB_INDEX => this.child(self.body_tab.clone()),
-                                AUTH_TAB_INDEX => this.child(self.auth_tab.clone()),
-                                SETTINGS_TAB_INDEX => this.child(self.settings_tab.clone()),
-                                _ => this.child(self.params.clone()),
+                            let tab: gpui::AnyView = match self.active_tab {
+                                HEADERS_TAB_INDEX => self.headers.clone().into(),
+                                BODY_TAB_INDEX => self.body_tab.clone().into(),
+                                AUTH_TAB_INDEX => self.auth_tab.clone().into(),
+                                SETTINGS_TAB_INDEX => self.settings_tab.clone().into(),
+                                _ => self.params.clone().into(),
                             };
-                            // Under the active table: where each variable resolves
-                            // from (`variable_line`). Settings uses none.
-                            this.when(self.active_tab != SETTINGS_TAB_INDEX, |this| {
-                                this.children(self.render_variable_line(cx))
-                            })
+                            this.child(tab)
                         }
                     }),
             )

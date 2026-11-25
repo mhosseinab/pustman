@@ -17,8 +17,9 @@ pub(crate) const SPLIT_HANDLE_SELECTOR: &str = "response-split-handle";
 /// Test hook: the 1 px line drawn inside the handle.
 pub(crate) const SPLIT_LINE_SELECTOR: &str = "response-split-line";
 
-/// The share of the split the request pane opens at.
-pub(crate) const DEFAULT_SPLIT_FRACTION: f32 = 0.5;
+/// The share of the split the request pane opens at: more than half, so the breadcrumb,
+/// URL row, tabs, variable line and a short table fit above the response (S48u4).
+pub(crate) const DEFAULT_SPLIT_FRACTION: f32 = 0.6;
 
 /// The smallest share either pane may take: clamping into this range is what keeps a
 /// drag or a key press from collapsing one pane below a usable minimum.
