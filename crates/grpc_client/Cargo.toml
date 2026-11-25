@@ -1,0 +1,33 @@
+# `grpc_client` — gRPC calls from runtime-compiled descriptors (PRD §5.6): `protox`
+# parses .proto files, `prost-reflect` encodes dynamic messages, `tonic` carries them.
+# A domain crate: no GPUI views, no build.rs, no protoc. TLS is rustls with the crypto
+# provider reqwest uses (`tls_provider::ensure_crypto_provider`).
+
+[package]
+name = "grpc_client"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/grpc_client.rs"
+
+[dependencies]
+log.workspace = true
+prost.workspace = true
+prost-reflect.workspace = true
+prost-types.workspace = true
+protox.workspace = true
+rustls.workspace = true
+tonic.workspace = true
+tonic-reflection.workspace = true
+tonic-types.workspace = true
+
+[dev-dependencies]
+rcgen.workspace = true
+# `http2`: the test server is tonic's, which offers only `h2` in ALPN.
+reqwest = { workspace = true, features = ["http2"] }
+tokio.workspace = true
