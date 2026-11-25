@@ -146,6 +146,28 @@ fn request_variable_names(draft: &HttpRequest) -> Vec<String> {
         Auth::ApiKey { key, value, .. } => {
             templates.extend(key.as_deref().into_iter().chain(value.as_deref()))
         }
+        Auth::Digest(digest) => templates.extend([digest.username.as_str(), &digest.password]),
+        Auth::OAuth2(oauth2) => {
+            templates.extend([
+                oauth2.token_url.as_str(),
+                &oauth2.client_id,
+                &oauth2.client_secret,
+                &oauth2.scope,
+            ]);
+            if let api_model::OAuth2Grant::Password { username, password } = &oauth2.grant {
+                templates.extend([username.as_str(), password]);
+            }
+        }
+        Auth::AwsSigV4(aws) => {
+            templates.extend([
+                aws.access_key.as_str(),
+                &aws.secret_key,
+                &aws.region,
+                &aws.service,
+            ]);
+            templates.extend(aws.session_token.as_deref());
+        }
+        Auth::JwtBearer(jwt) => templates.extend([jwt.secret_or_key.as_str(), &jwt.payload]),
         Auth::Inherit | Auth::None | Auth::Unsupported(_) => {}
     }
     if let Body::Raw { text, .. } = &draft.body {

@@ -109,6 +109,10 @@ mod tests;
 #[path = "graphql_io_tests.rs"]
 mod graphql_io_tests;
 
+#[cfg(test)]
+#[path = "import_extended_auth_tests.rs"]
+mod extended_auth_tests;
+
 /// The directory top-level collections live in (REQ-WSP-01), the same one the CRUD
 /// creates use.
 const COLLECTIONS_DIR: &str = "collections";
@@ -793,8 +797,15 @@ fn harden_auth(auth: &mut Auth, label: &str, problems: &mut Vec<ImportProblem>) 
             strip_extra(extra, label, problems);
         }
         // A preserved auth has no modelled fields to override, and its shape is never
-        // the file's to change either.
-        Auth::Inherit | Auth::None | Auth::Unsupported(_) => {}
+        // the file's to change either. The extended kinds' `extra` can never shadow a
+        // typed field: `api_model` drops such a key when it writes the auth.
+        Auth::Digest(_)
+        | Auth::OAuth2(_)
+        | Auth::AwsSigV4(_)
+        | Auth::JwtBearer(_)
+        | Auth::Inherit
+        | Auth::None
+        | Auth::Unsupported(_) => {}
     }
 }
 
@@ -918,6 +929,16 @@ fn auth_carries_credential(auth: &Auth) -> bool {
         Auth::Basic { password, .. } => literal_opt(password),
         Auth::Bearer { token, .. } => literal_opt(token),
         Auth::ApiKey { value, .. } => literal_opt(value),
+        // `api_model`'s one list: typed secrets and the unmodelled fields Postman fills.
+        // OAuth 2.0 parameter rows are judged by name, like any other row.
+        Auth::Digest(_) | Auth::OAuth2(_) | Auth::AwsSigV4(_) | Auth::JwtBearer(_) => {
+            auth.extended_credentials()
+                .is_some_and(|values| values.iter().any(|value| literal(value)))
+                || auth
+                    .extended_parameter_rows()
+                    .iter()
+                    .any(|(key, value)| row_carries_credential(key, value))
+        }
         // Preserved verbatim: whatever the file held is still in there.
         Auth::Unsupported(raw) => raw_auth_carries_credential(raw),
         Auth::Inherit | Auth::None => false,
@@ -940,7 +961,7 @@ fn raw_auth_carries_credential(value: &Value) -> bool {
 
 /// Whether a key/value row carries a literal credential — one implementation for the
 /// typed tables' rows and a preserved `{key, value}` pair (fix 3).
-fn row_carries_credential(key: &str, value: &Option<String>) -> bool {
+pub(crate) fn row_carries_credential(key: &str, value: &Option<String>) -> bool {
     let name = key.trim().to_ascii_lowercase();
     (CREDENTIAL_KEYS.contains(&name.as_str()) || CREDENTIAL_HEADERS.contains(&name.as_str()))
         && literal_opt(value)

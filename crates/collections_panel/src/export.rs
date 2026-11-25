@@ -374,6 +374,16 @@ fn scan_literal_auth(name: &str, auth: &Auth, carrying: &mut Vec<String>) {
         Auth::Basic { password, .. } => is_literal_credential(password),
         Auth::Bearer { token, .. } => is_literal_credential(token),
         Auth::ApiKey { value, .. } => is_literal_credential(value),
+        // `api_model`'s one list: the export writes the unmodelled fields back verbatim.
+        // OAuth 2.0 parameter rows are judged by name, with the import's row check.
+        Auth::Digest(_) | Auth::OAuth2(_) | Auth::AwsSigV4(_) | Auth::JwtBearer(_) => {
+            auth.extended_credentials()
+                .is_some_and(|values| values.iter().any(|value| is_literal_text(value)))
+                || auth
+                    .extended_parameter_rows()
+                    .iter()
+                    .any(|(key, value)| crate::import::row_carries_credential(key, value))
+        }
         Auth::Inherit | Auth::None | Auth::Unsupported(_) => false,
     };
     if literal {
@@ -390,9 +400,12 @@ fn note_literal_credential(carrying: &mut Vec<String>, name: &str) {
 
 /// A credential value typed literally: present, non-empty and not a `{{…}}` reference.
 fn is_literal_credential(value: &Option<String>) -> bool {
-    value
-        .as_deref()
-        .is_some_and(|value| !value.is_empty() && !value.contains("{{"))
+    value.as_deref().is_some_and(is_literal_text)
+}
+
+/// [`is_literal_credential`] for the credentials the model keeps as plain text.
+fn is_literal_text(value: &str) -> bool {
+    !value.is_empty() && !value.contains("{{")
 }
 
 /// An `Authorization` or `Cookie` header carrying a literal credential value.
@@ -452,3 +465,7 @@ fn report_to_user(
 #[cfg(test)]
 #[path = "export_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "export_extended_auth_tests.rs"]
+mod extended_auth_tests;

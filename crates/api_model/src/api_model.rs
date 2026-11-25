@@ -6,6 +6,7 @@
 //! as `Unsupported(serde_json::Value)` so an export never drops what an import brought in.
 
 mod auth;
+mod auth_extended;
 mod collection;
 mod curl;
 mod environment;
@@ -21,6 +22,10 @@ mod settings;
 mod variable;
 
 pub use auth::{ApiKeyLocation, Auth, AuthSource, EffectiveAuth, effective_auth};
+pub use auth_extended::{
+    AwsSigV4Auth, ClientAuthentication, DigestAlgorithm, DigestAuth, JwtAlgorithm, JwtBearerAuth,
+    OAuth2Auth, OAuth2Grant,
+};
 pub use collection::{Child, Collection, Folder, Workspace};
 pub use curl::{CurlError, parse_curl, to_curl};
 pub use environment::Environment;

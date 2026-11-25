@@ -419,7 +419,12 @@ impl AuthTab {
                 fill(&self.api_key_name_input, key.as_deref(), cx);
                 fill(&self.api_key_value_input, value.as_deref(), cx);
             }
-            Auth::Unsupported(_) => {
+            // No editor for these kinds yet: shown read-only and kept as they are.
+            Auth::Digest(_)
+            | Auth::OAuth2(_)
+            | Auth::AwsSigV4(_)
+            | Auth::JwtBearer(_)
+            | Auth::Unsupported(_) => {
                 self.auth_type = AuthType::Unsupported;
                 self.unsupported = Some(auth.clone());
             }

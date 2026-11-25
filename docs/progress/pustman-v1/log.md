@@ -371,3 +371,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — S51c UI review PASS_WITH_ISSUES with 4 MEDIUM (key bubbling from buttons, unbounded full-payload read, huge single lines shaped per frame, needless row-list copies) → fix cycle; LOWs filed.
 - 2026-11-25 — S52a re-review CHANGES_REQUESTED: history must keep masking Digest/OAuth2 usernames and AWS access_key (Basic rule) → fix 2, with the Digest/OAuth2 harmless-key lists corrected to stop false credential warnings.
 - 2026-11-25 — S51c merged (message log view; UI fix 1; VERIFY OK; LOW #346).
+- 2026-11-25 — S52a merged (auth kinds model; high-stakes; security fix 2 + re-review; VERIFY OK; LOW #345).

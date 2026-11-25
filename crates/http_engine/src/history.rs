@@ -45,6 +45,10 @@ mod redaction_tests;
 #[path = "history_window_tests.rs"]
 mod window_tests;
 
+#[cfg(test)]
+#[path = "history_extended_auth_tests.rs"]
+mod extended_auth_tests;
+
 /// How much of a response body one history row keeps (REQ-HIST-02's default). Making it
 /// configurable — and `0` disabling storage — is settings work (S16b), not this step.
 pub const HISTORY_BODY_LIMIT: usize = 1024 * 1024;
@@ -442,6 +446,29 @@ fn redact_auth(kind: &Auth, node: &mut Value, secrets: &SecretValues) {
         Auth::Basic { .. } => &["username", "password"],
         Auth::Bearer { .. } => &["token"],
         Auth::ApiKey { .. } => &["value"],
+        // Postman keeps credentials in fields these kinds do not model, so the node is
+        // rebuilt from the auth with every credential `api_model` knows of masked —
+        // typed secrets and the unmodelled `extra` alike.
+        Auth::Digest(_) | Auth::OAuth2(_) | Auth::AwsSigV4(_) | Auth::JwtBearer(_) => {
+            let mut masked = kind.clone();
+            let mask = |text: &mut String| {
+                if !is_one_reference(text) {
+                    *text = shared_mask();
+                }
+            };
+            masked.visit_extended_credentials(mask);
+            // The identity too, as for Basic's username.
+            masked.visit_history_identities(mask);
+            match serde_json::to_value(&masked) {
+                Ok(value) => {
+                    *node = value;
+                    redact_leaves(node, secrets);
+                }
+                // Handled: an auth that cannot be rebuilt is masked whole, never kept.
+                Err(_) => mask_credential(node),
+            }
+            return;
+        }
         Auth::Unsupported(_) => {
             mask_credential(node);
             return;
