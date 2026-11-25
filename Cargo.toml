@@ -102,9 +102,7 @@ http-auth = { version = "0.1.10", default-features = false, features = ["digest-
 jsonwebtoken = { version = "12.0.0", features = ["aws_lc_rs"] }
 # PFX/PKCS#12 → PEM: reqwest's rustls backend takes PEM identities only.
 p12-keystore = "0.4.1"
-# WebSocket and Socket.IO (M4). `socketio-next` speaks Engine.IO 4 / Socket.IO protocol 5
-# (socket.io v3 and v4 servers) and takes our own rustls `ClientConfig`.
-socketio-next = { version = "0.2.1", default-features = false, features = ["rustls"] }
+# WebSocket (M4). The Socket.IO client is chosen in S62a.
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] }
 # gRPC (M5): descriptors compiled at runtime by `protox`, messages handled as
 # `prost-reflect` dynamic messages (proto3 JSON through `serde`). No build.rs, no protoc.
@@ -126,8 +124,6 @@ hyper = { version = "1.12.0", features = ["server", "http1"] }
 hyper-util = "0.1.21"
 pretty_assertions = "1.4.1"
 rcgen = "0.14.10"
-# The in-process Socket.IO server the M4 tests talk to.
-socketioxide = "0.18.9"
 rustls = "0.23.46"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net"] }
 tokio-rustls = "0.26.6"

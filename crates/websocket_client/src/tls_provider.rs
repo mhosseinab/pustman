@@ -1,9 +1,10 @@
 //! One rustls crypto provider for the whole process.
 //!
-//! reqwest's `rustls` feature uses aws-lc-rs, while `socketio-next` turns on rustls'
-//! `ring` feature. With both compiled in, rustls cannot pick a process default on its own
-//! and `rustls::ClientConfig::builder()` panics, so every session installs aws-lc-rs —
-//! the provider reqwest uses — before it builds a TLS config.
+//! reqwest's `rustls` feature uses aws-lc-rs. rustls picks a process default from its
+//! crate features only while exactly one provider is compiled in; once any dependency
+//! adds a second (rustls' `ring` feature), `rustls::ClientConfig::builder()` panics. So
+//! every session installs aws-lc-rs — the provider reqwest uses — before it builds a TLS
+//! config, instead of relying on feature selection.
 
 use std::sync::Once;
 

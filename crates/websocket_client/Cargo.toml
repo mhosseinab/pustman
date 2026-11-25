@@ -17,13 +17,11 @@ path = "src/websocket_client.rs"
 [dependencies]
 log.workspace = true
 rustls.workspace = true
-socketio-next.workspace = true
 tokio-tungstenite.workspace = true
 
 [dev-dependencies]
 futures.workspace = true
 rcgen.workspace = true
 reqwest.workspace = true
-socketioxide.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
 tokio-rustls.workspace = true
