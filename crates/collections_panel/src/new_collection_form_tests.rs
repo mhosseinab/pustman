@@ -249,3 +249,34 @@ fn new_collection_without_workspace_offers_workspace_actions(cx: &mut TestAppCon
         "New workspace… opens the New Workspace form"
     );
 }
+
+#[gpui::test]
+fn two_queued_creates_with_one_name_never_make_two_same_named_collections(cx: &mut TestAppContext) {
+    let folder = seed_workspace();
+    let snapshot = workspace_store::open(folder.path()).expect("the seeded workspace opens");
+    let (_workspace, tree, cx) = open_tree(snapshot, cx);
+
+    // Two forms submitted back to back: both saw the same snapshot, neither write has
+    // landed when the second is queued.
+    cx.update(|window, cx| {
+        tree.update(cx, |tree, cx| {
+            tree.create_collection(String::from("Orders"), None, window, cx);
+            tree.create_collection(String::from("Orders"), None, window, cx);
+        });
+    });
+    cx.run_until_parked();
+
+    let written = workspace_store::open(folder.path()).expect("the workspace still opens");
+    let mut names: Vec<String> = written
+        .items
+        .values()
+        .filter(|item| matches!(item.body, ItemBody::Collection(_)))
+        .map(Item::name)
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        vec!["Orders", "Orders (2)", "Users API"],
+        "the second create is numbered against what the first wrote"
+    );
+}

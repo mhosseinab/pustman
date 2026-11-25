@@ -213,7 +213,9 @@ impl NewCollectionForm {
             cx.notify();
             return;
         }
-        let name = self.saved_name(cx);
+        // The typed name: the queued write numbers it against the disk as it is then
+        // (`CollectionsTree::create_collection`), which is what `saved_name` previews.
+        let name = self.name_text(cx);
         let description = self.description.read(cx).text();
         let description = (!description.trim().is_empty()).then_some(description);
         if self
@@ -450,7 +452,7 @@ impl ModalView for NoWorkspaceModal {}
 
 /// `name`, or `name (n)` with the first `n` from 2 that no name in `existing` has.
 /// Compared case-insensitively: "orders" and "Orders" read as the same collection.
-fn unique_name(name: &str, existing: &[String]) -> String {
+pub(crate) fn unique_name(name: &str, existing: &[String]) -> String {
     let taken = |candidate: &str| {
         existing
             .iter()

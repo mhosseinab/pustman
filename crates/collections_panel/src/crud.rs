@@ -473,7 +473,9 @@ impl CollectionsTree {
     /// Create the collection the New Collection form describes at the workspace root:
     /// the file goes in `collections/` (REQ-WSP-01) and there is no parent's `order` to
     /// update. It goes through the tree's one write queue, and its row is selected once
-    /// it lands.
+    /// it lands. A `name` a sibling already has is numbered ("Orders (2)") inside the
+    /// queued write, against the workspace as the disk holds it then — so two creates
+    /// queued back to back never produce two collections with one name.
     pub(crate) fn create_collection(
         &mut self,
         name: String,
@@ -485,10 +487,10 @@ impl CollectionsTree {
             return;
         };
         let id = ItemId::new();
-        let item = Item {
+        let mut item = Item {
             body: ItemBody::Collection(Collection {
                 id,
-                name,
+                name: name.clone(),
                 description,
                 auth: Auth::Inherit,
                 variables: Vec::new(),
@@ -499,8 +501,14 @@ impl CollectionsTree {
             dir: PathBuf::from(COLLECTIONS_DIR),
             path: None,
         };
-        let name = item.name();
         self.queue_write(None, Some(id), window, cx, move || {
+            let taken = workspace_store::open(&root)
+                .map(|snapshot| collection_names(&snapshot))
+                .unwrap_or_default();
+            let name = crate::new_collection_form::unique_name(&name, &taken);
+            if let ItemBody::Collection(collection) = &mut item.body {
+                collection.name = name.clone();
+            }
             let failure = match workspace_store::save_item(&root, &item) {
                 Ok(_) => None,
                 Err(error) => Some(format!(
@@ -514,12 +522,7 @@ impl CollectionsTree {
     /// The names of the collections at the workspace root — what a new collection's
     /// name is checked against.
     pub(crate) fn collection_names(&self) -> Vec<String> {
-        self.snapshot
-            .items
-            .values()
-            .filter(|item| matches!(item.body, ItemBody::Collection(_)))
-            .map(Item::name)
-            .collect()
+        collection_names(&self.snapshot)
     }
 
     /// Put the selection on `id`'s row, if the tree draws it.
@@ -1013,6 +1016,16 @@ impl CollectionsTree {
             }
         }));
     }
+}
+
+/// The names of the collections at `snapshot`'s root.
+fn collection_names(snapshot: &WorkspaceSnapshot) -> Vec<String> {
+    snapshot
+        .items
+        .values()
+        .filter(|item| matches!(item.body, ItemBody::Collection(_)))
+        .map(Item::name)
+        .collect()
 }
 
 /// What a background write reports back: the workspace as it now stands on disk, and
