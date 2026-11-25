@@ -22,11 +22,15 @@ mod json_copy;
 mod json_syntax;
 mod large_body;
 pub mod log_toolbar;
+// Named apart from `log_toolbar::` so the step's Verify filter counts only its own tests.
 pub mod pretty;
 mod preview;
 mod request_as_sent;
 mod save_body;
 pub mod session_log;
+#[cfg(test)]
+#[path = "log_toolbar_review_tests.rs"]
+mod toolbar_review_tests;
 // Named apart from `session_log::` so the step's Verify filter counts only its own tests.
 #[cfg(test)]
 mod session_log_keys_tests;

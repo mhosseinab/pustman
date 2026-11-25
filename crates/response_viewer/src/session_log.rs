@@ -374,7 +374,7 @@ impl SessionLog {
             time_mode: TimeMode::Absolute,
             expanded: BTreeMap::new(),
             selected: None,
-            toolbar: ToolbarState::default(),
+            toolbar: ToolbarState::new(cx),
             origin: None,
             origin_scanned: 0,
             seen_len: 0,
@@ -389,6 +389,18 @@ impl SessionLog {
         log.scan_origin(cx);
         log.seen_len = len;
         log.seen_rows = rows;
+        log
+    }
+
+    /// [`Self::new`] with the toolbar's search field, which needs a window. Hosts build
+    /// the log with this; `new` is the windowless log without a search field.
+    pub fn new_in(
+        store: Entity<SessionStore>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut log = Self::new(store, cx);
+        log.mount_search(window, cx);
         log
     }
 
@@ -719,7 +731,6 @@ impl Focusable for SessionLog {
 
 impl Render for SessionLog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.ensure_toolbar(window, cx);
         let header = self.render_header(cx);
         let root = Self::register_toolbar_actions(v_flex().id(child_id(&self.base, "root")), cx);
         let store = self.store.read(cx);
@@ -1309,8 +1320,6 @@ fn text_lines(text: &str) -> DetailBody {
     DetailBody::Lines(Arc::new(text.lines().map(cut_line).collect()))
 }
 
-/// `line`, cut at [`LINE_CHARS`] with a note of how many characters were left out, so
-/// no single line is shaped whole on the foreground.
 /// A spilled payload whole: its in-memory `prefix`, then its file, in one buffer sized
 /// once and never read past [`FULL_PAYLOAD_CAP`] however the file has grown. Blocking IO:
 /// run it on a background task.
@@ -1324,6 +1333,8 @@ pub(crate) fn read_spilled(path: &Path, prefix: &[u8], len: u64) -> std::io::Res
     Ok(bytes)
 }
 
+/// `line`, cut at [`LINE_CHARS`] with a note of how many characters were left out, so
+/// no single line is shaped whole on the foreground.
 fn cut_line(line: &str) -> SharedString {
     match line.char_indices().nth(LINE_CHARS) {
         Some((cut, _)) => {

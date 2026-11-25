@@ -202,13 +202,16 @@ impl SessionStore {
         &self.filtered
     }
 
-    /// Forget every event. The spill files are handed back: dropping them deletes the
-    /// files, so a view drops them on a background task (deleting is file IO).
-    pub fn clear(&mut self) -> Vec<SpilledFile> {
-        self.events.clear();
+    /// Forget every event. The events and their spill files are handed back: dropping
+    /// them frees the payloads and deletes the files, so a view drops them on a
+    /// background task (deleting is file IO).
+    pub fn clear(&mut self) -> ClearedSession {
         self.filtered.clear();
         self.inline_bytes = 0;
-        std::mem::take(&mut self.spill_files)
+        ClearedSession {
+            _events: std::mem::take(&mut self.events),
+            _spill_files: std::mem::take(&mut self.spill_files),
+        }
     }
 
     /// The session as it is now, for an export off the foreground. The snapshot shares
@@ -249,6 +252,13 @@ impl SessionStore {
                 .any(|bytes| matcher.is_match(bytes))
         })
     }
+}
+
+/// What [`SessionStore::clear`] took out of the store; dropping it frees the payloads
+/// and deletes the spill files.
+pub struct ClearedSession {
+    _events: Vec<SessionEvent>,
+    _spill_files: Vec<SpilledFile>,
 }
 
 /// A copy of a session's events that keeps their spill files alive

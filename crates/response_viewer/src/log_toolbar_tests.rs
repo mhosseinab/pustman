@@ -7,6 +7,7 @@ use gpui::{AppContext as _, Entity, Focusable as _, TestAppContext, VisualTestCo
 use pustman_actions::message_log::{Clear, ConfirmClear, Export, Pause, Resume};
 use ui::test_support::{draw_window, init_test};
 
+use super::SEARCH_DEBOUNCE;
 use crate::session_log::SessionLog;
 use crate::session_store::SessionStore;
 
@@ -52,9 +53,9 @@ fn open_log<'a>(
         }
     });
     cx.update(init_test);
-    let (log, cx) = cx.add_window_view(|_, cx| {
+    let (log, cx) = cx.add_window_view(|window, cx| {
         let store = cx.new(|_| store);
-        SessionLog::new(store, cx)
+        SessionLog::new_in(store, window, cx)
     });
     let store = cx.read(|cx| log.read(cx).store().clone());
     let handle = cx.read(|cx| log.read(cx).focus_handle(cx));
@@ -96,8 +97,15 @@ fn search_narrows_rows(cx: &mut TestAppContext) {
 
     let search = cx
         .read(|cx| log.read(cx).search_input().cloned())
-        .expect("the toolbar's search field is mounted once the log is drawn");
+        .expect("a log built in a window has its search field");
     search.update(cx, |search, cx| search.set_text("message 13", cx));
+    cx.run_until_parked();
+    assert_eq!(
+        cx.read(|cx| store.read(cx).filtered().len()),
+        20,
+        "the search waits for typing to pause"
+    );
+    cx.executor().advance_clock(SEARCH_DEBOUNCE);
     cx.run_until_parked();
     draw_window(cx);
 
@@ -110,6 +118,7 @@ fn search_narrows_rows(cx: &mut TestAppContext) {
     assert!(!row_is_drawn(&log, 0, cx), "a non-matching row is gone");
 
     search.update(cx, |search, cx| search.set_text("", cx));
+    cx.executor().advance_clock(SEARCH_DEBOUNCE);
     cx.run_until_parked();
     draw_window(cx);
     assert_eq!(cx.read(|cx| store.read(cx).filtered().len()), 20);
