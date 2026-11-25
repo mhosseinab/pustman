@@ -17,20 +17,21 @@ use std::rc::Rc;
 use gpui::{
     Action, Anchor, AnyElement, App, Bounds, ClickEvent, Context, CursorStyle, Decorations, Entity,
     EntityId, FocusHandle, Focusable, Global, HitboxBehavior, IntoElement,
-    KeyBindingContextPredicate, Menu, MouseButton, MouseDownEvent, OwnedMenu, OwnedMenuItem,
-    ParentElement, Pixels, Point, Render, ResizeEdge, Role, Size, Subscription, Tiling, WeakEntity,
-    WeakFocusHandle, Window, anchored, canvas, deferred, point, px,
+    KeyBindingContextPredicate, KeyDownEvent, Menu, MouseButton, MouseDownEvent, OwnedMenu,
+    OwnedMenuItem, ParentElement, Pixels, Point, Render, ResizeEdge, Role, Size, Subscription,
+    Tiling, WeakEntity, WeakFocusHandle, Window, anchored, canvas, deferred, point, px,
 };
 use pustman_actions::quick_open;
 use pustman_actions::workspace::{CreateWorkspace, OpenWorkspace};
 use ui::components::context_menu::ContextMenuEvent;
 use ui::prelude::*;
-use ui::{Icon, IconName, IconSize, keymap_binding_text, px_to_rems};
+use ui::{Cancel, Icon, IconName, IconSize, keymap_binding_text, px_to_rems};
 use workspace_store::ItemBody;
 
 use crate::CloseWindow;
 use crate::recent_workspaces::{
-    OpenRecentWorkspace, RecentWorkspaces, disambiguation, recent_workspaces,
+    OpenRecentWorkspace, RECENT_READ_FAILED_LABEL, RecentWorkspaces, disambiguation,
+    recent_workspaces, recent_workspaces_failed,
 };
 use crate::workspace_open::WorkspaceOpen;
 
@@ -182,7 +183,8 @@ pub(crate) fn client_frame(
 /// window — the drag area and the window controls.
 ///
 /// `Decision:` the menu bar draws the app's one menu model, the [`gpui::Menu`]s the app
-/// installs with [`install_app_menus`] (`cx.set_menus`, read back with `cx.get_menus`).
+/// installs with [`install_app_menus`] (`cx.set_menus`, read back once with `cx.get_menus`
+/// and cached).
 /// macOS shows that same model in its native menu bar, so the in-window bar is drawn
 /// everywhere else only. An entry is enabled when its action has a handler where the user
 /// was when the menu opened (the focused element's dispatch path, or an app-level
@@ -233,7 +235,13 @@ struct OpenPopover {
     /// The element that had focus when the first popover opened. Actions run from there,
     /// so a menu entry acts exactly like its key binding would have.
     restore_focus: FocusHandle,
+    /// For a submenu (File › Open recent), the top-level menu it replaced in place: Left
+    /// or Escape goes back to it (#332).
+    parent: Option<SharedString>,
     _subscription: Subscription,
+    /// Closes the popover when the keyboard leaves it for anywhere but another popover
+    /// of this bar (#332).
+    _focus_out: Subscription,
 }
 
 // The title-bar actions: the arrows walk from an open menu to its neighbours.
@@ -329,7 +337,18 @@ pub fn install_app_menus(menus: Vec<Menu>, cx: &mut App) {
         cx.bind_keys(bindings);
     }
     cx.set_menus(menus);
+    // Read back once, here: the bar draws from this copy instead of asking the platform
+    // for the model on every frame (#332).
+    let installed = cx.get_menus().unwrap_or_default();
+    cx.set_global(InstalledMenus(installed));
 }
+
+/// The app's menu model as [`install_app_menus`] last installed it: what the in-window
+/// bar draws its titles and menus from.
+#[derive(Default)]
+struct InstalledMenus(Vec<OwnedMenu>);
+
+impl Global for InstalledMenus {}
 
 /// Bind the arrows that walk the menu bar while one of its menus has the keyboard.
 pub(crate) fn init(cx: &mut App) {
@@ -381,13 +400,15 @@ pub(crate) fn switcher_label(name: &str) -> SharedString {
     SharedString::from(format!("{}…", kept.trim_end()))
 }
 
-/// The application menus the in-window bar draws; none on macOS, whose native bar shows
-/// the same model.
-fn in_window_menus(cx: &App) -> Vec<OwnedMenu> {
+/// The application menus the in-window bar draws — the model cached when it was
+/// installed; none on macOS, whose native bar shows the same model.
+fn in_window_menus(cx: &App) -> &[OwnedMenu] {
     if native_menu_bar(cx) {
-        return Vec::new();
+        return &[];
     }
-    cx.get_menus().unwrap_or_default()
+    cx.try_global::<InstalledMenus>()
+        .map(|menus| menus.0.as_slice())
+        .unwrap_or_default()
 }
 
 /// Whether `action` can run from where the user was: a handler on the focused element's
@@ -489,7 +510,11 @@ impl TitleBar {
             open: None,
             closed_by_press: None,
             // A new recent list redraws the switcher and the File › Open recent entries.
-            _subscriptions: vec![cx.observe_global::<RecentWorkspaces>(|_bar, cx| cx.notify())],
+            _subscriptions: vec![
+                cx.observe_global::<RecentWorkspaces>(|_bar, cx| cx.notify()),
+                // A reinstalled menu model redraws the titles.
+                cx.observe_global::<InstalledMenus>(|_bar, cx| cx.notify()),
+            ],
         }
     }
 
@@ -530,11 +555,11 @@ impl TitleBar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let name = in_window_menus(cx).into_iter().find_map(|menu| {
+        let name = in_window_menus(cx).iter().find_map(|menu| {
             menu.name
                 .to_lowercase()
                 .starts_with(mnemonic)
-                .then_some(menu.name)
+                .then(|| menu.name.clone())
         });
         if let Some(name) = name {
             self.open_menu(name, window, cx);
@@ -543,13 +568,14 @@ impl TitleBar {
 
     /// Open the top-level menu `name` under its title.
     fn open_menu(&mut self, name: SharedString, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(model) = in_window_menus(cx)
-            .into_iter()
+        let Some(items) = in_window_menus(cx)
+            .iter()
             .find(|menu| menu.name == name)
+            .map(|menu| menu.items.clone())
         else {
             return;
         };
-        self.show(PopoverAnchor::Menu(name), &model.items, window, cx);
+        self.show(PopoverAnchor::Menu(name), &items, window, cx);
     }
 
     /// Replace the open menu with one of its submenus, in place (File › Open recent).
@@ -564,7 +590,48 @@ impl TitleBar {
             .as_ref()
             .map(|open| open.anchor.clone())
             .unwrap_or(PopoverAnchor::Switcher);
+        let parent = match &anchor {
+            PopoverAnchor::Menu(name) => Some(name.clone()),
+            PopoverAnchor::Switcher => None,
+        };
         self.show(anchor, items, window, cx);
+        if let Some(open) = self.open.as_mut() {
+            open.parent = parent;
+        }
+    }
+
+    /// Back from a submenu to the menu it replaced (Left or Escape in File › Open
+    /// recent). `false` when the open popover is not a submenu.
+    fn back_to_parent(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(parent) = self.open.as_ref().and_then(|open| open.parent.clone()) else {
+            return false;
+        };
+        self.open_menu(parent, window, cx);
+        true
+    }
+
+    /// Escape: a submenu goes back to its menu; anywhere else the menu's own Escape
+    /// closes it.
+    fn cancel_in_menu(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
+        if self.back_to_parent(window, cx) {
+            cx.stop_propagation();
+        }
+    }
+
+    /// Tab while a popover is open closes it: the keyboard goes back to where the user
+    /// was instead of wandering off behind a menu that stays on screen.
+    fn close_on_tab(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let modifiers = event.keystroke.modifiers;
+        if event.keystroke.key != "tab"
+            || modifiers.control
+            || modifiers.alt
+            || modifiers.platform
+            || self.open.is_none()
+        {
+            return;
+        }
+        self.close(window, cx);
+        cx.stop_propagation();
     }
 
     /// Build a menu of `items` under `anchor`, focus it and show it.
@@ -597,12 +664,11 @@ impl TitleBar {
     fn open_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let restore_focus = self.restore_focus(window, cx);
         let recents = recent_workspaces(cx).to_vec();
+        let read_failed = recent_workspaces_failed(cx);
         let menu = cx.new(|cx| {
             let mut menu = ContextMenu::new(cx);
             for (index, recent) in recents.iter().enumerate() {
-                let action = OpenRecentWorkspace {
-                    path: recent.path.to_string_lossy().into_owned(),
-                };
+                let action = OpenRecentWorkspace::for_folder(&recent.path);
                 let target = restore_focus.clone();
                 menu = menu.entry(recent.name.clone(), move |_event, window, cx| {
                     run_from(&target, Box::new(action.clone()), window, cx);
@@ -613,7 +679,12 @@ impl TitleBar {
                     menu = menu.hint(path);
                 }
             }
-            if !recents.is_empty() {
+            // A failed read says so instead of passing a stale or empty list off as
+            // the whole story (#332).
+            if read_failed {
+                menu = menu.disabled_entry(RECENT_READ_FAILED_LABEL);
+            }
+            if !recents.is_empty() || read_failed {
                 menu = menu.separator();
             }
             let new_target = restore_focus.clone();
@@ -645,13 +716,28 @@ impl TitleBar {
         cx: &mut Context<Self>,
     ) {
         let subscription = cx.subscribe_in(&menu, window, Self::on_menu_event);
+        let menu_focus = menu.read(cx).focus_handle(cx);
+        let focus_out = cx.on_focus_out(&menu_focus, window, {
+            let menu = menu.downgrade();
+            move |bar, _event, window, cx| {
+                let still_open = bar
+                    .open
+                    .as_ref()
+                    .is_some_and(|open| open.menu.downgrade() == menu);
+                if still_open {
+                    bar.close(window, cx);
+                }
+            }
+        });
         menu.update(cx, |menu, cx| menu.focus(window, cx));
         self.closed_by_press = None;
         self.open = Some(OpenPopover {
             anchor,
             menu,
             restore_focus,
+            parent: None,
             _subscription: subscription,
+            _focus_out: focus_out,
         });
         cx.notify();
     }
@@ -735,8 +821,8 @@ impl TitleBar {
             return;
         };
         let names: Vec<SharedString> = in_window_menus(cx)
-            .into_iter()
-            .map(|menu| menu.name)
+            .iter()
+            .map(|menu| menu.name.clone())
             .collect();
         let Some(index) = names.iter().position(|name| *name == current) else {
             return;
@@ -767,6 +853,10 @@ impl TitleBar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // In a submenu, Left is "back", the way a desktop menu leaves a cascade.
+        if self.back_to_parent(window, cx) {
+            return;
+        }
         self.step_menu(false, window, cx);
     }
 
@@ -835,6 +925,8 @@ impl TitleBar {
             }))
             .child(
                 Button::new(SharedString::from(format!("app-menu-button-{name}")), name.clone())
+                    .role(Role::MenuItem)
+                    .aria_expanded(is_open)
                     .size(ButtonSize::Medium)
                     .style(if is_open {
                         ButtonStyle::Tinted(TintColor::Accent)
@@ -866,6 +958,7 @@ impl TitleBar {
             .ml(DynamicSpacing::Base06.rems(cx))
             .child(
                 Button::new("workspace-switcher-button", switcher_label(&name))
+                    .aria_expanded(is_open)
                     .size(ButtonSize::Medium)
                     .style(if is_open {
                         ButtonStyle::Tinted(TintColor::Accent)
@@ -1015,8 +1108,8 @@ impl Render for TitleBar {
             "Maximize"
         };
         let menu_names: Vec<SharedString> = in_window_menus(cx)
-            .into_iter()
-            .map(|menu| menu.name)
+            .iter()
+            .map(|menu| menu.name.clone())
             .collect();
 
         let bar = h_flex()
@@ -1040,6 +1133,8 @@ impl Render for TitleBar {
             .gap(DynamicSpacing::Base02.rems(cx))
             .on_action(cx.listener(Self::select_next_menu))
             .on_action(cx.listener(Self::select_previous_menu))
+            .capture_action(cx.listener(Self::cancel_in_menu))
+            .capture_key_down(cx.listener(Self::close_on_tab))
             .child(
                 // The app's mark: identity only, it runs nothing.
                 div()
@@ -1129,3 +1224,11 @@ mod menu_tests;
 #[cfg(test)]
 #[path = "title_bar_focus_tests.rs"]
 mod focus_tests;
+
+#[cfg(test)]
+#[path = "title_bar_installed_menus_tests.rs"]
+mod installed_menus_tests;
+
+#[cfg(test)]
+#[path = "title_bar_submenu_tests.rs"]
+mod submenu_tests;

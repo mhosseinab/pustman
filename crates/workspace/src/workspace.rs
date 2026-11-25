@@ -299,6 +299,7 @@ pub fn init(cx: &mut App) {
     read_only::init(cx);
     recent_workspaces::init(cx);
     title_bar::init(cx);
+    dock::init(cx);
 }
 
 #[cfg(test)]

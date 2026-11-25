@@ -5,7 +5,7 @@
 //! Every change to the strip happens here, outside `render`: the tab list is rebuilt with
 //! [`TabBar::set_tabs`] after add/close/move/pin/activate and when an item notifies.
 
-use gpui::{Context, Entity, EntityId, Subscription};
+use gpui::{AnyView, Context, Entity, EntityId, Subscription};
 use ui::prelude::*;
 
 use crate::Pane;
@@ -155,6 +155,23 @@ impl Pane {
             _item_observer: observer,
         });
         self.activate_item(entity_id, cx);
+    }
+
+    /// Activate the tab whose item reports `persistent_id` — whoever opened it: a
+    /// restored session, the tree, quick open — and hand back its view (#333,
+    /// REQ-UI-02). [`None`] when no open tab carries that id; the active tab is then
+    /// left as it was.
+    pub fn activate_item_with_persistent_id(
+        &mut self,
+        persistent_id: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyView> {
+        let (entity_id, view) = self.tabs.iter().find_map(|tab| {
+            (tab.handle.persistent_id(cx).as_deref() == Some(persistent_id))
+                .then(|| (tab.handle.entity_id(), tab.handle.to_any_view()))
+        })?;
+        self.activate_item(entity_id, cx);
+        Some(view)
     }
 
     /// Make `entity_id`'s tab the active one and restage the strip around it.

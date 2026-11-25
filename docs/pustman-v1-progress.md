@@ -136,7 +136,7 @@ Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub p
 | S48u4 | Request area: breadcrumb, split Send, tab badges, variable line, two-column Auth (driver-added) | done | 1 | | | S48u4 merged |
 | S48u5 | Response area + status bar; console collapsed by default (driver-added) | done | 1 | | | S48u5 merged |
 | S48u6 | Environment menu, variable popover, console error rows (driver-added) | done | 1 | | | S48u6 merged |
-| S48u7 | UX follow-ups #332/#333 (driver-added; header-switch removal dropped) | in_progress | 0 | | |  |
+| S48u7 | UX follow-ups #332/#333 (driver-added; header-switch removal dropped) | done | 1 | | | S48u7 merged |
 | S48 | M2 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off |
 | S49 | Declare the M3–M5 dependencies | pending | 0 | | |  |
 | S50 | Protocol request kinds, files, import, New menu, open from tree | pending | 0 | | | S50a–S50e |

@@ -21,6 +21,9 @@ pub struct KeyBinding {
     action: Box<dyn Action>,
     color: Color,
     size: TextSize,
+    /// Look the binding up in the whole keymap rather than under the focused element's
+    /// key contexts ([`KeyBinding::from_keymap`]).
+    from_keymap: bool,
 }
 
 impl Clone for KeyBinding {
@@ -29,6 +32,7 @@ impl Clone for KeyBinding {
             action: self.action.boxed_clone(),
             color: self.color,
             size: self.size,
+            from_keymap: self.from_keymap,
         }
     }
 }
@@ -48,6 +52,18 @@ impl KeyBinding {
             action: action.boxed_clone(),
             color: Color::Muted,
             size: TextSize::XSmall,
+            from_keymap: false,
+        }
+    }
+
+    /// The binding the whole keymap has for `action`, whatever has focus — for a hint
+    /// that must not go blank while focus sits somewhere the action's context does not
+    /// reach (an open application menu): an empty state's shortcut chips. The lookup is
+    /// [`keymap_binding_text`]'s.
+    pub fn from_keymap(action: &dyn Action) -> Self {
+        Self {
+            from_keymap: true,
+            ..Self::for_action(action)
         }
     }
 
@@ -67,16 +83,14 @@ impl KeyBinding {
     /// The keys as the user would press them: `["Ctrl+Enter"]`, one entry per chord step.
     /// Empty when nothing is bound.
     pub fn keystrokes(&self, window: &Window, cx: &App) -> Vec<String> {
+        if self.from_keymap {
+            return keymap_keystrokes(self.action.as_ref(), cx);
+        }
         let Some(binding) = window.highest_precedence_binding_for_action(self.action.as_ref())
         else {
             return Vec::new();
         };
-        let os = cx.platform_info().os;
-        binding
-            .keystrokes()
-            .iter()
-            .map(|keystroke| keystroke_label(keystroke.modifiers(), keystroke.key(), os))
-            .collect()
+        binding_labels(&binding, cx)
     }
 
     /// The same keys as one line: `"Ctrl+K Ctrl+S"` for a chord.
@@ -97,16 +111,32 @@ impl KeyBinding {
 /// is in the sidebar. The binding added last wins, as GPUI's own keymap docs order it
 /// for display. [`None`] when nothing binds the action.
 pub fn keymap_binding_text(action: &dyn Action, cx: &App) -> Option<SharedString> {
+    let keys = keymap_keystrokes(action, cx);
+    if keys.is_empty() {
+        return None;
+    }
+    Some(SharedString::from(keys.join(" ")))
+}
+
+/// The keys of the keymap's last binding for `action`, one entry per chord step; empty
+/// when nothing binds it.
+fn keymap_keystrokes(action: &dyn Action, cx: &App) -> Vec<String> {
     let keymap = cx.key_bindings();
     let keymap = keymap.borrow();
-    let binding = keymap.bindings_for_action(action).next_back()?;
+    match keymap.bindings_for_action(action).next_back() {
+        Some(binding) => binding_labels(binding, cx),
+        None => Vec::new(),
+    }
+}
+
+/// `binding`'s keystrokes as hints spell them on this platform.
+fn binding_labels(binding: &gpui::KeyBinding, cx: &App) -> Vec<String> {
     let os = cx.platform_info().os;
-    let keys: Vec<String> = binding
+    binding
         .keystrokes()
         .iter()
         .map(|keystroke| keystroke_label(keystroke.modifiers(), keystroke.key(), os))
-        .collect();
-    Some(SharedString::from(keys.join(" ")))
+        .collect()
 }
 
 /// One keystroke as a hint spells it: `Ctrl+Shift+Tab` on Linux and Windows, GPUI's native
@@ -178,3 +208,7 @@ impl RenderOnce for KeyBinding {
 #[cfg(test)]
 #[path = "key_binding_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "key_binding_keymap_tests.rs"]
+mod keymap_tests;
