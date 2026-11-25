@@ -4,18 +4,27 @@
 //!
 //! The bytes come from the network and are untrusted. The parser never indexes into them,
 //! splits lines on the ASCII terminators only (so a UTF-8 sequence split across chunks is
-//! reassembled before it is decoded), and bounds what one event may hold: see
-//! [`MAX_EVENT_BYTES`].
+//! reassembled before it is decoded), and bounds what it holds: see [`MAX_EVENT_BYTES`] and
+//! [`MAX_FIELD_BYTES`].
 
 use std::fmt;
+use std::sync::Arc;
 
 use api_model::{Message, Payload, ProtocolFields, SessionMessageKind};
 
-/// The most bytes one event may buffer — its pending line plus its data so far. An event
+/// The most bytes one event may buffer: the line being read (any field, before it is
+/// interpreted), plus the `data` gathered so far, plus the `event` type set so far. An event
 /// past this is dropped whole, counted in [`EventSourceParser::oversized_events_dropped`],
 /// and parsing resumes after the blank line that ends it. Without a cap a server that never
-/// sends a line end would grow the buffer until the app runs out of memory.
+/// sends a line end would grow the buffer until the app runs out of memory. The pending
+/// `id` is not counted here: it outlives the event and has its own cap, [`MAX_FIELD_BYTES`].
 pub const MAX_EVENT_BYTES: usize = 16 * 1024 * 1024;
+
+/// The longest `id` or `event` value kept. A longer one is ignored, as if the line were
+/// absent, and counted in [`EventSourceParser::oversized_fields_ignored`]. The id is repeated
+/// on every later event, so without its own cap one huge `id` followed by many tiny events
+/// would multiply into gigabytes.
+pub const MAX_FIELD_BYTES: usize = 64 * 1024;
 
 const BOM: &[u8] = b"\xef\xbb\xbf";
 
@@ -28,8 +37,9 @@ pub struct SseEvent {
     /// The `data` lines joined with `\n`.
     pub data: String,
     /// The last event ID at dispatch: an `id` persists to later events until another `id`
-    /// replaces it. `None` when it is empty.
-    pub id: Option<String>,
+    /// replaces it. `None` when it is empty. Shared, not copied, between the events that
+    /// carry it.
+    pub id: Option<Arc<str>>,
     /// A valid `retry` (milliseconds) given in this event's block.
     pub retry: Option<u64>,
 }
@@ -46,7 +56,7 @@ impl SseEvent {
             payload: Payload::Inline(data),
             fields: ProtocolFields::Sse {
                 event: self.event,
-                id: self.id,
+                id: self.id.map(|id| id.to_string()),
                 retry: self.retry,
             },
         }
@@ -59,7 +69,7 @@ impl fmt::Debug for SseEvent {
         f.debug_struct("SseEvent")
             .field("event_len", &self.event.as_ref().map(String::len))
             .field("data_len", &self.data.len())
-            .field("id_len", &self.id.as_ref().map(String::len))
+            .field("id_len", &self.id.as_deref().map(str::len))
             .field("retry", &self.retry)
             .finish()
     }
@@ -80,22 +90,30 @@ pub struct EventSourceParser {
     data: String,
     event_type: String,
     retry: Option<u64>,
-    last_event_id: String,
+    /// The spec's "last event ID buffer": set by `id` lines, committed to `last_event_id`
+    /// only at a blank line, so an id inside an event the stream cut off never counts.
+    pending_id: String,
+    /// An `id` line changed `pending_id` since the last commit. Commits only then, so a
+    /// stream of blank lines never re-copies a large id.
+    pending_id_changed: bool,
+    last_event_id: Option<Arc<str>>,
     reconnection_time: Option<u64>,
     /// The current event passed [`MAX_EVENT_BYTES`]: skip to its blank line.
     discarding: bool,
     /// The line skipped while discarding has content, so its end is not a blank line.
     discarding_line: bool,
     oversized_events_dropped: u64,
+    oversized_fields_ignored: u64,
 }
 
 // Event data is a server payload, never logged.
 impl fmt::Debug for EventSourceParser {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("EventSourceParser")
-            .field("buffered", &(self.line.len() + self.data.len()))
+            .field("buffered", &self.event_bytes())
             .field("reconnection_time", &self.reconnection_time)
             .field("oversized_events_dropped", &self.oversized_events_dropped)
+            .field("oversized_fields_ignored", &self.oversized_fields_ignored)
             .finish_non_exhaustive()
     }
 }
@@ -132,15 +150,25 @@ impl EventSourceParser {
     }
 
     /// The stream ended. Per the spec an event without its closing blank line is never
-    /// dispatched, so this drops whatever is buffered and returns no events; the last event
-    /// ID and the reconnection time survive for a reconnect.
+    /// dispatched, so this drops whatever is buffered and returns no events. The last
+    /// dispatched event ID and the reconnection time survive for a reconnect; an id from the
+    /// dropped event does not, and the next stream is checked for its own BOM.
     pub fn finish(&mut self) -> Vec<SseEvent> {
         self.line = Vec::new();
         self.bom_prefix = Vec::new();
+        self.bom_checked = false;
         self.reset_event();
         self.after_cr = false;
         self.discarding = false;
         self.discarding_line = false;
+        if self.pending_id_changed {
+            self.pending_id = self
+                .last_event_id
+                .as_deref()
+                .map(str::to_owned)
+                .unwrap_or_default();
+            self.pending_id_changed = false;
+        }
         Vec::new()
     }
 
@@ -151,13 +179,19 @@ impl EventSourceParser {
 
     /// The last event ID, to send as `Last-Event-ID` on a reconnect (REQ-SSE-03).
     pub fn last_event_id(&self) -> &str {
-        &self.last_event_id
+        self.last_event_id.as_deref().unwrap_or_default()
     }
 
     /// How many events were dropped for passing [`MAX_EVENT_BYTES`], so the caller can tell
     /// the user the stream lost events.
     pub fn oversized_events_dropped(&self) -> u64 {
         self.oversized_events_dropped
+    }
+
+    /// How many `id` or `event` values were ignored for passing [`MAX_FIELD_BYTES`], so the
+    /// caller can tell the user those fields were not applied.
+    pub fn oversized_fields_ignored(&self) -> u64 {
+        self.oversized_fields_ignored
     }
 
     fn parse(&mut self, bytes: &[u8], events: &mut Vec<SseEvent>) {
@@ -193,6 +227,11 @@ impl EventSourceParser {
         }
     }
 
+    /// What [`MAX_EVENT_BYTES`] bounds.
+    fn event_bytes(&self) -> usize {
+        self.line.len() + self.data.len() + self.event_type.len()
+    }
+
     fn push_line_bytes(&mut self, bytes: &[u8]) {
         if bytes.is_empty() {
             return;
@@ -201,7 +240,7 @@ impl EventSourceParser {
             self.discarding_line = true;
             return;
         }
-        if self.line.len() + self.data.len() + bytes.len() > MAX_EVENT_BYTES {
+        if self.event_bytes().saturating_add(bytes.len()) > MAX_EVENT_BYTES {
             self.discard_event();
             self.discarding_line = true;
             return;
@@ -219,9 +258,11 @@ impl EventSourceParser {
     /// A line terminator arrived: interpret the buffered line.
     fn end_line(&mut self) -> Option<SseEvent> {
         if self.discarding {
-            // Only a line that was blank on the wire ends the dropped event.
+            // Only a line that was blank on the wire ends the dropped event; like any blank
+            // line it is a dispatch point, so the id the event set still commits.
             if !self.discarding_line {
                 self.discarding = false;
+                self.commit_id();
             }
             self.discarding_line = false;
             return None;
@@ -243,9 +284,18 @@ impl EventSourceParser {
             None => (line, ""),
         };
         match name {
-            "event" => value.clone_into(&mut self.event_type),
+            "event" => {
+                if self.ignore_oversized_field(value) {
+                    return;
+                }
+                if self.data.len() + value.len() > MAX_EVENT_BYTES {
+                    self.discard_event();
+                    return;
+                }
+                value.clone_into(&mut self.event_type);
+            }
             "data" => {
-                if self.data.len() + value.len() + 1 > MAX_EVENT_BYTES {
+                if self.event_bytes() + value.len() + 1 > MAX_EVENT_BYTES {
                     self.discard_event();
                     return;
                 }
@@ -253,9 +303,11 @@ impl EventSourceParser {
                 self.data.push('\n');
             }
             "id" => {
-                if !value.contains('\0') {
-                    value.clone_into(&mut self.last_event_id);
+                if value.contains('\0') || self.ignore_oversized_field(value) {
+                    return;
                 }
+                value.clone_into(&mut self.pending_id);
+                self.pending_id_changed = true;
             }
             "retry" => {
                 // `u64::from_str` also takes a leading `+`, which the spec does not; a value
@@ -272,7 +324,26 @@ impl EventSourceParser {
         }
     }
 
+    fn ignore_oversized_field(&mut self, value: &str) -> bool {
+        if value.len() <= MAX_FIELD_BYTES {
+            return false;
+        }
+        self.oversized_fields_ignored = self.oversized_fields_ignored.saturating_add(1);
+        true
+    }
+
+    /// The spec sets the last event ID from its buffer at every dispatch, data or not.
+    fn commit_id(&mut self) {
+        if !self.pending_id_changed {
+            return;
+        }
+        self.pending_id_changed = false;
+        self.last_event_id =
+            (!self.pending_id.is_empty()).then(|| Arc::from(self.pending_id.as_str()));
+    }
+
     fn dispatch(&mut self) -> Option<SseEvent> {
+        self.commit_id();
         if self.data.is_empty() {
             self.reset_event();
             return None;
@@ -286,7 +357,7 @@ impl EventSourceParser {
         Some(SseEvent {
             event: (!event_type.is_empty()).then_some(event_type),
             data,
-            id: (!self.last_event_id.is_empty()).then(|| self.last_event_id.clone()),
+            id: self.last_event_id.clone(),
             retry,
         })
     }

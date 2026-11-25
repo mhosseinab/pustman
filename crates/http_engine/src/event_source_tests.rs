@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use api_model::{Payload, ProtocolFields, SessionMessageKind};
 
 use super::{EventSourceParser, SseEvent};
@@ -16,7 +18,7 @@ fn event(kind: Option<&str>, data: &str, id: Option<&str>, retry: Option<u64>) -
     SseEvent {
         event: kind.map(str::to_owned),
         data: data.to_owned(),
-        id: id.map(str::to_owned),
+        id: id.map(Arc::from),
         retry,
     }
 }
