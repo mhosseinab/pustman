@@ -379,3 +379,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — S51d UI review PASS_WITH_ISSUES (MEDIUM: focus lost on replaced controls; search input created in render; set_filter per keystroke) → fix cycle; LOWs filed.
 - 2026-11-25 — S54a merged (SSE parser; security fix 2 + re-reviews; VERIFY OK).
 - 2026-11-25 — Dispatched S54b (stream an event-stream response; http-engine-engineer). Running: S51d fix, S54b. Disk 28 GB.
+- 2026-11-25 — S51d merged (message log toolbar; UI fix 1; authorized EXPECTED_ACTIONS edit, ledger row now used; VERIFY OK; LOW #347).
