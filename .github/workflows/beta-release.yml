@@ -128,6 +128,16 @@ jobs:
           mkdir -p out
           tar -C dist -czf "out/$name.tar.gz" "$name"
 
+      # The .deb derives Depends: from the libraries the binary links, so the runtime
+      # libraries must be installed here (the build job's runner had them).
+      - name: Install runtime libraries for Depends
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon0 libxkbcommon-x11-0 libxcb1
+
+      - name: Package (.deb)
+        run: scripts/package-deb.sh bin/pustman "$TAG" "out/pustman_${TAG#v}_amd64.deb"
+
       - uses: actions/upload-artifact@v4
         with:
           name: package-linux-x86_64
@@ -139,6 +149,8 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: windows-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           name: binary-windows-x86_64
@@ -154,6 +166,15 @@ jobs:
           Copy-Item bin/pustman.exe "$stage/pustman.exe"
           "Pustman beta for Windows (x86_64)`r`n`r`nRun pustman.exe. The executable is not signed, so Windows SmartScreen may warn the first time.`r`nThis is a beta: expect rough edges." | Set-Content "$stage/README.txt"
           Compress-Archive -Path $stage -DestinationPath "out/$name.zip" -Force
+
+      # Per-user installer: Start-menu entry, optional desktop icon, uninstaller.
+      - name: Installer (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc "/DAppVersion=$($env:TAG.TrimStart('v'))" "/DSourceDir=$PWD\bin" "/DOutputBase=pustman-$env:TAG-windows-x86_64-setup" installer/windows/pustman.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - uses: actions/upload-artifact@v4
         with:

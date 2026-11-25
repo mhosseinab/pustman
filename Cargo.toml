@@ -10,6 +10,8 @@ edition = "2024"
 publish = false
 
 [workspace.dependencies]
+# Build-time only: embeds the Windows app icon resource (crates/pustman/build.rs).
+embed-resource = "3.0.12"
 
 #
 # Workspace member crates

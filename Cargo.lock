@@ -5014,6 +5014,7 @@ dependencies = [
  "collections_panel",
  "command_palette",
  "console",
+ "embed-resource",
  "environment_picker",
  "git",
  "gpui",
