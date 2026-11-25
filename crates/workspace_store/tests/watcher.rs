@@ -71,18 +71,61 @@ mod watcher {
         }
     }
 
+    /// No event for `what`. A `Rescan` is tolerated: it only asks the caller to re-read,
+    /// and macOS FSEvents sends one whenever it drops or coalesces events under load, which
+    /// the test cannot prevent. Any specific event still fails, so a watcher that reported
+    /// our own save (or a `.git` file) as a change is still caught.
     fn expect_timeout(rx: &std::sync::mpsc::Receiver<FsChange>, what: &str) {
-        match rx.recv_timeout(WAIT) {
-            Err(RecvTimeoutError::Timeout) => {}
-            other => panic!("expected no event for {what}, got {other:?}"),
+        loop {
+            match rx.recv_timeout(WAIT) {
+                Err(RecvTimeoutError::Timeout) => return,
+                Ok(FsChange::Rescan) => continue,
+                other => panic!("expected no event for {what}, got {other:?}"),
+            }
         }
+    }
+
+    /// The next specific change within `wait`, skipping any `Rescan` (see `expect_timeout`).
+    fn next_change(
+        rx: &std::sync::mpsc::Receiver<FsChange>,
+        wait: Duration,
+    ) -> Result<FsChange, RecvTimeoutError> {
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match rx.recv_timeout(left)? {
+                FsChange::Rescan => continue,
+                change => return Ok(change),
+            }
+        }
+    }
+
+    /// Start watching, then drain until the tree has been quiet for half a second (5 s at
+    /// most): the fixture writes made just before `watch` can still be delivered after it
+    /// on a loaded macOS runner, and must never be mistaken for the change under test.
+    fn watch_settled(
+        root: &std::path::Path,
+    ) -> (
+        workspace_store::WorkspaceWatcher,
+        std::sync::mpsc::Receiver<FsChange>,
+    ) {
+        let (watcher, rx) = watch(root).expect("watch");
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            match rx.recv_timeout(Duration::from_millis(500)) {
+                Err(RecvTimeoutError::Timeout) => break,
+                Err(RecvTimeoutError::Disconnected) => panic!("the watcher stopped"),
+                Ok(_) => continue,
+            }
+        }
+        (watcher, rx)
     }
 
     #[test]
     fn external_add_is_reported_within_one_second() {
         let dir = setup_workspace();
         let root = dir.path();
-        let (_watcher, rx) = watch(root).expect("watch");
+        let (_watcher, rx) = watch_settled(root);
 
         let path = root.join("collections/users-api/create-user.request.json");
         std::fs::write(
@@ -91,9 +134,7 @@ mod watcher {
         )
         .expect("write new request");
 
-        let event = rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("ItemAdded within 1 s");
+        let event = next_change(&rx, Duration::from_secs(1)).expect("ItemAdded within 1 s");
         match event {
             FsChange::ItemAdded { id, path: reported } => {
                 assert_eq!(
@@ -113,7 +154,7 @@ mod watcher {
     fn external_edit_is_reported() {
         let dir = setup_workspace();
         let root = dir.path();
-        let (_watcher, rx) = watch(root).expect("watch");
+        let (_watcher, rx) = watch_settled(root);
 
         // Touch the existing request so the watcher sees a modification.
         let path = root.join("collections/users-api/get-user.request.json");
@@ -123,7 +164,7 @@ mod watcher {
         )
         .expect("rewrite request");
 
-        let event = rx.recv_timeout(WAIT).expect("ItemChanged within 2 s");
+        let event = next_change(&rx, WAIT).expect("ItemChanged within 2 s");
         match event {
             FsChange::ItemChanged { id, path: reported } => {
                 assert_eq!(
@@ -172,7 +213,7 @@ mod watcher {
     fn own_save_is_not_reported() {
         let dir = setup_workspace();
         let root = dir.path();
-        let (watcher, rx) = watch(root).expect("watch");
+        let (watcher, rx) = watch_settled(root);
 
         let item = request_item("New request", "01ARZ3NDEKTSV4RRFFQ69G5FB4");
         let saved = save_item(root, &item).expect("save_item");
@@ -184,9 +225,8 @@ mod watcher {
         // leaves the caller's model stale with no recovery signal.
         let bytes = std::fs::read(root.join(&saved)).expect("read the bytes we saved");
         std::fs::write(root.join(&saved), bytes).expect("external rewrite of the same bytes");
-        let event = rx
-            .recv_timeout(WAIT)
-            .expect("an external revert to our own bytes is reported");
+        let event =
+            next_change(&rx, WAIT).expect("an external revert to our own bytes is reported");
         assert!(
             matches!(
                 event,
@@ -240,13 +280,13 @@ mod watcher {
     fn conflict_markers_reported_as_problem_event() {
         let dir = setup_workspace();
         let root = dir.path();
-        let (_watcher, rx) = watch(root).expect("watch");
+        let (_watcher, rx) = watch_settled(root);
 
         let path = root.join("collections/users-api/get-user.request.json");
         std::fs::write(&path, "<<<<<<< HEAD\n{}\n=======\n{}\n>>>>>>> branch\n")
             .expect("write conflicted file");
 
-        let event = rx.recv_timeout(WAIT).expect("Problem within 2 s");
+        let event = next_change(&rx, WAIT).expect("Problem within 2 s");
         match event {
             FsChange::Problem(problem) => {
                 assert_eq!(
@@ -267,7 +307,7 @@ mod watcher {
         let dir = setup_workspace();
         let root = dir.path();
         std::fs::create_dir_all(root.join(".git")).expect("mkdir .git");
-        let (_watcher, rx) = watch(root).expect("watch");
+        let (_watcher, rx) = watch_settled(root);
 
         std::fs::write(root.join(".git/HEAD"), "ref: refs/heads/main\n").expect("write .git/HEAD");
 
