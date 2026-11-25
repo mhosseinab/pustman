@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use api_model::{Auth, Body, Collection, Folder, HttpRequest, ItemId, Method, Request};
-use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext, Window};
+use gpui::{Entity, Focusable, Modifiers, TestAppContext, VisualTestContext, Window};
 use pustman_actions::import_export::Import;
 use pustman_actions::workspace::{CreateWorkspace, OpenWorkspace};
 use ui::prelude::*;
@@ -325,4 +325,165 @@ fn test_the_selected_row_carries_the_accent_bar(cx: &mut TestAppContext) {
         bar.size.width <= px(4.) && bar.size.height >= px(20.),
         "the bar is a thin full-height marker, got {bar:?}"
     );
+}
+
+/// The Commerce API fixture: a collection holding the Orders folder (two requests) and
+/// a Health request — ids returned as [collection, Orders, List orders, Get order, Health].
+fn commerce(cx: &mut TestAppContext) -> (Opened<'_>, [ItemId; 5]) {
+    let ids = [
+        ItemId::new(),
+        ItemId::new(),
+        ItemId::new(),
+        ItemId::new(),
+        ItemId::new(),
+    ];
+    let [commerce, orders, list, get, health] = ids;
+    let opened = open(
+        snapshot(
+            PathBuf::from("fixtures/workspace"),
+            vec![
+                collection(commerce, "Commerce API", vec![orders, health]),
+                folder(orders, "Orders", vec![list, get]),
+                http_request(list, "List orders"),
+                http_request(get, "Get order"),
+                http_request(health, "Health check"),
+            ],
+        ),
+        cx,
+    );
+    (opened, ids)
+}
+
+fn bounds_of(cx: &mut VisualTestContext, selector: String) -> gpui::Bounds<Pixels> {
+    let leaked: &'static str = selector.leak();
+    cx.debug_bounds(leaked)
+        .unwrap_or_else(|| panic!("{leaked} renders"))
+}
+
+fn set_filter(tree: &Entity<CollectionsTree>, text: &str, cx: &mut VisualTestContext) {
+    let filter = cx
+        .read(|cx| tree.read(cx).filter().cloned())
+        .expect("the tree has a filter");
+    filter.update(cx, |filter, cx| filter.set_text(text, cx));
+    cx.run_until_parked();
+    draw_window(cx);
+}
+
+#[gpui::test]
+fn test_names_start_right_after_the_chevron_and_after_the_method(cx: &mut TestAppContext) {
+    let (opened, [commerce, orders, list, _, _]) = commerce(cx);
+    let (tree, cx) = (opened.tree, opened.cx);
+    tree.update(cx, |tree, cx| {
+        tree.set_expanded(commerce, true, cx);
+        tree.set_expanded(orders, true, cx);
+    });
+    draw_window(cx);
+
+    let chevron = bounds_of(cx, format!("tree-toggle-{orders}"));
+    let folder_name = bounds_of(cx, format!("tree-item-{orders}-name"));
+    assert!(
+        folder_name.origin.x - chevron.origin.x < px(32.),
+        "a folder's name follows its chevron, with no empty method column between \
+         ({chevron:?} then {folder_name:?})"
+    );
+    let method = bounds_of(cx, format!("tree-item-{list}-method"));
+    let request_name = bounds_of(cx, format!("tree-item-{list}-name"));
+    assert!(
+        request_name.origin.x - method.origin.x < px(48.),
+        "a request's name follows its method label ({method:?} then {request_name:?})"
+    );
+    assert!(
+        method.origin.x > chevron.origin.x,
+        "a request sits inside its folder"
+    );
+}
+
+#[gpui::test]
+fn test_escape_in_the_filter_clears_it(cx: &mut TestAppContext) {
+    cx.update(crate::crud::init);
+    let (opened, _) = commerce(cx);
+    let (tree, cx) = (opened.tree, opened.cx);
+    set_filter(&tree, "list", cx);
+    assert_eq!(row_names(&tree, cx).len(), 3, "the filter is applied");
+    let filter = cx
+        .read(|cx| tree.read(cx).filter().cloned())
+        .expect("the tree has a filter");
+    cx.update(|window, cx| {
+        let handle = filter.read(cx).focus_handle(cx);
+        window.focus(&handle, cx);
+    });
+    draw_window(cx);
+    ui::test_support::press_key(cx, "escape");
+    cx.run_until_parked();
+    draw_window(cx);
+    assert_eq!(
+        cx.read(|cx| filter.read(cx).text()),
+        "",
+        "Escape in the filter clears it"
+    );
+    assert_eq!(
+        row_names(&tree, cx),
+        vec!["Commerce API"],
+        "the whole tree is back"
+    );
+}
+
+#[gpui::test]
+fn test_a_selection_the_filter_hides_moves_to_the_first_shown_row(cx: &mut TestAppContext) {
+    let (opened, [commerce, _, _, _, health]) = commerce(cx);
+    let (tree, cx) = (opened.tree, opened.cx);
+    tree.update(cx, |tree, cx| tree.set_expanded(commerce, true, cx));
+    draw_window(cx);
+    click(cx, format!("tree-item-{health}-name").leak());
+    set_filter(&tree, "list", cx);
+    let selected = cx.read(|cx| {
+        let tree = tree.read(cx);
+        tree.navigation.selected_index(tree.rows())
+    });
+    assert_eq!(
+        selected,
+        Some(0),
+        "the hidden selection moves to the first row the filter shows"
+    );
+}
+
+#[gpui::test]
+fn test_collapsing_while_filtering_leaves_the_tree_as_the_user_left_it(cx: &mut TestAppContext) {
+    let (opened, [_, orders, _, _, _]) = commerce(cx);
+    let (tree, cx) = (opened.tree, opened.cx);
+    set_filter(&tree, "order", cx);
+    assert_eq!(
+        row_names(&tree, cx),
+        vec!["Commerce API", "Orders", "List orders", "Get order"]
+    );
+    click(cx, format!("tree-toggle-{orders}").leak());
+    assert_eq!(
+        row_names(&tree, cx),
+        vec!["Commerce API", "Orders"],
+        "a chevron still closes a row while filtering"
+    );
+    set_filter(&tree, "", cx);
+    assert_eq!(
+        row_names(&tree, cx),
+        vec!["Commerce API"],
+        "clearing the filter shows the tree collapsed as the user left it"
+    );
+    set_filter(&tree, "order", cx);
+    assert_eq!(
+        row_names(&tree, cx).len(),
+        4,
+        "a new query opens the whole tree again"
+    );
+}
+
+#[gpui::test]
+fn test_the_accent_bar_is_the_themes_accent(cx: &mut TestAppContext) {
+    cx.update(init_test);
+    cx.update(|cx| {
+        assert_eq!(
+            super::accent_bar_color(cx),
+            cx.theme().colors().accent_background,
+            "the selected row's bar is drawn in the theme's accent token"
+        );
+    });
 }

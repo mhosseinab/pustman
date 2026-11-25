@@ -63,8 +63,14 @@ pub const PANEL_ID: &str = "collections";
 /// which is what a navigation list of one-line rows draws at.
 const ROW_HEIGHT_PX: f32 = 32.;
 
-/// The width of a row's method column: fixed so the names line up down the tree.
-const METHOD_COLUMN_PX: f32 = 48.;
+/// The width of a request row's method column: fixed so the names line up down the
+/// tree, and as wide as the mockup's method label (44 px) — DELETE in the content font.
+const METHOD_COLUMN_PX: f32 = 44.;
+
+/// How far a request row sits in from its depth's indent: the room a container's
+/// disclosure takes, less the indent step, so a request's method starts a little past
+/// where a sibling folder's chevron does (the blueprint's 22 → 36 px step).
+const LEAF_INSET_PX: f32 = 8.;
 
 /// The width of a row's disclosure column: fixed so a row's name starts in the same
 /// place whether its row expands and collapses or is a leaf.
@@ -185,6 +191,10 @@ pub struct CollectionsTree {
     filter: Option<Entity<TextInput>>,
     /// The filter's text as of its last edit, lower-cased and trimmed.
     filter_query: String,
+    /// The containers the user closed while a filter shows the whole tree open. Kept
+    /// apart from [`Self::expanded`], so toggling a row while filtering never changes
+    /// what the tree shows once the filter is cleared; reset on every new query.
+    filter_collapsed: BTreeSet<ItemId>,
     /// Kept so the filter's edits keep reaching [`Self::on_filter_event`].
     _filter_subscription: Option<Subscription>,
 }
@@ -210,6 +220,7 @@ impl CollectionsTree {
             focus_handle,
             filter: None,
             filter_query: String::new(),
+            filter_collapsed: BTreeSet::new(),
             _filter_subscription: None,
         }
     }
@@ -255,8 +266,44 @@ impl CollectionsTree {
         let query = filter.read(cx).text().trim().to_lowercase();
         if query != self.filter_query {
             self.filter_query = query;
+            self.filter_collapsed.clear();
             self.reflatten(cx);
+            self.reanchor_selection();
         }
+    }
+
+    /// The filter hid the selected row: the selection moves to the first row the filter
+    /// shows, so the keyboard never acts on a row the user cannot see.
+    fn reanchor_selection(&mut self) {
+        if self.navigation.selected_key().is_none()
+            || self.navigation.selected_index(&self.rows).is_some()
+        {
+            return;
+        }
+        if let Some(first) = self.rows.first() {
+            self.navigation.select(first.element_id(), 0);
+        }
+    }
+
+    /// Escape in the filter field: clear the filter. With the filter already empty the
+    /// key goes on to the tree's own Escape (backing out of a rename).
+    fn clear_filter(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(filter) = self.filter.clone() else {
+            cx.propagate();
+            return;
+        };
+        if filter.read(cx).text().is_empty() {
+            cx.propagate();
+            return;
+        }
+        // Clearing emits `Changed`, which re-derives the rows through the subscription.
+        filter.update(cx, |filter, cx| filter.set_text("", cx));
+        window.focus(&self.focus_handle, cx);
+    }
+
+    /// Whether the rows are filtered right now.
+    fn is_filtering(&self) -> bool {
+        !self.filter_query.is_empty()
     }
 
     /// The rows the tree draws.
@@ -278,7 +325,13 @@ impl CollectionsTree {
     /// Open or close one container. Recording the state of a leaf is harmless: it draws
     /// no disclosure and has no children to hold back.
     pub fn set_expanded(&mut self, id: ItemId, is_expanded: bool, cx: &mut Context<Self>) {
-        if is_expanded {
+        if self.is_filtering() {
+            if is_expanded {
+                self.filter_collapsed.remove(&id);
+            } else {
+                self.filter_collapsed.insert(id);
+            }
+        } else if is_expanded {
             self.expanded.insert(id);
         } else {
             self.expanded.remove(&id);
@@ -290,7 +343,11 @@ impl CollectionsTree {
     pub fn toggle_expanded(&mut self, id: ItemId, cx: &mut Context<Self>) {
         // The rows move under an open details popover.
         self.close_problem_details(cx);
-        let is_expanded = !self.expanded.contains(&id);
+        let is_expanded = if self.is_filtering() {
+            self.filter_collapsed.contains(&id)
+        } else {
+            !self.expanded.contains(&id)
+        };
         self.set_expanded(id, is_expanded, cx);
     }
 
@@ -300,12 +357,15 @@ impl CollectionsTree {
         self.rows = Arc::new(if self.filter_query.is_empty() {
             visible_rows(&self.snapshot, &self.expanded, &self.problems)
         } else {
-            // A filter looks through the whole tree, whatever is collapsed.
+            // A filter looks through the whole tree, whatever the user had collapsed —
+            // less what they closed while filtering.
             let every_container: BTreeSet<ItemId> = self
                 .snapshot
                 .items
                 .iter()
-                .filter(|(_, item)| container_order(&item.body).is_some())
+                .filter(|(id, item)| {
+                    container_order(&item.body).is_some() && !self.filter_collapsed.contains(id)
+                })
                 .map(|(id, _)| *id)
                 .collect();
             filter_rows(
@@ -416,7 +476,7 @@ impl CollectionsTree {
                         .bottom_0()
                         .w(px_to_rems(ACCENT_BAR_PX))
                         .rounded_sm()
-                        .bg(cx.theme().colors().accent_background),
+                        .bg(accent_bar_color(cx)),
                 )
             })
             .when(!selected, |row| {
@@ -444,7 +504,6 @@ impl CollectionsTree {
             // insertion line rides over its content.
             .map(|frame| self.row_drag(frame, id, name.clone(), cx))
             .child(self.disclosure(id, is_expanded, name.clone(), cx))
-            .child(self.method_column(row_key, None, cx))
             .child(self.name_element(id, name, row_key, cx))
             .children(self.drop_indicator(id, cx))
             .into_any_element()
@@ -461,10 +520,12 @@ impl CollectionsTree {
         row_key: &ElementId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let indent = INDENT_PX * f32::from(u16::try_from(depth).unwrap_or(u16::MAX));
         self.row_frame(depth, row_key, Some(id), cx)
+            // A leaf has no disclosure: its column folds into the indent.
+            .pl(px_to_rems(indent + LEAF_INSET_PX))
             .map(|frame| self.row_drag(frame, id, name.clone(), cx))
-            .child(div().flex_none().w(px_to_rems(DISCLOSURE_COLUMN_PX)))
-            .child(self.method_column(row_key, Some(method), cx))
+            .child(self.method_column(row_key, method, cx))
             .child(self.name_element(id, name, row_key, cx))
             .children(self.drop_indicator(id, cx))
             .into_any_element()
@@ -535,7 +596,9 @@ impl CollectionsTree {
             IconName::ChevronRight
         };
         let verb = if is_expanded { "Collapse" } else { "Expand" };
+        let selector = format!("tree-toggle-{id}");
         div()
+            .debug_selector(move || selector)
             .flex_none()
             .w(px_to_rems(DISCLOSURE_COLUMN_PX))
             .child(
@@ -551,32 +614,23 @@ impl CollectionsTree {
             .into_any_element()
     }
 
-    /// The method column: the request's method (or the `type` of a request kind this
-    /// build does not model) in the content font, or nothing on a row that is not a
-    /// request.
-    fn method_column(
-        &self,
-        row_id: &ElementId,
-        method: Option<SharedString>,
-        cx: &App,
-    ) -> AnyElement {
-        let column = div().flex_none().w(px_to_rems(METHOD_COLUMN_PX)).min_w_0();
-        match method {
-            Some(method) => {
-                let color = method_color(&method, cx);
-                column
-                    .child(row_label(
-                        method,
-                        ElementId::from(format!("{row_id}-method")),
-                        LabelFont::Buffer,
-                        TextSize::XSmall,
-                        color,
-                        cx,
-                    ))
-                    .into_any_element()
-            }
-            None => column.into_any_element(),
-        }
+    /// A request row's method column: its method (or the `type` of a request kind this
+    /// build does not model) in the content font, in the method's colour.
+    fn method_column(&self, row_id: &ElementId, method: SharedString, cx: &App) -> AnyElement {
+        let color = method_color(&method, cx);
+        div()
+            .flex_none()
+            .w(px_to_rems(METHOD_COLUMN_PX))
+            .min_w_0()
+            .child(row_label(
+                method,
+                ElementId::from(format!("{row_id}-method")),
+                LabelFont::Buffer,
+                TextSize::XSmall,
+                color,
+                cx,
+            ))
+            .into_any_element()
     }
 
     /// The panel's root element: its identity, its key context and the five navigation
@@ -773,7 +827,7 @@ impl Panel for CollectionsTree {
 impl CollectionsTree {
     /// The row above the tree: "Find in collections" and "＋ New" (S48u3) — creating a
     /// collection never depends on the right-click menu.
-    fn toolbar(&self, cx: &App) -> AnyElement {
+    fn toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
         let focus_handle = self.focus_handle.clone();
         h_flex()
             .w_full()
@@ -782,6 +836,9 @@ impl CollectionsTree {
             .children(self.filter.clone().map(|filter| {
                 div()
                     .debug_selector(|| FILTER_ID.to_owned())
+                    // Nearer the focused field than the panel root, so Escape clears
+                    // the filter before the tree's own Escape sees it.
+                    .on_action(cx.listener(Self::clear_filter))
                     .flex_1()
                     .min_w_0()
                     .child(filter)
@@ -820,6 +877,11 @@ impl CollectionsTree {
                 }),
         )
     }
+}
+
+/// The selected row's accent bar colour: the theme's accent token, never a literal.
+pub(crate) fn accent_bar_color(cx: &App) -> gpui::Hsla {
+    cx.theme().colors().accent_background
 }
 
 /// A sidebar empty state (mockup `.side-empty`): one muted line saying what belongs here,
