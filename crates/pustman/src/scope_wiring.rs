@@ -494,6 +494,7 @@ pub fn init(cx: &mut App) {
             let (scopes, sources) = scopes_for(&open, request_id, cx);
             editor.set_scopes(scopes, cx);
             editor.set_secret_sources(sources, cx);
+            editor.set_environment_name(active_environment_name(&open), cx);
         }),
         cx.observe_new::<Workspace>(|_workspace, _window, cx| {
             let workspace = cx.entity();
@@ -594,6 +595,7 @@ fn close_workspace(cx: &mut App) {
         editor.update(cx, |editor, cx| {
             editor.set_scopes(ScopeStack::new(), cx);
             editor.set_secret_sources(SecretSources::default(), cx);
+            editor.set_environment_name(None, cx);
         });
     }
 }
@@ -1119,15 +1121,17 @@ fn apply(cx: &mut App) {
         .collect();
     for editor in editors {
         let of_open_workspace = bound.contains(&editor.entity_id());
-        let (scopes, sources) = if of_open_workspace {
+        let (scopes, sources, environment) = if of_open_workspace {
             let request_id = editor.read(cx).draft().id;
-            scopes_for(&open, request_id, cx)
+            let (scopes, sources) = scopes_for(&open, request_id, cx);
+            (scopes, sources, active_environment_name(&open))
         } else {
-            (ScopeStack::new(), SecretSources::default())
+            (ScopeStack::new(), SecretSources::default(), None)
         };
         editor.update(cx, |editor, cx| {
             editor.set_scopes(scopes, cx);
             editor.set_secret_sources(sources, cx);
+            editor.set_environment_name(environment, cx);
         });
     }
 }
@@ -1197,6 +1201,13 @@ fn install_inputs(open: &OpenScopes, cx: &mut App) {
 
 /// The scopes one request resolves against — globals, its collection, the active
 /// environment — and where its secrets come from (module docs).
+/// The active environment's display name: what the editors' variable line names an
+/// environment source by ("Source: Development").
+fn active_environment_name(open: &OpenScopes) -> Option<String> {
+    open.active_environment()
+        .map(|(environment, _)| environment.name.clone())
+}
+
 fn scopes_for(open: &OpenScopes, request_id: ItemId, cx: &App) -> (ScopeStack, SecretSources) {
     let mut layers: Vec<(ScopeKind, &EditTarget)> = Vec::new();
     if let Some(globals) = &open.globals {

@@ -15,10 +15,9 @@
 //! `environment_picker` depends on this crate and cannot be named from it. A build
 //! that fails (the editor is not part of this app) is told to the user as a toast.
 //!
-//! `Decision:` the source is the winning scope's kind ("Environment", "Global", …),
-//! not the environment's display name: the editor's [`variables::ScopeStack`] carries
-//! kinds only, and naming the active environment would need the app's scope wire
-//! (`crates/pustman`), outside this step.
+//! The source names the active environment ("Source: Development") when the app's scope
+//! wire gave the editor its name ([`RequestEditor::set_environment_name`]); other scopes
+//! read by kind ("Global", "Collection").
 //!
 //! The line is recomputed when the draft or the scopes change
 //! ([`RequestEditor::refresh_variable_line`]), never in `render`.
@@ -116,6 +115,23 @@ impl RequestEditor {
         &self.variable_line
     }
 
+    /// The active environment's display name, what the line names an environment
+    /// source and an undefined name by (the app's scope wire sets it beside the scopes).
+    pub fn set_environment_name(&mut self, name: Option<String>, cx: &mut Context<Self>) {
+        if self.environment_name != name {
+            self.environment_name = name;
+            self.refresh_variable_line(cx);
+        }
+    }
+
+    /// How the line names a scope: the active environment by its name when known.
+    fn scope_name(&self, kind: Option<ScopeKind>) -> String {
+        match (kind, &self.environment_name) {
+            (Some(ScopeKind::Environment), Some(name)) => name.clone(),
+            _ => scope_label(kind),
+        }
+    }
+
     /// Recompute the line from the draft and the scopes.
     pub(super) fn refresh_variable_line(&mut self, cx: &mut Context<Self>) {
         let entries: Vec<VariableLineEntry> = request_variable_names(&self.draft)
@@ -139,7 +155,12 @@ impl RequestEditor {
                 source: String::from("Source: Dynamic"),
             };
         }
-        let source = || format!("Source: {}", scope_label(scope_kind_of(&self.scopes, name)));
+        let source = || {
+            format!(
+                "Source: {}",
+                self.scope_name(scope_kind_of(&self.scopes, name))
+            )
+        };
         match self.scopes.find(name) {
             Some(binding) if binding.variable.kind == VariableKind::Secret => {
                 if binding.value.is_some() || self.keychain_resolves(name) {
@@ -162,7 +183,7 @@ impl RequestEditor {
                 None => EntryState::Unresolved {
                     message: format!(
                         "has no value in {}.",
-                        scope_label(scope_kind_of(&self.scopes, name))
+                        self.scope_name(scope_kind_of(&self.scopes, name))
                     ),
                     fix: VariableFix::OpenVariablesEditor,
                 },
@@ -174,11 +195,11 @@ impl RequestEditor {
                     .iter()
                     .any(|scope| scope.kind == ScopeKind::Environment);
                 EntryState::Unresolved {
-                    message: String::from(if has_environment {
-                        "is not defined in the active environment."
-                    } else {
-                        "is not defined in any scope."
-                    }),
+                    message: match (has_environment, &self.environment_name) {
+                        (true, Some(environment)) => format!("is not defined in {environment}."),
+                        (true, None) => String::from("is not defined in the active environment."),
+                        (false, _) => String::from("is not defined in any scope."),
+                    },
                     fix: VariableFix::OpenVariablesEditor,
                 }
             }

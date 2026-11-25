@@ -178,3 +178,27 @@ fn test_an_undefined_variable_set_it_opens_the_variables_editor(cx: &mut TestApp
 
     assert_eq!(*opened.borrow(), 1, "Set it… dispatched env_editor::Open");
 }
+
+#[gpui::test]
+fn test_the_line_names_the_active_environment_it_was_given(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx);
+    cx.update(|_, cx| {
+        editor.update(cx, |editor, cx| {
+            editor.set_environment_name(Some(String::from("Development")), cx)
+        })
+    });
+
+    assert_eq!(
+        state_of(&editor, cx, "base_url"),
+        EntryState::Resolved {
+            shown: String::from("https://api.dev.example.test"),
+            source: String::from("Source: Development"),
+        }
+    );
+    match state_of(&editor, cx, "page_size") {
+        EntryState::Unresolved { message, .. } => {
+            assert_eq!(message, "is not defined in Development.")
+        }
+        other => panic!("page_size is unresolved, got {other:?}"),
+    }
+}

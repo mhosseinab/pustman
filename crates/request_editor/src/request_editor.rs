@@ -113,6 +113,8 @@ pub struct RequestEditor {
     location: Option<Vec<String>>,
     /// Each `{{variable}}` the request uses and what it resolves to (`variable_line`).
     variable_line: Vec<variable_line::VariableLineEntry>,
+    /// The active environment's name, for the variable line (`variable_line`).
+    environment_name: Option<String>,
     /// The counts and dots the tab strip shows (`request_tabs`).
     tab_badges: request_tabs::TabBadges,
     /// The Params tab: the query and path-variable tables (S27a).
@@ -289,6 +291,7 @@ impl RequestEditor {
             active_tab: PARAMS_TAB_INDEX,
             tab_badges,
             variable_line: Vec::new(),
+            environment_name: None,
             location: None,
             params,
             headers,
