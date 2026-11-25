@@ -1,6 +1,6 @@
-//! The recent workspaces the title bar offers (S48u2): the workspace switcher's list and
-//! the app menu's File › Open recent submenu both read [`recent_workspaces`], so the two
-//! can never disagree — each entry under the workspace's own name, the one the switcher
+//! The recent workspaces (S48u2): the one source every list of them reads — the workspace
+//! switcher, the app menu's File › Open recent submenu, the welcome pane's Recent list
+//! and the `OpenRecent` picker (#332/#333) — so no two of them can disagree — each entry under the workspace's own name, the one the switcher
 //! shows for the open workspace. Choosing one dispatches [`OpenRecentWorkspace`], which lands in
 //! [`WorkspaceOpen::open_folder`] — the one door every open goes through (S41a).
 //!
@@ -8,9 +8,10 @@
 //! and after every workspace open (each open records a row, so the list changes then and
 //! only then). The read runs on a background task (AGENTS.md › async) and a folder that
 //! no longer exists is left out, the shape `command_palette`'s Open Recent picker reads
-//! the same table in. A failed refresh keeps the last list and is logged, not toasted: it
-//! runs on its own at launch, nobody asked for it, and the picker (`workspace::OpenRecent`)
-//! still reports a failed read to the user who does ask.
+//! the same table in. A failed refresh keeps the last list, marks it failed — the
+//! welcome says so in its Recent list — and is not toasted: it runs on its own at launch,
+//! nobody asked for it. The picker (`workspace::OpenRecent`) re-reads through
+//! [`reload_recent_workspaces`] and toasts a failed read to the user who does ask.
 //!
 //! `Decision:` an entry's name is the `name` in its folder's `pustman.json`, read with the
 //! same background stat (only that one field, never the whole workspace); a file without
@@ -20,7 +21,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use gpui::{App, Global, SharedString, Subscription, Task};
+use gpui::{App, BorrowAppContext, Global, SharedString, Subscription, Task};
 use storage::LocalStore;
 
 use crate::workspace_open::{
@@ -56,17 +57,37 @@ pub struct RecentEntry {
     pub name: String,
 }
 
-/// The recent workspaces that still exist, newest first.
+/// The recent workspaces that still exist, newest first, and whether the last read of
+/// them failed.
 #[derive(Default)]
-pub struct RecentWorkspaces(Vec<RecentEntry>);
+pub struct RecentWorkspaces {
+    pub(crate) entries: Vec<RecentEntry>,
+    pub(crate) failed: bool,
+}
 
 impl Global for RecentWorkspaces {}
 
 /// The recent workspaces, newest first — empty until the first read lands.
 pub fn recent_workspaces(cx: &App) -> &[RecentEntry] {
     cx.try_global::<RecentWorkspaces>()
-        .map(|recents| recents.0.as_slice())
+        .map(|recents| recents.entries.as_slice())
         .unwrap_or_default()
+}
+
+/// Whether the last read of the recent list failed; the list then holds what the read
+/// before it found.
+pub fn recent_workspaces_failed(cx: &App) -> bool {
+    cx.try_global::<RecentWorkspaces>()
+        .is_some_and(|recents| recents.failed)
+}
+
+/// Why [`reload_recent_workspaces`] could not refresh the list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecentReadError {
+    /// The app has not installed its local store yet ([`WorkspaceOpen::local_store`]).
+    NotConnected,
+    /// The store could not be read; the list keeps what it held.
+    Unreadable,
 }
 
 /// Where `entries[index]` lives, when another recent workspace has the same name: the
@@ -86,7 +107,7 @@ pub fn disambiguation(entries: &[RecentEntry], index: usize) -> Option<SharedStr
 #[derive(Default)]
 struct Wiring {
     started: bool,
-    refreshing: Option<Task<()>>,
+    refreshing: Option<Task<Result<(), RecentReadError>>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -118,22 +139,40 @@ pub fn init(cx: &mut App) {
     }
 }
 
-/// Re-read the list off the foreground thread and install it.
+/// Re-read the list off the foreground thread and install it, replacing — cancelling —
+/// a refresh still in flight.
 fn refresh(cx: &mut App) {
+    let task = reload_recent_workspaces(cx);
+    cx.default_global::<Wiring>().refreshing = Some(task);
+}
+
+/// Re-read the recent list off the foreground thread and install it in the one
+/// [`RecentWorkspaces`] global every reader draws from; the task resolves once the
+/// global holds the result. A failed read keeps the last list and marks it failed.
+pub fn reload_recent_workspaces(cx: &mut App) -> Task<Result<(), RecentReadError>> {
     let Some(store) = WorkspaceOpen::local_store(cx) else {
-        return;
+        return Task::ready(Err(RecentReadError::NotConnected));
     };
-    let task = cx.spawn(async move |cx| {
+    cx.spawn(async move |cx| {
         let read = cx
             .background_executor()
             .spawn(async move { read_existing_workspaces(&store) })
             .await;
-        match read {
-            Some(entries) => cx.update(|cx| cx.set_global(RecentWorkspaces(entries))),
-            None => log::error!("the recent workspaces could not be read for the title bar"),
-        }
-    });
-    cx.default_global::<Wiring>().refreshing = Some(task);
+        cx.update(|cx| {
+            cx.update_default_global::<RecentWorkspaces, _>(|recents, _cx| match read {
+                Some(entries) => {
+                    recents.entries = entries;
+                    recents.failed = false;
+                    Ok(())
+                }
+                None => {
+                    log::error!("the recent workspaces could not be read");
+                    recents.failed = true;
+                    Err(RecentReadError::Unreadable)
+                }
+            })
+        })
+    })
 }
 
 /// The recorded workspaces whose folders still exist, newest first, each named from its
@@ -190,3 +229,7 @@ fn open_recent_workspace(action: &OpenRecentWorkspace, cx: &mut App) {
     let folder = PathBuf::from(&action.path);
     with_active_opener(cx, move |opener, cx| opener.open_folder(folder, cx));
 }
+
+#[cfg(test)]
+#[path = "recent_single_source_tests.rs"]
+mod single_source_tests;

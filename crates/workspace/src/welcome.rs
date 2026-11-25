@@ -16,11 +16,11 @@
 //! Reading the window's [`WorkspaceOpen`] while drawing is what makes it redraw when a
 //! workspace opens ([`WorkspaceOpen`] notifies on every open).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use gpui::{
     Action, App, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, Role,
-    SharedString, StatefulInteractiveElement, Subscription, Task, Window,
+    SharedString, StatefulInteractiveElement, Subscription, Window,
 };
 use pustman_actions::import_export::Import;
 use pustman_actions::workspace::{CreateWorkspace, NewTab, OpenWorkspace, ToggleSidebar};
@@ -28,9 +28,10 @@ use ui::prelude::*;
 
 use crate::Workspace;
 use crate::item::Item;
-use crate::workspace_open::{
-    OpenStore, RecentListError, RecentsChanged, WorkspaceOpen, recent_folders,
+use crate::recent_workspaces::{
+    RecentEntry, RecentWorkspaces, recent_workspaces, recent_workspaces_failed,
 };
+use crate::workspace_open::WorkspaceOpen;
 
 #[cfg(test)]
 #[path = "welcome_tests.rs"]
@@ -64,66 +65,28 @@ const MAX_RECENT_ROWS: usize = 5;
 /// What the Recent list shows when the store could not be read.
 const RECENT_FAILURE_MESSAGE: &str = "The recent workspaces could not be read.";
 
+/// The failed-read line's test selector.
+pub(crate) const RECENT_FAILURE_SELECTOR: &str = "welcome-recent-failure";
+
 /// One Recent row's element id and test selector: the folder's path, its stable identity.
 pub(crate) fn recent_row_id(folder: &Path) -> String {
     format!("welcome-recent-{}", folder.to_string_lossy())
 }
 
-/// The recent list as the last background read left it.
-enum Recent {
-    /// Not read yet — no store installed, or the read is in flight.
-    Unknown,
-    /// The recorded folders that still exist, newest first.
-    Folders(Vec<PathBuf>),
-    /// The read failed; the list says so instead of looking empty.
-    Failed,
-}
-
-/// The pane's empty state (see the module docs).
+/// The pane's empty state (see the module docs). Its Recent list is the app's one recent
+/// list ([`recent_workspaces`]), redrawn whenever that list changes.
 pub struct Welcome {
-    recent: Recent,
-    /// The recent-list read in flight; replacing it cancels the stale one.
-    _loading: Option<Task<()>>,
-    /// Re-reads the list when the app's local store lands.
     _subscriptions: Vec<Subscription>,
 }
 
 impl Welcome {
-    /// A fresh welcome item; it reads the recent list as soon as the local store exists.
+    /// A fresh welcome item, following the app's recent list.
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let mut welcome = Self {
-            recent: Recent::Unknown,
-            _loading: None,
-            _subscriptions: vec![
-                cx.observe_global::<OpenStore>(|welcome, cx| welcome.load_recent(cx)),
-                // A workspace opened anywhere re-dated the list: read it again.
-                cx.observe_global::<RecentsChanged>(|welcome, cx| welcome.load_recent(cx)),
-            ],
-        };
-        welcome.load_recent(cx);
-        welcome
-    }
-
-    /// Read the recent list off the foreground thread (AGENTS.md › async).
-    fn load_recent(&mut self, cx: &mut Context<Self>) {
-        let Some(store) = WorkspaceOpen::local_store(cx) else {
-            return;
-        };
-        self._loading = Some(cx.spawn(async move |this, cx| {
-            let read = cx
-                .background_executor()
-                .spawn(async move { recent_folders(&store) })
-                .await;
-            // The welcome went away with its tab; nobody is left to show the list to.
-            this.update(cx, |welcome, cx| {
-                welcome.recent = match read {
-                    Ok(folders) => Recent::Folders(folders),
-                    Err(RecentListError) => Recent::Failed,
-                };
-                cx.notify();
-            })
-            .ok();
-        }));
+        // Idempotent: the list is wired once per app, by whichever reader comes first.
+        crate::recent_workspaces::init(cx);
+        Self {
+            _subscriptions: vec![cx.observe_global::<RecentWorkspaces>(|_welcome, cx| cx.notify())],
+        }
     }
 
     /// The "Start with a workspace" state.
@@ -203,22 +166,20 @@ impl Welcome {
         open_root: Option<&Path>,
         cx: &App,
     ) -> Option<AnyElement> {
-        let folders: Vec<&PathBuf> = match &self.recent {
-            Recent::Unknown => return None,
-            Recent::Failed => {
-                return Some(
-                    Label::new(RECENT_FAILURE_MESSAGE)
-                        .color(Color::Error)
-                        .into_any_element(),
-                );
-            }
-            Recent::Folders(folders) => folders
-                .iter()
-                .filter(|folder| Some(folder.as_path()) != open_root)
-                .take(MAX_RECENT_ROWS)
-                .collect(),
-        };
-        if folders.is_empty() {
+        if recent_workspaces_failed(cx) {
+            return Some(
+                div()
+                    .debug_selector(|| RECENT_FAILURE_SELECTOR.to_owned())
+                    .child(Label::new(RECENT_FAILURE_MESSAGE).color(Color::Error))
+                    .into_any_element(),
+            );
+        }
+        let entries: Vec<&RecentEntry> = recent_workspaces(cx)
+            .iter()
+            .filter(|entry| Some(entry.path.as_path()) != open_root)
+            .take(MAX_RECENT_ROWS)
+            .collect();
+        if entries.is_empty() {
             return None;
         }
         let opener = opener.cloned();
@@ -237,8 +198,8 @@ impl Welcome {
                         .rounded_md()
                         .border_color(colors.border_variant)
                         .bg(colors.surface_background)
-                        .children(folders.into_iter().enumerate().map(|(index, folder)| {
-                            recent_row(folder.clone(), index > 0, opener.clone(), cx)
+                        .children(entries.into_iter().enumerate().map(|(index, entry)| {
+                            recent_row(entry, index > 0, opener.clone(), cx)
                         })),
                 )
                 .into_any_element(),
@@ -409,17 +370,18 @@ fn new_request_row(cx: &App) -> impl IntoElement {
         .child(KeyBinding::for_action(&NewTab).size(TextSize::Default))
 }
 
-/// One Recent row: the folder's name, its path muted at the right. A keyboard-reachable
-/// list item; activating it opens the folder in this window.
+/// One Recent row: the workspace's name, its path muted at the right. A
+/// keyboard-reachable list item; activating it opens the folder in this window.
 fn recent_row(
-    folder: PathBuf,
+    entry: &RecentEntry,
     divided: bool,
     opener: Option<Entity<WorkspaceOpen>>,
     cx: &App,
 ) -> impl IntoElement {
+    let folder = entry.path.clone();
     let id = recent_row_id(&folder);
     let selector = id.clone();
-    let name = workspace_name(&folder);
+    let name = entry.name.clone();
     let path: SharedString = folder.to_string_lossy().into_owned().into();
     let colors = cx.theme().colors();
     h_flex()
