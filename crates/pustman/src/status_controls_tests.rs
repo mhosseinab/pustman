@@ -3,13 +3,18 @@
 //! and the status bar's Console, Cookies and Sidebar controls each run their action when
 //! clicked — nothing in the bar does nothing.
 
+use std::sync::Arc;
+use std::time::Duration;
+
+use console::{ConsoleEntry, ConsoleLevel, ConsoleStore};
 use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext};
 use response_viewer::cookie_dialog::CookieDialog;
+use storage::Layout;
 use ui::test_support::draw_window;
 use workspace::Workspace;
 
 use crate::status_items::{CONSOLE_TOGGLE_SELECTOR, COOKIES_SELECTOR, SIDEBAR_TOGGLE_SELECTOR};
-use crate::{StoreLocation, init_with_store};
+use crate::{AppStore, StoreLocation, init_with_store};
 
 fn first_launch(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext) {
     cx.update(|cx| init_with_store(cx, StoreLocation::InMemory));
@@ -53,7 +58,9 @@ fn test_a_first_launch_starts_the_console_collapsed_to_its_strip(cx: &mut TestAp
 }
 
 #[gpui::test]
-fn test_the_status_bar_console_control_unfolds_and_hides_the_console(cx: &mut TestAppContext) {
+fn test_the_status_bar_console_control_moves_between_strip_and_full_console(
+    cx: &mut TestAppContext,
+) {
     let (workspace, cx) = first_launch(cx);
 
     click(cx, CONSOLE_TOGGLE_SELECTOR);
@@ -64,9 +71,69 @@ fn test_the_status_bar_console_control_unfolds_and_hides_the_console(cx: &mut Te
     );
 
     click(cx, CONSOLE_TOGGLE_SELECTOR);
-    assert!(
-        !console_state(&workspace, cx).0,
-        "clicking it again hides the console"
+    assert_eq!(
+        console_state(&workspace, cx),
+        (true, true),
+        "clicking it again folds the console back to its strip, never hides it"
+    );
+}
+
+#[gpui::test]
+fn test_new_console_entries_leave_the_strip_folded(cx: &mut TestAppContext) {
+    let (workspace, cx) = first_launch(cx);
+    cx.update(|_, cx| {
+        ConsoleStore::push(
+            cx,
+            ConsoleEntry {
+                level: ConsoleLevel::Error,
+                protocol: "http".to_owned(),
+                method: None,
+                url: "http://example.test/failed".to_owned(),
+                status: Some(500),
+                time: Some(Duration::from_millis(7)),
+                size: Some(0),
+                raw_request: String::new(),
+                raw_response: String::new(),
+            },
+        );
+    });
+    cx.run_until_parked();
+    draw_window(cx);
+    assert_eq!(
+        console_state(&workspace, cx),
+        (true, true),
+        "an entry, even an error, does not unfold the console by itself"
+    );
+}
+
+#[gpui::test]
+fn test_a_window_with_a_saved_expanded_console_opens_expanded(cx: &mut TestAppContext) {
+    let (_first, cx) = first_launch(cx);
+    cx.update(|_, cx| {
+        let store = Arc::clone(&cx.global::<AppStore>().0);
+        let json = serde_json::json!({
+            "left_dock": { "is_open": true, "size_px": 248.0, "collapsed": false },
+            "bottom_dock": { "is_open": true, "size_px": 240.0, "collapsed": false },
+        });
+        store
+            .lock()
+            .expect("the store lock is free")
+            .layout()
+            .insert(&Layout {
+                workspace_id: crate::WORKSPACE_ID.to_owned(),
+                json,
+            })
+            .expect("the layout saves");
+    });
+
+    let (reopened, cx) = cx.add_window_view(Workspace::new);
+    cx.run_until_parked();
+    draw_window(cx);
+
+    assert_eq!(
+        console_state(&reopened, cx),
+        (true, false),
+        "the saved open console wins over the app's resting strip"
     );
 }
 
