@@ -380,3 +380,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — S54a merged (SSE parser; security fix 2 + re-reviews; VERIFY OK).
 - 2026-11-25 — Dispatched S54b (stream an event-stream response; http-engine-engineer). Running: S51d fix, S54b. Disk 28 GB.
 - 2026-11-25 — S51d merged (message log toolbar; UI fix 1; authorized EXPECTED_ACTIONS edit, ledger row now used; VERIFY OK; LOW #347).
+- 2026-11-25 — S51d merged. Dispatched S51e (one Console entry per session; http-engine-engineer; carries #338). Running: S54b, S51e. Disk 36 GB.
