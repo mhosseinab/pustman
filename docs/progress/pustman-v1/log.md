@@ -372,3 +372,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — S52a re-review CHANGES_REQUESTED: history must keep masking Digest/OAuth2 usernames and AWS access_key (Basic rule) → fix 2, with the Digest/OAuth2 harmless-key lists corrected to stop false credential warnings.
 - 2026-11-25 — S51c merged (message log view; UI fix 1; VERIFY OK; LOW #346).
 - 2026-11-25 — S52a merged (auth kinds model; high-stakes; security fix 2 + re-review; VERIFY OK; LOW #345).
+- 2026-11-25 — S52 done. Dispatched S54a (SSE parser; http-engine-engineer) and S51d (message log toolbar; ui-implementer; carries #341/#346 notes). Disk 38 GB.
