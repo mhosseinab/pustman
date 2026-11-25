@@ -31,7 +31,11 @@
 //! renamed) or another keychain is installed — never on an environment switch or an
 //! unrelated disk change. What the app itself writes to the keychain is learnt from the
 //! write: the wire installs the keychain behind [`TrackedKeychain`], which notes each
-//! key set or removed (never a value).
+//! key set or removed (never a value). The set is one shared cell per open workspace
+//! ([`StoredSecrets`]), read at call time (S43x): a snapshot copied into each lookup
+//! would freeze a failed send's key naming before the very save that makes its secret
+//! resolvable, and the `UnresolvedSecret` panel's re-check — which resolves against that
+//! captured send — could then never offer Resend.
 //!
 //! `Decision:` (fix 1) local values, the active environment's selection and keychain
 //! entries live under [`workspace_key`]: the workspace's `pustman.json` id bound to the
@@ -59,7 +63,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 use api_model::{
     Auth, Body, Environment, HttpRequest, ItemId, Request, RequestSettings, VariableKind,
@@ -283,6 +287,51 @@ impl ScopeWiring {
     }
 }
 
+/// The secret keys the keychain holds an entry for (module docs): one shared cell per
+/// open workspace (S43x), read by every [`SecretKeyLookup`](http_engine::SecretKeyLookup)
+/// closure at call time. A snapshot — `Arc<HashSet<_>>` cloned into each closure — went
+/// stale behind the very save that makes a secret resolvable: the `UnresolvedSecret`
+/// panel's captured failed send then keeps answering "not stored" for ever and its
+/// re-check never offers Resend. Keys only: nothing reads a value through this, and the
+/// lock is never held across an `.await`.
+#[derive(Clone, Default)]
+struct StoredSecrets(Arc<RwLock<HashSet<SecretKey>>>);
+
+impl StoredSecrets {
+    /// Whether the keychain holds an entry for `key`.
+    fn contains(&self, key: &SecretKey) -> bool {
+        self.0
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(key)
+    }
+
+    /// Fold `writes` — one entry set or removed per key — into the cell in place;
+    /// whether that changed it.
+    fn apply_writes(&self, writes: impl IntoIterator<Item = (SecretKey, bool)>) -> bool {
+        let mut stored = self.0.write().unwrap_or_else(PoisonError::into_inner);
+        let mut changed = false;
+        for (key, is_stored) in writes {
+            changed |= if is_stored {
+                stored.insert(key)
+            } else {
+                stored.remove(&key)
+            };
+        }
+        changed
+    }
+
+    /// Replace the cell with what a presence check found; whether it differed.
+    fn replace_with(&self, keys: HashSet<SecretKey>) -> bool {
+        let mut stored = self.0.write().unwrap_or_else(PoisonError::into_inner);
+        if *stored == keys {
+            return false;
+        }
+        *stored = keys;
+        true
+    }
+}
+
 /// One opened workspace's scopes. [`EditTarget`] names each scope's id and variables —
 /// the same ids the environment editor saves local values and keychain entries under.
 #[derive(Clone)]
@@ -303,8 +352,10 @@ struct OpenScopes {
     requests: BTreeMap<ItemId, RequestTarget>,
     local_values: Vec<LocalValue>,
     active: Option<ItemId>,
-    /// The secret keys the keychain holds an entry for (module docs).
-    stored_secrets: Arc<HashSet<SecretKey>>,
+    /// The secret keys the keychain holds an entry for (module docs) — shared live
+    /// ([`StoredSecrets`]), so every lookup closure built from these scopes reads it at
+    /// call time.
+    stored_secrets: StoredSecrets,
 }
 
 impl OpenScopes {
@@ -620,7 +671,7 @@ fn scopes_of(snapshot: &WorkspaceSnapshot) -> Option<OpenScopes> {
             .collect(),
         local_values: Vec::new(),
         active: None,
-        stored_secrets: Arc::default(),
+        stored_secrets: StoredSecrets::default(),
     })
 }
 
@@ -905,10 +956,9 @@ fn land_secret_check(
     wiring.checked_secrets = Some(checked);
     // Only a change re-resolves: re-installing the inputs runs the check again, and an
     // unchanged answer has to end that loop.
-    if *open.stored_secrets == stored {
+    if !open.stored_secrets.replace_with(stored) {
         return;
     }
-    open.stored_secrets = Arc::new(stored);
     apply(cx);
 }
 
@@ -1019,22 +1069,10 @@ fn take_secret_writes(cx: &mut App) -> bool {
     if wiring.checking_secrets.is_some() {
         wiring.writes_during_check.extend(writes.iter().cloned());
     }
-    let Some(open) = wiring.open.as_mut() else {
+    let Some(open) = wiring.open.as_ref() else {
         return false;
     };
-    let mut stored = (*open.stored_secrets).clone();
-    for (key, is_stored) in writes {
-        if is_stored {
-            stored.insert(key);
-        } else {
-            stored.remove(&key);
-        }
-    }
-    if stored == *open.stored_secrets {
-        return false;
-    }
-    open.stored_secrets = Arc::new(stored);
-    true
+    open.stored_secrets.apply_writes(writes)
 }
 
 /// The live request editors, dropping dead handles.
@@ -1212,7 +1250,10 @@ fn scopes_for(open: &OpenScopes, request_id: ItemId, cx: &App) -> (ScopeStack, S
     }
     let sources = match (secret_values::store(cx), open.key.clone()) {
         (Some(store), Some(workspace_key)) => {
-            let stored = Arc::clone(&open.stored_secrets);
+            // Read at call time, not captured as a snapshot (S43x): the closure outlives
+            // the wiring that built it — the `UnresolvedSecret` panel re-checks a failed
+            // send's own inputs after a save has added keys.
+            let stored = open.stored_secrets.clone();
             SecretSources {
                 store,
                 key_of: Arc::new(move |kind, name| {

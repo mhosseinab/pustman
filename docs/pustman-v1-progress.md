@@ -125,7 +125,7 @@ Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub p
 | S42 | External change bar and problem badges | done | 0 | | | S42a, S42b, S42c merged |
 | S43 | Environment editor: shared, local and secret values; set-secret prompt on send | done | 0 | | | S43a, S43b, S43c, S43w merged |
 | S43w | Wire the active environment and globals into open editors (driver-added, S48 prereq; after S41, S43) | done | 0 | | |  |
-| S43x | Wire the unresolved-secret panel's inputs on every failed send (driver-added, #324; S48 prereq) | in_progress | 0 | | |  |
+| S43x | Wire the unresolved-secret panel's inputs on every failed send (driver-added, #324; S48 prereq) | done | 0 | | | S43x merged |
 | S44 | `git` crate + status bar branch and dirty count | done | 0 | | | S44a, S44b, S44w merged |
 | S45 | Import/export UI (Postman collection, environment, globals) | in_progress | 0 | | | S45a, S45c merged |
 | S46 | Quick open (`Ctrl/Cmd-P`) | done | 0 | | | S46 merged |

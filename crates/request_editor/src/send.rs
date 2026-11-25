@@ -40,6 +40,7 @@
 //! `FakeTransport`. `request_editor::init` cannot install one either: the transport is
 //! an app-level wiring decision.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use api_model::{Auth, HttpRequest};
@@ -246,7 +247,7 @@ impl RequestEditor {
         let warnings = match self.presend_check(&ancestors) {
             Ok(warnings) => warnings,
             Err(error) => {
-                self.fail_send(&sent, &error, &[], cx);
+                self.fail_send(&sent, &error, &[], None, cx);
                 return;
             }
         };
@@ -272,6 +273,16 @@ impl RequestEditor {
             secrets: self.secret_sources.store.clone(),
             secret_key: self.secret_sources.key_of.clone(),
         };
+        // The failed-send panel's copy of the very same inputs (S43x): the client takes
+        // `SendInput` by value and the panel keeps this `Arc`, so its re-check resolves
+        // against what this send ran — `SendInput` itself is not `Clone`.
+        let captured_send = Arc::new(SendInput {
+            request: input.request.clone(),
+            ancestors: input.ancestors.clone(),
+            scopes: input.scopes.clone(),
+            secrets: Arc::clone(&input.secrets),
+            secret_key: Arc::clone(&input.secret_key),
+        });
         // The send is this tab's own: it replaces only this tab's previous send, never
         // another tab's (REQ-HTTP-12).
         let owner = SendOwner::from(cx.entity_id());
@@ -281,7 +292,7 @@ impl RequestEditor {
         self.pending_send = Some(cx.spawn(async move |this, cx| {
             let result = send_task.await;
             let landed = this.update(cx, |editor, cx| {
-                editor.finish_send(result, sent, warnings, cx)
+                editor.finish_send(result, sent, warnings, captured_send, cx)
             });
             if landed.is_err() {
                 // Handled: the tab closed while the request was in flight; there is no
@@ -340,7 +351,8 @@ impl RequestEditor {
     /// entry is written — [`console::feed`]'s [`record_error`] does the redacting — and
     /// the warnings the send carried are recorded with it (REQ-VAR-07): a "Send anyway"
     /// failure names its unresolved variables exactly as a finished send's outcome does.
-    /// `sent` is the request as the send had it, for the entry's summary line.
+    /// `sent` is the request as the send had it, for the entry's summary line, and
+    /// `captured_send` is the send's own inputs for the failed-send panel (S43x).
     ///
     /// `Decision:` the write keeps the [`ConsoleStore`]-global guard of the warned-send
     /// write it replaces: a host that has not installed the console store (an editor
@@ -350,6 +362,7 @@ impl RequestEditor {
         sent: &HttpRequest,
         error: &PipelineError,
         warnings: &[Warning],
+        captured_send: Option<Arc<SendInput>>,
         cx: &mut Context<Self>,
     ) {
         self.pending_send = None;
@@ -359,7 +372,7 @@ impl RequestEditor {
             record_warnings(Some(sent), warnings, cx);
         }
         match error {
-            PipelineError::Transport(error) => self.show_transport_error(error, cx),
+            PipelineError::Transport(error) => self.show_transport_error(error, captured_send, cx),
             // `ResolveError` carries no `suggested_fix` of its own (its `Display` names
             // the variables involved and nothing else), so only the message is its text.
             PipelineError::Resolve(error) => {
@@ -380,11 +393,24 @@ impl RequestEditor {
     /// A TLS failure keeps its offer form in `tls_offer_error`, so "Disable
     /// verification for this request" renders for it — and, because the shown error
     /// must be that very failure, never for another error that replaces `inline_error`
-    /// outside a send.
-    fn show_transport_error(&mut self, error: &TransportError, cx: &mut Context<Self>) {
+    /// outside a send. On an `UnresolvedSecret` the send's own inputs are installed for
+    /// the panel first, in this same update (S43x, #324): the panel's capture reads what
+    /// is installed when [`response_viewer::ResponseView::set_error`] runs, and it must
+    /// capture THIS send — never a later one that happens to be installed by then.
+    fn show_transport_error(
+        &mut self,
+        error: &TransportError,
+        captured_send: Option<Arc<SendInput>>,
+        cx: &mut Context<Self>,
+    ) {
         let inline = InlineError::from_transport(error);
         self.tls_offer_error = matches!(error, TransportError::Tls { .. }).then(|| inline.clone());
         self.inline_error = Some(inline);
+        if matches!(error, TransportError::UnresolvedSecret { .. })
+            && let Some(send) = captured_send
+        {
+            response_viewer::set_secret::install_inputs(cx, send);
+        }
         self.response_view
             .update(cx, |view, cx| view.set_error(error.clone(), cx));
         cx.notify();
@@ -404,6 +430,7 @@ impl RequestEditor {
         result: Result<SendOutcome, PipelineError>,
         sent: HttpRequest,
         warnings: Vec<Warning>,
+        captured_send: Arc<SendInput>,
         cx: &mut Context<Self>,
     ) {
         self.pending_send = None;
@@ -435,7 +462,7 @@ impl RequestEditor {
             Err(PipelineError::Transport(TransportError::Cancelled)) => {
                 self.show_cancelled_state(cx)
             }
-            Err(error) => self.fail_send(&sent, &error, &warnings, cx),
+            Err(error) => self.fail_send(&sent, &error, &warnings, Some(captured_send), cx),
         }
         cx.notify();
     }
