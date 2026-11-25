@@ -12,6 +12,7 @@
 
 mod auth_tab;
 mod body_tab;
+pub mod breadcrumb;
 mod curl_paste;
 pub mod disk_change;
 mod headers;
@@ -20,15 +21,18 @@ mod method;
 mod new_request;
 mod params;
 mod read_only_wiring;
+pub mod request_tabs;
 mod response_split;
 pub mod save;
 pub mod send;
+pub mod send_menu;
 mod settings_tab;
 mod unresolved_warning;
 pub mod url_bar;
 pub mod variable_autocomplete;
 mod variable_highlight;
 mod variable_hover;
+pub mod variable_line;
 
 use std::sync::Arc;
 
@@ -63,14 +67,14 @@ pub(crate) const REQUEST_TAB_CONTENT_SELECTOR: &str = "request-tab-content";
 /// The Params tab's index in the request tab strip.
 const PARAMS_TAB_INDEX: usize = 0;
 
+/// The Auth tab's index in the request tab strip (mockup order: Params, Auth, …).
+const AUTH_TAB_INDEX: usize = 1;
+
 /// The Headers tab's index in the request tab strip.
-const HEADERS_TAB_INDEX: usize = 1;
+const HEADERS_TAB_INDEX: usize = 2;
 
 /// The Body tab's index in the request tab strip.
-const BODY_TAB_INDEX: usize = 2;
-
-/// The Auth tab's index in the request tab strip.
-const AUTH_TAB_INDEX: usize = 3;
+const BODY_TAB_INDEX: usize = 3;
 
 /// The Settings tab's index in the request tab strip.
 const SETTINGS_TAB_INDEX: usize = 4;
@@ -104,6 +108,15 @@ pub struct RequestEditor {
     tab_bar: Entity<TabBar>,
     /// Which request tab's content shows: the [`TabBar`]'s selection index.
     active_tab: usize,
+    /// The collection and folder names over this request, `None` while it has no file
+    /// in the open workspace (`breadcrumb`).
+    location: Option<Vec<String>>,
+    /// Each `{{variable}}` the request uses and what it resolves to (`variable_line`).
+    variable_line: Vec<variable_line::VariableLineEntry>,
+    /// The active environment's name, for the variable line (`variable_line`).
+    environment_name: Option<String>,
+    /// The counts and dots the tab strip shows (`request_tabs`).
+    tab_badges: request_tabs::TabBadges,
     /// The Params tab: the query and path-variable tables (S27a).
     params: Entity<Params>,
     /// The Headers tab: the user's rows and the request's auto headers (S27b).
@@ -120,6 +133,8 @@ pub struct RequestEditor {
     /// The send task (S26b): replacing it cancels the request in flight, because
     /// dropping a `Task` cancels it.
     pending_send: Option<Task<()>>,
+    /// The split Send's chevron menu while it is open (`send_menu`).
+    send_menu: Option<send_menu::SendMenu>,
     /// Why the last send failed, shown under the URL bar.
     inline_error: Option<InlineError>,
     /// The TLS failure whose inline display carries the "Disable verification for this
@@ -254,33 +269,9 @@ impl RequestEditor {
         let settings_tab_subscription =
             cx.subscribe_in(&settings_tab, window, Self::on_settings_tab_event);
         let tab_bar = cx.new(|cx| TabBar::new(cx).section());
+        let tab_badges = request_tabs::TabBadges::of(&request);
         tab_bar.update(cx, |bar, cx| {
-            bar.set_tabs(
-                vec![
-                    Tab::new(
-                        SharedString::new_static("request-tab-params"),
-                        SharedString::new_static("Params"),
-                    )
-                    .toggle_state(true),
-                    Tab::new(
-                        SharedString::new_static("request-tab-headers"),
-                        SharedString::new_static("Headers"),
-                    ),
-                    Tab::new(
-                        SharedString::new_static("request-tab-body"),
-                        SharedString::new_static("Body"),
-                    ),
-                    Tab::new(
-                        SharedString::new_static("request-tab-auth"),
-                        SharedString::new_static("Auth"),
-                    ),
-                    Tab::new(
-                        SharedString::new_static("request-tab-settings"),
-                        SharedString::new_static("Settings"),
-                    ),
-                ],
-                cx,
-            )
+            bar.set_tabs(request_tabs::request_tabs(tab_badges), cx)
         });
         let tab_bar_subscription = cx.subscribe_in(&tab_bar, window, Self::on_tab_bar_event);
         let send_owner = http_engine::SendOwner::from(cx.entity_id());
@@ -298,6 +289,10 @@ impl RequestEditor {
             url_bar,
             tab_bar,
             active_tab: PARAMS_TAB_INDEX,
+            tab_badges,
+            variable_line: Vec::new(),
+            environment_name: None,
+            location: None,
             params,
             headers,
             body_tab,
@@ -305,6 +300,7 @@ impl RequestEditor {
             settings_tab,
             pre_import_request: None,
             pending_send: None,
+            send_menu: None,
             inline_error: None,
             tls_offer_error: None,
             unresolved_warning: None,
@@ -631,6 +627,8 @@ impl Render for RequestEditor {
             // The pre-send unresolved-variable warning bar, above the URL bar
             // (REQ-VAR-07).
             .children(self.render_unresolved_warning(cx))
+            // Where the request lives, with Save and Copy as cURL (`breadcrumb`).
+            .child(self.render_breadcrumb(cx))
             // The URL bar, wrapped: the cURL paste is captured on this wrapper, which
             // is on the dispatch path exactly while the URL bar has focus (`curl_paste`).
             // Send ends the URL row; the URL bar's own errors stay under its field.
@@ -659,7 +657,12 @@ impl Render for RequestEditor {
             .children(self.render_auth_warning(cx))
             // The request tab strip over the tab content: the selection decides which
             // tab's content shows below.
-            .child(self.tab_bar.clone())
+            .child(self.render_tab_strip(cx))
+            // Where each `{{variable}}` resolves from (`variable_line`), between the strip
+            // and the tab's table: always on screen, never under a tall table.
+            .when(self.active_tab != SETTINGS_TAB_INDEX, |this| {
+                this.children(self.render_variable_line(cx))
+            })
             .child(
                 v_flex()
                     .debug_selector(|| REQUEST_TAB_CONTENT_SELECTOR.to_owned())
@@ -667,19 +670,21 @@ impl Render for RequestEditor {
                     .flex_1()
                     .min_h_0()
                     .min_w_0()
+                    .gap(DynamicSpacing::Base04.rems(cx))
                     .map(|this| {
                         // Compare's side-by-side field diff takes the content region
                         // while it is open (`disk_change`).
                         if let Some(compare) = self.render_compare(cx) {
                             this.child(compare)
                         } else {
-                            match self.active_tab {
-                                HEADERS_TAB_INDEX => this.child(self.headers.clone()),
-                                BODY_TAB_INDEX => this.child(self.body_tab.clone()),
-                                AUTH_TAB_INDEX => this.child(self.auth_tab.clone()),
-                                SETTINGS_TAB_INDEX => this.child(self.settings_tab.clone()),
-                                _ => this.child(self.params.clone()),
-                            }
+                            let tab: gpui::AnyView = match self.active_tab {
+                                HEADERS_TAB_INDEX => self.headers.clone().into(),
+                                BODY_TAB_INDEX => self.body_tab.clone().into(),
+                                AUTH_TAB_INDEX => self.auth_tab.clone().into(),
+                                SETTINGS_TAB_INDEX => self.settings_tab.clone().into(),
+                                _ => self.params.clone().into(),
+                            };
+                            this.child(tab)
                         }
                     }),
             )
@@ -718,6 +723,7 @@ pub fn init(cx: &mut App) {
     read_only_wiring::init(cx);
     save::init(cx);
     disk_change::init(cx);
+    breadcrumb::init(cx);
 }
 
 #[cfg(test)]

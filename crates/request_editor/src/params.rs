@@ -214,7 +214,7 @@ impl Params {
                 .debug_selector(|| String::from(PATH_SECTION_SELECTOR))
                 .gap(DynamicSpacing::Base04.rems(cx))
                 .child(section_title("Path Variables", PATH_SECTION_TITLE_SELECTOR))
-                .child(self.path_table.clone()),
+                .child(div().flex_none().w_full().child(self.path_table.clone())),
         )
     }
 }
@@ -223,11 +223,18 @@ impl Render for Params {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .id(ElementId::Name(SharedString::new_static("params-tab")))
+            // Scrolls inside the editor half of the split like Headers (#207), so a long
+            // query table's last rows stay reachable on a short pane.
             .size_full()
+            .flex_1()
+            .min_h_0()
             .min_w_0()
+            .overflow_y_scroll()
             .gap(DynamicSpacing::Base04.rems(cx))
             .child(section_title("Query Params", QUERY_SECTION_TITLE_SELECTOR))
-            .child(self.query_table.clone())
+            // Kept at its content height: a table squeezed to the pane would clip its
+            // rows instead of letting the tab scroll them.
+            .child(div().flex_none().w_full().child(self.query_table.clone()))
             .children(self.path_section(cx))
     }
 }
@@ -339,3 +346,7 @@ mod path_section_tests;
 #[cfg(test)]
 #[path = "params_url_build_tests.rs"]
 mod url_build_tests;
+
+#[cfg(test)]
+#[path = "params_scroll_tests.rs"]
+mod scroll_tests;

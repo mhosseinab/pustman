@@ -364,10 +364,7 @@ impl UrlBar {
                 .flex_col()
                 .justify_center()
                 .w(px_to_rems(CUSTOM_FIELD_WIDTH_PX))
-                .h(px_to_rems(URL_ROW_HEIGHT_PX))
-                .border_1()
-                .border_color(cx.theme().colors().border)
-                .rounded_sm()
+                .h_full()
                 .px(DynamicSpacing::Base04.rems(cx))
                 .child(input)
                 .into_any_element(),
@@ -375,7 +372,8 @@ impl UrlBar {
                 ElementId::from(&self.method_focus_handle),
                 SharedString::from(self.method.as_str()),
             )
-            .size(ButtonSize::Large)
+            // Medium inside the 32 px frame: the frame's border is the row's edge.
+            .size(ButtonSize::Medium)
             // The verb draws in its theme token, text and colour together (#217).
             .label_color(self.method_label_color(cx))
             .end_icon(Icon::new(IconName::ChevronDown).size(IconSize::Small))
@@ -386,9 +384,21 @@ impl UrlBar {
             .on_click(cx.listener(|this, _event, window, cx| this.open_method_menu(window, cx)))
             .into_any_element(),
         };
+        // The method half of the one bordered URL control: framed on three sides, the
+        // URL field's own left border is the separator between them.
         div()
             .debug_selector(|| METHOD_CONTROL_SELECTOR.to_string())
             .relative()
+            .flex()
+            .items_center()
+            .h(px_to_rems(URL_ROW_HEIGHT_PX))
+            .px(DynamicSpacing::Base01.rems(cx))
+            .border_l_1()
+            .border_t_1()
+            .border_b_1()
+            .border_color(cx.theme().colors().border)
+            .rounded_l_sm()
+            .bg(cx.theme().colors().editor_background)
             .child(control)
             .children(self.method_menu.clone().map(|menu| {
                 div()
@@ -431,24 +441,23 @@ impl Render for UrlBar {
             .gap(DynamicSpacing::Base02.rems(cx))
             .on_action(cx.listener(Self::cancel))
             .child(
-                h_flex()
-                    .gap(DynamicSpacing::Base03.rems(cx))
-                    .child(self.render_method_control(cx))
-                    .child(
-                        div()
-                            .debug_selector(|| URL_FIELD_SELECTOR.to_string())
-                            .flex()
-                            .flex_col()
-                            .justify_center()
-                            .flex_1()
-                            .min_w_0()
-                            .h(px_to_rems(URL_ROW_HEIGHT_PX))
-                            .border_1()
-                            .border_color(cx.theme().colors().border)
-                            .rounded_sm()
-                            .px(DynamicSpacing::Base04.rems(cx))
-                            .child(self.hover.clone()),
-                    ), // S26b's Send button lands at the end of this row.
+                // One bordered control: method, separator, URL (mockup section 1).
+                h_flex().child(self.render_method_control(cx)).child(
+                    div()
+                        .debug_selector(|| URL_FIELD_SELECTOR.to_string())
+                        .flex()
+                        .flex_col()
+                        .justify_center()
+                        .flex_1()
+                        .min_w_0()
+                        .h(px_to_rems(URL_ROW_HEIGHT_PX))
+                        .border_1()
+                        .border_color(cx.theme().colors().border)
+                        .rounded_r_sm()
+                        .bg(cx.theme().colors().editor_background)
+                        .px(DynamicSpacing::Base04.rems(cx))
+                        .child(self.hover.clone()),
+                ), // S26b's Send button lands at the end of this row.
             )
             .children(
                 self.custom_error

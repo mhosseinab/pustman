@@ -106,7 +106,10 @@ impl RequestEditor {
     /// rebuilds the fields (`curl_paste`'s `replace_request`, S33e), which would
     /// otherwise hold the empty default. Never called from `render` — highlights are
     /// computed when state changes (AGENTS.md › GPUI).
-    pub(super) fn refresh_highlights(&self, cx: &mut Context<Self>) {
+    pub(super) fn refresh_highlights(&mut self, cx: &mut Context<Self>) {
+        // A whole-request replacement lands here too: the tab badges follow the draft.
+        self.refresh_tab_badges(cx);
+        self.refresh_variable_line(cx);
         let scopes = self.scopes.clone();
         self.url_bar
             .update(cx, |bar, cx| bar.set_scopes(scopes.clone(), cx));
