@@ -1,0 +1,81 @@
+name: Beta release
+
+# Builds the desktop app for Linux and macOS when a GitHub *pre-release* is published and
+# attaches the packages to it. Promotions (release/pustman-v1-<n>) stay a manual,
+# human-smoked process; this only publishes betas.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    if: github.event.release.prerelease
+    name: package (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x86_64
+          - os: macos-latest
+            target: macos-arm64
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GPUI system libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libwayland-dev \
+            libx11-xcb-dev \
+            libvulkan-dev \
+            libfontconfig-dev \
+            libfreetype-dev \
+            libdbus-1-dev
+
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - name: Build release
+        run: cargo build --release --locked -p pustman
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          name="pustman-${TAG}-linux-x86_64"
+          stage="dist/$name"
+          mkdir -p "$stage/scripts" "$stage/assets/pustman-icon-pack"
+          cp target/release/pustman "$stage/pustman"
+          cp scripts/install-desktop-entry.sh "$stage/scripts/"
+          cp -R assets/pustman-icon-pack/linux "$stage/assets/pustman-icon-pack/"
+          cat > "$stage/README.txt" <<'EOF'
+          Pustman beta for Linux (x86_64)
+
+          Run:      ./pustman
+          Install the launcher entry and icon (optional):
+                    scripts/install-desktop-entry.sh ./pustman
+
+          Needs the usual GPUI desktop libraries: xkbcommon, wayland or X11, vulkan,
+          fontconfig, freetype. This is a beta: expect rough edges.
+          EOF
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          gh release upload "$TAG" "dist/$name.tar.gz" --clobber
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          scripts/bundle-macos.sh target/release/pustman dist
+          name="pustman-${TAG}-macos-arm64"
+          ditto -c -k --keepParent dist/Pustman.app "dist/$name.zip"
+          gh release upload "$TAG" "dist/$name.zip" --clobber
