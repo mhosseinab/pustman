@@ -27,7 +27,7 @@ use api_model::{
 };
 use environment_picker::secret_values::{self, SecretInputs};
 use gpui::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext};
-use http_engine::{FakeTransport, HttpClient, ResolvedRequest};
+use http_engine::{FakeTransport, HttpClient, ResolvedRequest, TransportError};
 use pustman::{StartupProblems, StoreLocation};
 use pustman_actions::environment::SelectEnvironment;
 use pustman_actions::history::Focus as FocusHistory;
@@ -53,6 +53,11 @@ const B_BASE: &str = "https://folder-b.example.test";
 /// The request inside each fixture's collection.
 const SAVED_REQUEST_NAME: &str = "Saved pets";
 
+/// The fixture collection's one variable: it resolves only for a tab given the
+/// collection's scope.
+const COLLECTION_VARIABLE: &str = "collection_tag";
+const COLLECTION_VALUE: &str = "collection-tag-example";
+
 struct Fixture {
     _directory: tempfile::TempDir,
     root: PathBuf,
@@ -76,8 +81,9 @@ fn save(root: &Path, item: Item) -> PathBuf {
 }
 
 /// A workspace whose "Development" environment defines `base_url` as `base` and holds
-/// the secret `token` (no value anywhere but the keychain), with one collection request
-/// sending `{{token}}` in its path, `{{base_url}}/saved/{{token}}` — a header would not
+/// the secret `token` (no value anywhere but the keychain), with one collection — whose
+/// variable is [`COLLECTION_VARIABLE`] — holding one request that sends `{{token}}` in
+/// its path, `{{base_url}}/saved/{{token}}?tag={{collection_tag}}` — a header would not
 /// do: history masks an `X-Api-Key`'s value, so the reopened tab would carry no
 /// `{{token}}` to resolve.
 fn fixture(base: &str) -> Fixture {
@@ -116,7 +122,7 @@ fn fixture(base: &str) -> Fixture {
         id: ItemId::new(),
         name: SAVED_REQUEST_NAME.to_string(),
         method: Method::Get,
-        url: "{{base_url}}/saved/{{token}}".to_string(),
+        url: format!("{{{{base_url}}}}/saved/{{{{token}}}}?tag={{{{{COLLECTION_VARIABLE}}}}}"),
         params: Vec::new(),
         path_variables: Vec::new(),
         headers: Vec::new(),
@@ -131,7 +137,11 @@ fn fixture(base: &str) -> Fixture {
         name: "Pets".to_string(),
         description: None,
         auth: Auth::Inherit,
-        variables: Vec::new(),
+        variables: vec![variable(
+            COLLECTION_VARIABLE,
+            Some(COLLECTION_VALUE),
+            VariableKind::Default,
+        )],
         order: vec![saved_request.id],
         children: Vec::new(),
         extra: BTreeMap::new(),
@@ -635,4 +645,216 @@ fn wire_history_entry_with_no_recorded_folder_stays_unbound(cx: &mut TestAppCont
 
     let reopened = reopen_newest_entry(cx, &workspace);
     assert_unbound(&reopened, &transport, 0, cx);
+}
+
+/// Make `editor` the center pane's active tab, as clicking its tab does.
+fn activate(
+    workspace: &Entity<Workspace>,
+    editor: &Entity<RequestEditor>,
+    cx: &mut VisualTestContext,
+) {
+    let pane = cx.read(|cx| workspace.read(cx).center_pane().clone());
+    let index = cx
+        .read(|cx| pane.read(cx).item_ids())
+        .iter()
+        .position(|id| *id == editor.entity_id())
+        .expect("the editor is a tab of the center pane");
+    cx.update(|_, cx| pane.update(cx, |pane, cx| pane.set_active_index(index, cx)));
+    cx.run_until_parked();
+    draw_window(cx);
+}
+
+/// The fixture's saved request is edited to `url` and saved, and the open folder's
+/// watcher hands the new snapshot over.
+fn save_saved_request_at(
+    cx: &mut VisualTestContext,
+    workspace: &Entity<Workspace>,
+    fixture: &Fixture,
+    url: &str,
+) {
+    let snapshot = workspace_store::open(&fixture.root).expect("the fixture folder opens");
+    let mut item = snapshot
+        .items
+        .values()
+        .find(|item| {
+            matches!(&item.body, ItemBody::Request(Request::Http(request))
+                if request.name == SAVED_REQUEST_NAME)
+        })
+        .cloned()
+        .expect("the fixture holds its saved request");
+    if let ItemBody::Request(Request::Http(request)) = &mut item.body {
+        request.url = url.to_string();
+    }
+    save(&fixture.root, item);
+    let snapshot = workspace_store::open(&fixture.root).expect("the fixture folder opens");
+    let opener = cx
+        .read(|cx| WorkspaceOpen::for_window(workspace.entity_id(), cx))
+        .expect("the window has open-workspace state");
+    cx.update(|_, cx| opener.update(cx, |opener, cx| opener.set_snapshot(snapshot, cx)));
+    cx.run_until_parked();
+    draw_window(cx);
+}
+
+/// What a tab bound to the folder it was recorded in, but not to a request that folder
+/// holds as recorded, must show and do: `base_url` resolves from the active environment,
+/// while the keychain and the collection give it nothing — the pre-send check names
+/// `token` and the collection's variable, and even with Send anyway the declared secret
+/// left without a value stops the send (`TransportError::UnresolvedSecret`): nothing
+/// goes out, so no keychain secret and no other value can.
+fn assert_environment_only(
+    reopened: &Entity<RequestEditor>,
+    transport: &FakeTransport,
+    cx: &mut VisualTestContext,
+) {
+    match state_of(reopened, cx, "base_url") {
+        EntryState::Resolved { source, .. } => assert_eq!(source, "Source: Development"),
+        other => panic!("base_url resolves from the active environment, got {other:?}"),
+    }
+    assert!(
+        !is_resolved(reopened, cx, "token"),
+        "the keychain secret does not resolve"
+    );
+    assert!(
+        !is_resolved(reopened, cx, COLLECTION_VARIABLE),
+        "the collection's variable does not resolve"
+    );
+    let sent_before = transport.requests().len();
+    send(reopened, cx);
+    let warned = warned_names(reopened, cx);
+    assert!(
+        warned.iter().any(|name| name == "token")
+            && warned.iter().any(|name| name == COLLECTION_VARIABLE)
+            && !warned.iter().any(|name| name == "base_url"),
+        "the pre-send check names the secret and the collection's variable, got {warned:?}"
+    );
+    assert_eq!(
+        transport.requests().len(),
+        sent_before,
+        "the send is held back while the bar shows"
+    );
+    send_anyway(cx);
+    let unresolved_secret = TransportError::UnresolvedSecret {
+        names: vec!["token".to_string()],
+    }
+    .user_message();
+    assert_eq!(
+        cx.read(|cx| reopened
+            .read(cx)
+            .inline_error()
+            .map(|error| error.message.clone())),
+        Some(unresolved_secret),
+        "the secret without a value stops the send, and the user is told"
+    );
+    let after = transport.requests();
+    let after = after.get(sent_before..).unwrap_or_default();
+    assert!(
+        after.is_empty(),
+        "nothing goes out: no keychain secret, no collection value"
+    );
+}
+
+/// An unsaved request recorded in this folder names a request id the folder does not
+/// hold: reopened here, it gets the environment, never the keychain or a collection.
+#[gpui::test]
+fn wire_history_entry_of_an_unsaved_request_resolves_the_environment_but_never_the_keychain(
+    cx: &mut TestAppContext,
+) {
+    let folder = fixture(A_BASE);
+    let store = shared_store();
+    let keychain = Arc::new(MemorySecretStore::new());
+    seed_secret(&keychain, &folder, FOLDER_A_SECRET);
+    let (workspace, transport, cx) = boot(cx, &store, &folder, keychain);
+    select_development(cx);
+
+    let editor = new_request(
+        cx,
+        &workspace,
+        &format!("{{{{base_url}}}}/fresh?key={{{{token}}}}&tag={{{{{COLLECTION_VARIABLE}}}}}"),
+    );
+    send(&editor, cx);
+    assert_eq!(
+        warned_names(&editor, cx),
+        vec![COLLECTION_VARIABLE.to_string()],
+        "the new request is in no collection"
+    );
+    send_anyway(cx);
+    assert!(
+        carries(&transport.requests(), FOLDER_A_SECRET),
+        "the new request itself resolves this folder's keychain secret"
+    );
+
+    let reopened = reopen_newest_entry(cx, &workspace);
+    assert_environment_only(&reopened, &transport, cx);
+}
+
+/// An entry of a saved request whose URL was edited and saved after the entry was
+/// recorded: the folder no longer holds the request as recorded, so the entry gets the
+/// environment, never the keychain or the collection.
+#[gpui::test]
+fn wire_history_entry_of_a_request_saved_at_another_url_since_never_resolves_the_keychain(
+    cx: &mut TestAppContext,
+) {
+    let folder = fixture(A_BASE);
+    let store = shared_store();
+    let keychain = Arc::new(MemorySecretStore::new());
+    seed_secret(&keychain, &folder, FOLDER_A_SECRET);
+    let (workspace, transport, cx) = boot(cx, &store, &folder, keychain);
+    select_development(cx);
+
+    let saved = open_saved_request(cx, &workspace);
+    send(&saved, cx);
+    assert!(carries(&transport.requests(), FOLDER_A_SECRET));
+    save_saved_request_at(
+        cx,
+        &workspace,
+        &folder,
+        &format!("{{{{base_url}}}}/moved/{{{{token}}}}?tag={{{{{COLLECTION_VARIABLE}}}}}"),
+    );
+
+    let reopened = reopen_newest_entry(cx, &workspace);
+    assert!(
+        cx.read(|cx| reopened.read(cx).draft().url.contains("/saved/")),
+        "the reopened entry is the one recorded before the edit"
+    );
+    assert_environment_only(&reopened, &transport, cx);
+}
+
+/// A tab bound to folder B, left open after folder A opens, is bound to no open folder:
+/// what it sends there is recorded with no folder, so reopened in A it stays unbound.
+#[gpui::test]
+fn wire_history_entry_sent_by_a_tab_of_another_folder_records_no_folder(cx: &mut TestAppContext) {
+    let folder_a = fixture(A_BASE);
+    let folder_b = fixture(B_BASE);
+    let store = shared_store();
+    let keychain = Arc::new(MemorySecretStore::new());
+    seed_secret(&keychain, &folder_a, FOLDER_A_SECRET);
+    seed_secret(&keychain, &folder_b, FOLDER_B_SECRET);
+    let (workspace, transport, cx) = boot(cx, &store, &folder_b, keychain);
+    select_development(cx);
+    // A literal host, so the send from folder A goes out (with Send anyway) and records
+    // a row rather than failing as no URL at all.
+    let stale = new_request(
+        cx,
+        &workspace,
+        "https://stale.example.test/stale?key={{token}}&to={{base_url}}",
+    );
+
+    open_folder(cx, &workspace, &folder_a);
+    select_development(cx);
+    activate(&workspace, &stale, cx);
+    send(&stale, cx);
+    assert!(
+        !warned_names(&stale, cx).is_empty(),
+        "the tab from folder B resolves nothing in folder A"
+    );
+    send_anyway(cx);
+    assert_eq!(
+        transport.requests().len(),
+        1,
+        "the stale tab's send went out"
+    );
+    assert!(!carries(&transport.requests(), FOLDER_A_SECRET));
+
+    let reopened = reopen_newest_entry(cx, &workspace);
+    assert_unbound(&reopened, &transport, 1, cx);
 }

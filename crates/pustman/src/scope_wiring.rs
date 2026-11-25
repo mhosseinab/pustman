@@ -72,6 +72,12 @@
 //! id and request included, since the key binds the canonical path — leaves the tab
 //! unbound, its `{{variables}}` literal.
 //!
+//! With two windows, binding follows the one app-wide open workspace, not the window a
+//! tab sits in: a History tab in a window whose own folder differs binds, or not, by the
+//! folder last opened anywhere. It fails closed — unbound, when that folder is not the
+//! one its entry was recorded in — or resolves the recording folder's own values, never
+//! another folder's.
+//!
 //! Once bound, an editor keeps that workspace: a tab left open from folder A after folder
 //! B opens gets no scopes and no keychain. Either way its secrets stay unresolved and the
 //! pre-send check warns, rather than resolving B's secrets into a request to A's host.
