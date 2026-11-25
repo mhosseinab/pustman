@@ -23,7 +23,7 @@
 //! and a dedicated action would need one this step's Facts say not to add.
 
 use api_model::{HttpRequest, parse_curl, to_curl};
-use gpui::{ClipboardItem, Context, Window};
+use gpui::{App, ClipboardItem, Context, Window};
 use pustman_actions::request;
 use text_input::input::Paste;
 use ui::prelude::*;
@@ -67,6 +67,12 @@ impl RequestEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.copy_as_curl(cx);
+    }
+
+    /// The draft as a cURL command on the clipboard — the one path behind
+    /// `request::CopyAsCurl`, the breadcrumb's button and the Send menu.
+    pub fn copy_as_curl(&self, cx: &mut App) {
         cx.write_to_clipboard(ClipboardItem::new_string(to_curl(&self.draft)));
     }
 

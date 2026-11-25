@@ -12,6 +12,7 @@
 
 mod auth_tab;
 mod body_tab;
+pub mod breadcrumb;
 mod curl_paste;
 pub mod disk_change;
 mod headers;
@@ -105,6 +106,11 @@ pub struct RequestEditor {
     tab_bar: Entity<TabBar>,
     /// Which request tab's content shows: the [`TabBar`]'s selection index.
     active_tab: usize,
+    /// The collection and folder names over this request, `None` while it has no file
+    /// in the open workspace (`breadcrumb`).
+    location: Option<Vec<String>>,
+    /// Keeps the breadcrumb following the window's workspace (`breadcrumb`).
+    _location_subscription: Option<Subscription>,
     /// The counts and dots the tab strip shows (`request_tabs`).
     tab_badges: request_tabs::TabBadges,
     /// The Params tab: the query and path-variable tables (S27a).
@@ -278,6 +284,8 @@ impl RequestEditor {
             tab_bar,
             active_tab: PARAMS_TAB_INDEX,
             tab_badges,
+            location: None,
+            _location_subscription: None,
             params,
             headers,
             body_tab,
@@ -611,6 +619,8 @@ impl Render for RequestEditor {
             // The pre-send unresolved-variable warning bar, above the URL bar
             // (REQ-VAR-07).
             .children(self.render_unresolved_warning(cx))
+            // Where the request lives, with Save and Copy as cURL (`breadcrumb`).
+            .child(self.render_breadcrumb(cx))
             // The URL bar, wrapped: the cURL paste is captured on this wrapper, which
             // is on the dispatch path exactly while the URL bar has focus (`curl_paste`).
             // Send ends the URL row; the URL bar's own errors stay under its field.
@@ -698,6 +708,7 @@ pub fn init(cx: &mut App) {
     read_only_wiring::init(cx);
     save::init(cx);
     disk_change::init(cx);
+    breadcrumb::init(cx);
 }
 
 #[cfg(test)]
