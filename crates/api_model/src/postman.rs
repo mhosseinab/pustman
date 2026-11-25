@@ -1108,7 +1108,11 @@ fn as_object<'a>(
     value.as_object().ok_or(ImportError::MissingField(what))
 }
 
-fn string_field(object: &serde_json::Map<String, Value>, name: &str) -> Option<String> {
+/// Read a string-named field the way the importer reads every key and name it maps: a
+/// string as is, a number or a bool as its scalar text — Postman exports spell a key
+/// either way. Public because the callers that walk the raw rows must agree with this
+/// reader exactly (S45b fix 3).
+pub fn string_field(object: &serde_json::Map<String, Value>, name: &str) -> Option<String> {
     match object.get(name)? {
         Value::String(text) => Some(text.clone()),
         Value::Number(number) => Some(number.to_string()),

@@ -1136,11 +1136,14 @@ name = "collections_panel"
 version = "0.1.0"
 dependencies = [
  "api_model",
+ "environment_picker",
  "gpui",
  "log",
  "pustman_actions",
  "request_editor",
+ "secrets",
  "serde_json",
+ "storage",
  "tempfile",
  "text_input",
  "ui",

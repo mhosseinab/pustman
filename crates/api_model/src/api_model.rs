@@ -23,7 +23,7 @@ pub use environment::Environment;
 pub use example::{Example, ExampleResponse};
 pub use postman::{
     ExportReport, ImportError, ImportLimits, ImportProblem, ImportReport, SecretValuesToStore,
-    export_collection, import_collection, import_environment, import_globals,
+    export_collection, import_collection, import_environment, import_globals, string_field,
 };
 pub use redact::{MASK, SecretValues, redact_headers, redact_text, redact_url};
 pub use request::{
