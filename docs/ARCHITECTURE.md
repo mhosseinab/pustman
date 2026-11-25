@@ -41,8 +41,7 @@ Init order in `pustman::init_with_store` (`crates/pustman/src/pustman.rs`): `set
    cancels the previous request.
 2. **Save:** edit → `workspace::Save` (Ctrl/Cmd-S; `request_editor::save`, S40c: only from a focused request editor, one write at a time per editor, a press during a write re-saves after it) → `workspace_store::save_item` (temp file + fsync + rename; deterministic JSON)
    → `git diff` shows exactly one changed file (REQ-WSP-02).
-3. **External change:** `workspace_store::watch` → tree/tab update within 1 s; unsaved edits kept
-   and a "Changed on disk" bar appears (REQ-COLLAB-01).
+3. **External change:** `workspace_store::watch` → tree/tab update within 1 s (S42a feeds the tree; S42c `request_editor::disk_change` watches each open tab's file): a clean tab reloads silently, a dirty tab keeps its edits and shows the "Changed on disk" bar (Reload / Keep mine / Compare), a conflict-marked or invalid file is flagged on the first event and Ctrl-S refuses to overwrite it, and a rename/delete moves or drops the tab's save target (REQ-COLLAB-01).
 4. **History:** response → `redact_text`/`redact_headers` → `storage::LocalStore` (SQLite); secret values live only in
    `secrets` (keychain) and never in workspace files (REQ-WSP-06).
 5. **Import/export:** Postman v2.1 JSON → `api_model` → workspace files; scripts preserved verbatim,
