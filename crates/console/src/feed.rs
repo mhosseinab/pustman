@@ -31,6 +31,12 @@ const PROTOCOL: &str = "http";
 /// mask (REQ-NFR-04), and the entry's level is [`ConsoleLevel::Warning`] whenever the
 /// send carries warnings at all.
 pub fn record_outcome(outcome: &SendOutcome, cx: &mut App) {
+    record_outcome_as(PROTOCOL, outcome, cx);
+}
+
+/// [`record_outcome`] for a send whose entries name `protocol`: a GraphQL request goes
+/// out as HTTP but is listed as `graphql` (REQ-GQL-01, `http_engine::graphql::PROTOCOL`).
+pub fn record_outcome_as(protocol: &str, outcome: &SendOutcome, cx: &mut App) {
     let secrets = &outcome.secrets_used;
     ConsoleStore::push(
         cx,
@@ -40,7 +46,7 @@ pub fn record_outcome(outcome: &SendOutcome, cx: &mut App) {
             } else {
                 ConsoleLevel::Warning
             },
-            protocol: PROTOCOL.to_string(),
+            protocol: protocol.to_string(),
             method: Some(outcome.request.method.clone()),
             url: redact_url(outcome.request.url.as_str(), secrets),
             status: Some(outcome.response.status),
@@ -53,6 +59,7 @@ pub fn record_outcome(outcome: &SendOutcome, cx: &mut App) {
     for warning in &outcome.warnings {
         push_notice(
             cx,
+            protocol,
             ConsoleLevel::Warning,
             &outcome.request,
             &warning_message(warning),
@@ -69,6 +76,7 @@ pub fn record_outcome(outcome: &SendOutcome, cx: &mut App) {
         };
         push_notice(
             cx,
+            protocol,
             ConsoleLevel::Warning,
             &outcome.request,
             &message,
@@ -85,6 +93,17 @@ pub fn record_outcome(outcome: &SendOutcome, cx: &mut App) {
 /// names the method and URL, and a failure before resolution leaves placeholders in the
 /// URL as they were. Pass `None` when the request is gone.
 pub fn record_error(request: Option<&HttpRequest>, error: &PipelineError, cx: &mut App) {
+    record_error_as(PROTOCOL, request, error, cx);
+}
+
+/// [`record_error`] for a send whose entry names `protocol` (REQ-GQL-01: a failed
+/// GraphQL send is listed as `graphql`).
+pub fn record_error_as(
+    protocol: &str,
+    request: Option<&HttpRequest>,
+    error: &PipelineError,
+    cx: &mut App,
+) {
     // No secret was ever substituted on a failed send (or the caller no longer has the
     // values), so the empty set redacts the pre-resolution URL: userinfo and credential
     // shapes are masked whatever is known.
@@ -100,7 +119,7 @@ pub fn record_error(request: Option<&HttpRequest>, error: &PipelineError, cx: &m
         cx,
         ConsoleEntry {
             level: ConsoleLevel::Error,
-            protocol: PROTOCOL.to_string(),
+            protocol: protocol.to_string(),
             method,
             url,
             status: None,
@@ -180,6 +199,17 @@ fn warning_message(warning: &Warning) -> String {
 /// when the request is gone. No secret was ever substituted on a failed send, so the
 /// empty set redacts the pre-resolution URL and the message, as in [`record_error`].
 pub fn record_warnings(request: Option<&HttpRequest>, warnings: &[Warning], cx: &mut App) {
+    record_warnings_as(PROTOCOL, request, warnings, cx);
+}
+
+/// [`record_warnings`] for a send whose entries name `protocol` (REQ-GQL-01: a GraphQL
+/// send's warnings are listed as `graphql`).
+pub fn record_warnings_as(
+    protocol: &str,
+    request: Option<&HttpRequest>,
+    warnings: &[Warning],
+    cx: &mut App,
+) {
     if warnings.is_empty() {
         return;
     }
@@ -196,7 +226,7 @@ pub fn record_warnings(request: Option<&HttpRequest>, warnings: &[Warning], cx: 
             cx,
             ConsoleEntry {
                 level: ConsoleLevel::Warning,
-                protocol: PROTOCOL.to_string(),
+                protocol: protocol.to_string(),
                 method: method.clone(),
                 url: url.clone(),
                 status: None,
@@ -229,7 +259,8 @@ pub fn watch(client: &Entity<HttpClient>, cx: &mut App) -> Subscription {
             cx,
             ConsoleEntry {
                 level: ConsoleLevel::Warning,
-                protocol: PROTOCOL.to_string(),
+                // The send's own protocol: a cancelled GraphQL send is listed as one.
+                protocol: event.protocol.unwrap_or(PROTOCOL).to_string(),
                 method,
                 url,
                 status: None,
@@ -248,6 +279,7 @@ pub fn watch(client: &Entity<HttpClient>, cx: &mut App) -> Subscription {
 /// it, so the panel draws it under its own `Notice` section (#115).
 fn push_notice(
     cx: &mut App,
+    protocol: &str,
     level: ConsoleLevel,
     request: &ResolvedRequest,
     message: &str,
@@ -257,7 +289,7 @@ fn push_notice(
         cx,
         ConsoleEntry {
             level,
-            protocol: PROTOCOL.to_string(),
+            protocol: protocol.to_string(),
             method: Some(request.method.clone()),
             url: redact_url(request.url.as_str(), secrets),
             status: None,
@@ -426,3 +458,11 @@ mod raw_view_tests;
 #[cfg(test)]
 #[path = "feed_version_tests.rs"]
 mod version_tests;
+
+#[cfg(test)]
+#[path = "feed_protocol_tests.rs"]
+mod protocol_tests;
+
+#[cfg(test)]
+#[path = "feed_graphql_cancel_tests.rs"]
+mod graphql_cancel_tests;

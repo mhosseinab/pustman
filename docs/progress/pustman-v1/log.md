@@ -364,3 +364,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — S50c security review CHANGES_REQUESTED (MEDIUM: preserved extra["postman_graphql"] block keeps item-level auth / request.certificate unscanned) → fix cycle. GraphQL LOWs (S50c + S53) filed.
 - 2026-11-25 — S50c merged (Postman GraphQL import/export; high-stakes; security fix 1; VERIFY OK; LOW #344).
 - 2026-11-25 — Dispatched S52a (auth kinds model; high-stakes; http-engine-engineer). S53 fix (9beedf8) in re-review. Disk 28 GB free.
+- 2026-11-25 — S53 merged (GraphQL over the HTTP engine; security fix 1 + re-review; VERIFY OK; LOWs on #344).

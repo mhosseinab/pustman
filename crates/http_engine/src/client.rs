@@ -6,7 +6,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use api_model::{Auth, HttpRequest, Method, SecretValues};
+use api_model::{Auth, GraphQlRequest, HttpRequest, Method, SecretValues};
 use futures::channel::oneshot;
 use gpui::{AppContext, Context, EntityId, EventEmitter, Task};
 use secrets::{SecretKey, SecretStore};
@@ -14,9 +14,10 @@ use variables::{DynamicValues, ScopeKind, ScopeStack};
 
 use crate::body::resolve_body_files;
 use crate::error::TransportError;
+use crate::graphql::{self, GraphQlError, GraphQlSendInput};
 use crate::history::{HistoryDraft, HistoryRecorder};
 use crate::pipeline::{PipelineError, Warning};
-use crate::prepare::{Prepared, prepare};
+use crate::prepare::{Prepared, prepare, prepare_graphql};
 use crate::redacted_url;
 use crate::request::ResolvedRequest;
 use crate::request_auth::AppliedAuth;
@@ -105,6 +106,10 @@ pub struct SendEvent {
     /// The send this is about. `None` only in [`SendEvent::Cancelled`], which names no
     /// send.
     pub send: Option<SendIdentity>,
+    /// The protocol the send is listed under in History and the Console: `None` for
+    /// HTTP, [`graphql::PROTOCOL`] for a [`HttpClient::send_graphql`] send. Not part of
+    /// equality, like [`SendEvent::send`]'s absence.
+    pub protocol: Option<&'static str>,
 }
 
 impl SendEvent {
@@ -113,7 +118,10 @@ impl SendEvent {
     // Lower case like the enum variant this replaces, so the token keeps reading as the
     // event's name.
     #[allow(non_upper_case_globals)]
-    pub const Cancelled: Self = Self { send: None };
+    pub const Cancelled: Self = Self {
+        send: None,
+        protocol: None,
+    };
 }
 
 impl PartialEq for SendEvent {
@@ -159,9 +167,9 @@ struct PendingSend {
     /// The history row the send leaves when it ends before its own work can record it
     /// (PRD REQ-HIST-01: every send is recorded). `None` for a send that records nothing.
     history: Option<Arc<HistoryDraft>>,
-    /// Which send it is: what the [`SendEvent`] naming it carries when the send is
-    /// dropped (REQ-HTTP-12).
-    identity: SendIdentity,
+    /// The [`SendEvent`] emitted when the send is dropped (REQ-HTTP-12): which send it is
+    /// and the protocol it is listed under.
+    cancelled: SendEvent,
 }
 
 impl PendingSend {
@@ -281,7 +289,10 @@ impl HttpClient {
         self.drive_send(
             cx,
             SendOwner::Shared,
-            identity,
+            SendEvent {
+                send: Some(identity),
+                protocol: None,
+            },
             None,
             move || transport.send(request),
             Err(TransportError::Cancelled),
@@ -331,17 +342,74 @@ impl HttpClient {
         installation_key: Option<String>,
         cx: &mut Context<HttpClient>,
     ) -> Task<Result<SendOutcome, PipelineError>> {
+        self.send_request_with_protocol(owner, input, installation_key, None, cx)
+    }
+
+    /// Send a GraphQL request as `owner` (REQ-GQL-01): built by
+    /// [`graphql::to_http_request`] into `POST application/json {query, variables,
+    /// operationName}`, then sent exactly as [`HttpClient::send_request_recorded_in`]
+    /// sends — `{{variables}}`, secrets, auth, cancellation — with its history row
+    /// naming the protocol [`graphql::PROTOCOL`]. The Console entry is the caller's to
+    /// record, as for every send: `console::record_outcome_as(graphql::PROTOCOL, …)`.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphQlError`] when the request cannot be built — variables that are not JSON —
+    /// before anything is sent or recorded, so the editor can mark the spot.
+    pub fn send_graphql(
+        &mut self,
+        owner: SendOwner,
+        input: GraphQlSendInput,
+        installation_key: Option<String>,
+        cx: &mut Context<HttpClient>,
+    ) -> Result<Task<Result<SendOutcome, PipelineError>>, GraphQlError> {
+        let GraphQlSendInput {
+            request,
+            ancestors,
+            scopes,
+            secrets,
+            secret_key,
+        } = input;
+        let input = SendInput {
+            request: graphql::to_http_request(&request)?,
+            ancestors,
+            scopes,
+            secrets,
+            secret_key,
+        };
+        Ok(self.send_request_with_protocol(owner, input, installation_key, Some(request), cx))
+    }
+
+    /// The one prepare-and-send path behind [`HttpClient::send_request_recorded_in`] and
+    /// [`HttpClient::send_graphql`]. With `graphql`, `input.request` is its
+    /// [`graphql::to_http_request`], the body on the wire is built by
+    /// [`crate::prepare::prepare_graphql`] and the history row names
+    /// [`graphql::PROTOCOL`].
+    fn send_request_with_protocol(
+        &mut self,
+        owner: SendOwner,
+        input: SendInput,
+        installation_key: Option<String>,
+        graphql: Option<GraphQlRequest>,
+        cx: &mut Context<HttpClient>,
+    ) -> Task<Result<SendOutcome, PipelineError>> {
         let transport = self.transport.clone();
         let workspace_root = self.workspace_root.clone();
-        let draft = self
-            .history
-            .as_ref()
-            .and_then(|recorder| recorder.draft_recorded_in(&input.request, installation_key));
+        let draft = self.history.as_ref().and_then(|recorder| {
+            if graphql.is_some() {
+                recorder.draft_for_protocol(&input.request, installation_key, graphql::PROTOCOL)
+            } else {
+                recorder.draft_recorded_in(&input.request, installation_key)
+            }
+        });
         // The send names itself in the [`SendEvent`] a cancellation becomes: the method
         // and URL as the caller sent it, placeholders and all (REQ-HTTP-12).
-        let identity = SendIdentity {
-            method: input.request.method.clone(),
-            url: input.request.url.clone(),
+        let cancelled = SendEvent {
+            send: Some(SendIdentity {
+                method: input.request.method.clone(),
+                url: input.request.url.clone(),
+            }),
+            protocol: graphql.as_ref().map(|_| graphql::PROTOCOL),
         };
         // The send's work and this entity share the one draft (an `Arc`): its gate keeps
         // the send to one row however the two writers race.
@@ -349,7 +417,7 @@ impl HttpClient {
         self.drive_send(
             cx,
             owner,
-            identity,
+            cancelled,
             draft,
             move || async move {
                 let SendInput {
@@ -363,14 +431,26 @@ impl HttpClient {
                 // every field and the auth (REQ-VAR-05).
                 let mut dynamic = DynamicValues::new();
                 let ancestors: Vec<&Auth> = ancestors.iter().collect();
-                match prepare(
-                    &request,
-                    &ancestors,
-                    &scopes,
-                    secrets.as_ref(),
-                    secret_key.as_ref(),
-                    &mut dynamic,
-                ) {
+                let prepared = match &graphql {
+                    Some(graphql) => prepare_graphql(
+                        &request,
+                        graphql,
+                        &ancestors,
+                        &scopes,
+                        secrets.as_ref(),
+                        secret_key.as_ref(),
+                        &mut dynamic,
+                    ),
+                    None => prepare(
+                        &request,
+                        &ancestors,
+                        &scopes,
+                        secrets.as_ref(),
+                        secret_key.as_ref(),
+                        &mut dynamic,
+                    ),
+                };
+                match prepared {
                     Err(error) => {
                         // No secret was substituted before preparation failed, so the
                         // empty set redacts the pre-resolution request (history.rs).
@@ -442,7 +522,7 @@ impl HttpClient {
         &mut self,
         cx: &mut Context<HttpClient>,
         owner: SendOwner,
-        identity: SendIdentity,
+        cancelled_event: SendEvent,
         history: Option<Arc<HistoryDraft>>,
         make_work: MakeWork,
         cancelled: T,
@@ -468,7 +548,7 @@ impl HttpClient {
             PendingSend {
                 task,
                 history,
-                identity,
+                cancelled: cancelled_event,
             },
         );
         cx.background_spawn(async move { receiver.await.unwrap_or(cancelled) })
@@ -495,7 +575,7 @@ impl HttpClient {
         let Some(PendingSend {
             task,
             history: draft,
-            identity,
+            cancelled: event,
         }) = self.take_pending(owner)
         else {
             return;
@@ -503,7 +583,6 @@ impl HttpClient {
         let was_sending = !task.is_ready();
         // Dropping the task cancels the send, which aborts its connection.
         drop(task);
-        let send = Some(identity);
         // The dropped task can no longer record its own row, so the cancelled row is
         // written on a background task of its own (REQ-HIST-01 records every send) and
         // the event follows it — never blocking the foreground on SQLite.
@@ -511,7 +590,7 @@ impl HttpClient {
             cx.spawn(async move |this, cx| {
                 cx.background_spawn(async move { draft.record_cancelled() })
                     .await;
-                let emitted = this.update(cx, |_, cx| cx.emit(SendEvent { send }));
+                let emitted = this.update(cx, |_, cx| cx.emit(event));
                 if emitted.is_err() {
                     // Handled: the client entity was dropped while the row was being
                     // written; there is nobody left to tell.
@@ -520,7 +599,7 @@ impl HttpClient {
             .detach();
         } else if was_sending {
             // Nothing is written, so there is nothing to order the event after.
-            cx.emit(SendEvent { send });
+            cx.emit(event);
         }
     }
 }
