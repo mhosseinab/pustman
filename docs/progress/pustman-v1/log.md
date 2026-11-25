@@ -377,3 +377,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — S54a security review CHANGES_REQUESTED (HIGH: unbounded last_event_id cloned into every event; MEDIUM: event_type outside the bound, last-event-id committed before dispatch, no oversize test) → fix cycle; Edits extended to crates/http_engine/tests/event_source_bounds.rs. Note for S54b: clamp retry (min/max) before using it as a reconnect delay.
 - 2026-11-25 — S54a re-review: HIGH partly open (64 KiB id copied into every log message) → fix 2: MAX_ID_BYTES 1 KiB. Store-budget follow-up added to #341. tests/event_source_bounds.rs scope extension recorded (driver).
 - 2026-11-25 — S51d UI review PASS_WITH_ISSUES (MEDIUM: focus lost on replaced controls; search input created in render; set_filter per keystroke) → fix cycle; LOWs filed.
+- 2026-11-25 — S54a merged (SSE parser; security fix 2 + re-reviews; VERIFY OK).

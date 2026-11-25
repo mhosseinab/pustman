@@ -143,7 +143,7 @@ Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub p
 | S51 | Session events, Message log store/view/toolbar, Console entry | in_progress | 0 | | | S51a–S51e; S51a–S51c merged |
 | S52 | Auth kinds and network model (proxy, client certs, CA) | done | 1 | | | S52a, S52b merged |
 | S53 | GraphQL over the HTTP engine | done | 1 | | | S53 merged |
-| S54 | Server-sent events: parser, streaming, viewer mode | pending | 0 | | | S54a–S54c |
+| S54 | Server-sent events: parser, streaming, viewer mode | in_progress | 0 | | | S54a–S54c; S54a merged |
 | S55 | Digest, AWS SigV4, JWT Bearer auth applied on send | pending | 0 | | | S55a–S55d |
 | S56 | OAuth 2.0 grants, PKCE, keychain/refresh, local-IdP AC | pending | 0 | | | S56a–S56d |
 | S57 | Proxy, client certificates, CA bundle, palette secrets | pending | 0 | | | S57a–S57c |

@@ -23,6 +23,7 @@ mod cookie_persistence;
 mod cookie_transport;
 mod cookies;
 mod error;
+pub mod event_source;
 mod file_ref;
 mod history;
 mod pipeline;
