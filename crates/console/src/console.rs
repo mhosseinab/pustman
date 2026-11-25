@@ -16,6 +16,7 @@
 mod export;
 mod feed;
 mod panel;
+pub mod session_entry;
 mod store;
 
 pub use export::export_text;
