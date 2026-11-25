@@ -53,6 +53,10 @@ pub(crate) const OPEN_WORKSPACE_ID: &str = "welcome-open-workspace";
 pub(crate) const IMPORT_ID: &str = "welcome-import";
 pub(crate) const NEW_COLLECTION_ID: &str = "welcome-new-collection";
 
+/// The key hints' test selectors: New Request's and the sidebar shortcut's keys.
+pub(crate) const NEW_REQUEST_KEYS_SELECTOR: &str = "welcome-new-request-keys";
+pub(crate) const TOGGLE_SIDEBAR_KEYS_SELECTOR: &str = "welcome-toggle-sidebar-keys";
+
 /// The panel whose "＋ New" the open-workspace state offers as New collection….
 const COLLECTIONS_PANEL_ID: &str = "collections";
 
@@ -305,7 +309,12 @@ impl Render for Welcome {
                             ),
                     )
                     .child(actions)
-                    .child(shortcut_hint("Toggle Sidebar", &ToggleSidebar, cx))
+                    .child(shortcut_hint(
+                        "Toggle Sidebar",
+                        &ToggleSidebar,
+                        TOGGLE_SIDEBAR_KEYS_SELECTOR,
+                        cx,
+                    ))
                     .children(recent),
             )
     }
@@ -367,7 +376,11 @@ fn new_request_row(cx: &App) -> impl IntoElement {
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(NewTab), cx)),
             ),
         )
-        .child(KeyBinding::for_action(&NewTab).size(TextSize::Default))
+        .child(
+            div()
+                .debug_selector(|| NEW_REQUEST_KEYS_SELECTOR.to_owned())
+                .child(KeyBinding::from_keymap(&NewTab).size(TextSize::Default)),
+        )
 }
 
 /// One Recent row: the workspace's name, its path muted at the right. A
@@ -438,8 +451,14 @@ fn workspace_name(root: &Path) -> String {
 }
 
 /// One hint row: what the shortcut does, and the keys that run it — read from the active
-/// keymap at render time, so a rebound key cannot go stale here.
-fn shortcut_hint(label: &'static str, action: &dyn Action, cx: &App) -> impl IntoElement {
+/// keymap at render time, so a rebound key cannot go stale here, and from the whole
+/// keymap, so the hint stays while an application menu has the keyboard (#332).
+fn shortcut_hint(
+    label: &'static str,
+    action: &dyn Action,
+    keys_selector: &'static str,
+    cx: &App,
+) -> impl IntoElement {
     h_flex()
         .gap(DynamicSpacing::Base04.rems(cx))
         .child(
@@ -447,5 +466,13 @@ fn shortcut_hint(label: &'static str, action: &dyn Action, cx: &App) -> impl Int
                 .size(LabelSize::Default)
                 .color(Color::Muted),
         )
-        .child(KeyBinding::for_action(action).size(TextSize::Default))
+        .child(
+            div()
+                .debug_selector(move || keys_selector.to_owned())
+                .child(KeyBinding::from_keymap(action).size(TextSize::Default)),
+        )
 }
+
+#[cfg(test)]
+#[path = "welcome_hints_tests.rs"]
+mod hints_tests;
