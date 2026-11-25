@@ -36,6 +36,9 @@ security list-keychains -d user -s "$keychain" $(security list-keychains -d user
 codesign --force --deep --options runtime --timestamp \
     --keychain "$keychain" --sign "$MACOS_SIGN_IDENTITY" "$app"
 codesign --verify --deep --strict --verbose=2 "$app"
+# The certificate chain (names only, no secrets): notarization needs "Developer ID
+# Application", not "Apple Distribution" or "Apple Development".
+codesign --display --verbose=2 "$app" 2>&1 | grep -E '^(Authority|TeamIdentifier|Runtime|Timestamp)='
 
 # The drag-to-Applications disk image.
 staging="$work/dmg"
@@ -48,9 +51,18 @@ codesign --force --timestamp --keychain "$keychain" --sign "$MACOS_SIGN_IDENTITY
 
 # Notarize with the App Store Connect API key, wait for Apple's verdict, staple it.
 printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$work/AuthKey.p8"
-xcrun notarytool submit "$dmg" \
-    --key "$work/AuthKey.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" \
-    --wait --timeout 30m
+auth=(--key "$work/AuthKey.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID")
+xcrun notarytool submit "$dmg" "${auth[@]}" --wait --timeout 30m \
+    --output-format json > "$work/submission.json" || true
+cat "$work/submission.json"
+submission_id="$(plutil -extract id raw -o - "$work/submission.json")"
+status="$(plutil -extract status raw -o - "$work/submission.json")"
+if [[ "$status" != "Accepted" ]]; then
+    # Apple's own report of what it rejected (file paths and issue messages only).
+    echo "::error::notarization $status — Apple's log follows"
+    xcrun notarytool log "$submission_id" "${auth[@]}" || true
+    exit 1
+fi
 xcrun stapler staple "$dmg"
 xcrun stapler validate "$dmg"
 spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"

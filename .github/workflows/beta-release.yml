@@ -58,6 +58,14 @@ jobs:
       - name: Install toolchain from rust-toolchain.toml
         run: rustup toolchain install
 
+      # Restores the release build warmed on the default branch (release-cache.yml); tag
+      # builds can only read caches from their own tag and the default branch, so they
+      # never save one themselves.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}
+          save-if: false
+
       - name: Build release
         run: cargo build --release --locked -p pustman
 

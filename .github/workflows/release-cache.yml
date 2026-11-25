@@ -1,0 +1,55 @@
+name: Release cache
+
+# Keeps a warm release-profile build cache on the default branch so beta tag builds
+# (beta-release.yml) restore it instead of compiling every dependency from scratch.
+# A tag can only read caches saved on its own tag or on the default branch.
+
+on:
+  push:
+    branches: [pustman-v1/main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-cache
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    name: warm (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x86_64
+          - os: macos-latest
+            target: macos-arm64
+          - os: windows-latest
+            target: windows-x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GPUI system libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libwayland-dev \
+            libx11-xcb-dev \
+            libvulkan-dev \
+            libfontconfig-dev \
+            libfreetype-dev \
+            libdbus-1-dev
+
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}
+
+      - name: Build release
+        run: cargo build --release --locked -p pustman
