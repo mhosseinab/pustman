@@ -390,7 +390,6 @@ impl Render for Dock {
 impl Dock {
     /// The dock itself: the panel header row over the active panel.
     fn body(&self, cx: &Context<Self>) -> gpui::AnyElement {
-
         let header = self.panel_header(cx);
         let active_panel = self.panel();
         let colors = cx.theme().colors();
@@ -467,11 +466,11 @@ fn rail_item(
         })
         .focus_visible(|item| item.border_color(colors.border_focused))
         .tooltip(Tooltip::text(title).builder())
-        .child(
-            Icon::new(icon)
-                .size(IconSize::Medium)
-                .color(if selected { Color::Accent } else { Color::Muted }),
-        )
+        .child(Icon::new(icon).size(IconSize::Medium).color(if selected {
+            Color::Accent
+        } else {
+            Color::Muted
+        }))
         .on_click(on_click)
 }
 

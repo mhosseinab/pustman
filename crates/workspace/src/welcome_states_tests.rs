@@ -9,16 +9,16 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use gpui::{
-    Entity, FocusHandle, Focusable, Modifiers, TestAppContext, VisualTestContext, Window,
-};
+use gpui::{Entity, FocusHandle, Focusable, Modifiers, TestAppContext, VisualTestContext, Window};
 use pustman_actions::workspace::{CreateWorkspace, OpenWorkspace};
 use storage::{LocalStore, RecentWorkspace};
 use time::{Duration, OffsetDateTime};
 use ui::prelude::*;
 use ui::test_support::{draw_window, init_test};
 
-use crate::welcome::{IMPORT_ID, NEW_COLLECTION_ID, NEW_WORKSPACE_ID, OPEN_WORKSPACE_ID, recent_row_id};
+use crate::welcome::{
+    IMPORT_ID, NEW_COLLECTION_ID, NEW_WORKSPACE_ID, OPEN_WORKSPACE_ID, recent_row_id,
+};
 use crate::workspace_open::{WorkspaceOpen, create_workspace};
 use crate::{DockPosition, Panel, Workspace, init};
 
@@ -133,7 +133,11 @@ fn test_without_a_workspace_the_welcome_buttons_create_and_open_one(cx: &mut Tes
         "with no workspace there is nowhere to put a collection"
     );
     click(cx, NEW_WORKSPACE_ID);
-    assert_eq!(created.get(), 1, "New workspace… dispatches CreateWorkspace");
+    assert_eq!(
+        created.get(),
+        1,
+        "New workspace… dispatches CreateWorkspace"
+    );
     click(cx, OPEN_WORKSPACE_ID);
     assert_eq!(opened.get(), 1, "Open workspace… dispatches OpenWorkspace");
 }
@@ -197,7 +201,9 @@ fn test_with_a_workspace_open_new_collection_runs_the_panels_create_action(
         })
     });
     cx.update(|window, cx| {
-        workspace.update(cx, |workspace, cx| workspace.register_panel(panel, window, cx));
+        workspace.update(cx, |workspace, cx| {
+            workspace.register_panel(panel, window, cx)
+        });
     });
     cx.run_until_parked();
     draw_window(cx);

@@ -171,11 +171,7 @@ impl EnvironmentSelector {
 /// status bar's readout and every resolver follow, and it is persisted for the inputs'
 /// workspace on a background task. Without installed inputs there is nowhere to persist
 /// the choice, and the user is told so.
-pub fn select_environment(
-    choice: Option<ItemId>,
-    workspace: WeakEntity<Workspace>,
-    cx: &mut App,
-) {
+pub fn select_environment(choice: Option<ItemId>, workspace: WeakEntity<Workspace>, cx: &mut App) {
     let Some(inputs) = cx.try_global::<SelectorInputs>().cloned() else {
         if let Err(_released) = workspace.update(cx, |workspace, cx| {
             workspace.show_toast(NOT_WIRED_MESSAGE, Severity::Error, None, cx);

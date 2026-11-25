@@ -15,7 +15,10 @@ use storage::LocalStore;
 use ui::test_support::{draw_window, init_test};
 use workspace::{Workspace, WorkspaceOpen};
 
-use super::{EMPTY_ID, EMPTY_NEW_ID, EnvironmentsPanel, NO_WORKSPACE_ID, NO_WORKSPACE_OPEN_ID, PANEL_ID, row_id};
+use super::{
+    EMPTY_ID, EMPTY_NEW_ID, EnvironmentsPanel, NO_WORKSPACE_ID, NO_WORKSPACE_OPEN_ID, PANEL_ID,
+    row_id,
+};
 use crate::selector::{SelectorInputs, install_inputs};
 
 fn open_store() -> Arc<Mutex<LocalStore>> {
@@ -101,9 +104,15 @@ fn test_without_a_workspace_the_environments_view_offers_to_open_one(cx: &mut Te
         let opened = opened.clone();
         cx.on_action(move |_: &OpenWorkspace, _cx| opened.set(opened.get() + 1));
     });
-    assert!(cx.debug_bounds(NO_WORKSPACE_ID).is_some(), "the no-workspace line renders");
+    assert!(
+        cx.debug_bounds(NO_WORKSPACE_ID).is_some(),
+        "the no-workspace line renders"
+    );
     click(cx, NO_WORKSPACE_OPEN_ID);
-    assert!(opened.get() >= 1, "Open workspace… dispatches OpenWorkspace");
+    assert!(
+        opened.get() >= 1,
+        "Open workspace… dispatches OpenWorkspace"
+    );
 }
 
 #[gpui::test]
@@ -111,7 +120,10 @@ fn test_new_environment_writes_an_environment_into_the_open_workspace(cx: &mut T
     let directory = tempfile::tempdir().expect("the temp dir is created");
     let root = workspace_folder(directory.path());
     let (_workspace, cx) = open_panel(Some(&root), cx);
-    assert!(cx.debug_bounds(EMPTY_ID).is_some(), "an empty workspace says it has none");
+    assert!(
+        cx.debug_bounds(EMPTY_ID).is_some(),
+        "an empty workspace says it has none"
+    );
 
     click(cx, EMPTY_NEW_ID);
     let written: Vec<String> = std::fs::read_dir(root.join("environments"))
@@ -147,15 +159,21 @@ fn test_the_active_environment_is_badged_and_a_click_activates_another(cx: &mut 
     cx.run_until_parked();
     draw_window(cx);
     assert!(
-        cx.debug_bounds(format!("{}-active", row_id(development_id)).leak()).is_some(),
+        cx.debug_bounds(format!("{}-active", row_id(development_id)).leak())
+            .is_some(),
         "the active environment carries the Active badge"
     );
     assert!(
-        cx.debug_bounds(format!("{}-active", row_id(staging_id)).leak()).is_none(),
+        cx.debug_bounds(format!("{}-active", row_id(staging_id)).leak())
+            .is_none(),
         "only the active one does"
     );
 
     click(cx, row_id(staging_id).leak());
     let active = cx.update(|_window, cx| cx.global::<SelectorInputs>().active);
-    assert_eq!(active, Some(staging_id), "a click makes that environment active");
+    assert_eq!(
+        active,
+        Some(staging_id),
+        "a click makes that environment active"
+    );
 }

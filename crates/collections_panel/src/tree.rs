@@ -788,17 +788,19 @@ impl CollectionsTree {
             }))
             .when(self.filter.is_none(), |row| row.child(div().flex_1()))
             .child(
-                div().debug_selector(|| NEW_COLLECTION_BUTTON_ID.to_owned()).child(
-                    Button::new(NEW_COLLECTION_BUTTON_ID, "New")
-                        .style(ButtonStyle::Tinted(TintColor::Accent))
-                        .start_icon(Icon::new(IconName::Plus))
-                        .tooltip(Tooltip::text("New collection"))
-                        // Dispatched on the tree's own focus handle, so the tree's
-                        // handler answers wherever the keyboard was.
-                        .on_click(move |_, window, cx| {
-                            focus_handle.dispatch_action(&NewCollection, window, cx);
-                        }),
-                ),
+                div()
+                    .debug_selector(|| NEW_COLLECTION_BUTTON_ID.to_owned())
+                    .child(
+                        Button::new(NEW_COLLECTION_BUTTON_ID, "New")
+                            .style(ButtonStyle::Tinted(TintColor::Accent))
+                            .start_icon(Icon::new(IconName::Plus))
+                            .tooltip(Tooltip::text("New collection"))
+                            // Dispatched on the tree's own focus handle, so the tree's
+                            // handler answers wherever the keyboard was.
+                            .on_click(move |_, window, cx| {
+                                focus_handle.dispatch_action(&NewCollection, window, cx);
+                            }),
+                    ),
             )
             .into_any_element()
     }
@@ -869,8 +871,8 @@ pub(crate) fn filter_rows(rows: Vec<TreeRow>, query: &str) -> Vec<TreeRow> {
         while ancestors.last().is_some_and(|(_, above)| *above >= depth) {
             ancestors.pop();
         }
-        let matches = matches!(row, TreeRow::Problem { .. })
-            || row.name().to_lowercase().contains(query);
+        let matches =
+            matches!(row, TreeRow::Problem { .. }) || row.name().to_lowercase().contains(query);
         if matches {
             if let Some(slot) = keep.get_mut(index) {
                 *slot = true;

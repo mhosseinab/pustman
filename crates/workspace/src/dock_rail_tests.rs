@@ -54,7 +54,11 @@ impl Panel for TestPanel {
 /// A workspace with three left-dock panels registered in the rail's order.
 fn workspace_with_panels(
     cx: &mut TestAppContext,
-) -> (Entity<Workspace>, Vec<Entity<TestPanel>>, &mut VisualTestContext) {
+) -> (
+    Entity<Workspace>,
+    Vec<Entity<TestPanel>>,
+    &mut VisualTestContext,
+) {
     cx.update(init_test);
     cx.update(init);
     let (workspace, cx) = cx.add_window_view(Workspace::new);
@@ -113,7 +117,10 @@ fn test_the_rail_sits_left_of_the_sidebar_and_a_click_switches_the_view(cx: &mut
     cx.simulate_click(environments.center(), Modifiers::none());
     draw_window(cx);
     assert_eq!(active_panel(&workspace, cx), Some("environments"));
-    assert!(is_focused(&panels[1], cx), "the keyboard follows into the panel");
+    assert!(
+        is_focused(&panels[1], cx),
+        "the keyboard follows into the panel"
+    );
 }
 
 #[gpui::test]
@@ -142,7 +149,10 @@ fn test_the_rail_is_keyboard_reachable_and_enter_switches_the_view(cx: &mut Test
     cx.run_until_parked();
     draw_window(cx);
     assert_eq!(active_panel(&workspace, cx), Some("history"));
-    assert!(is_focused(&panels[2], cx), "Enter moves the keyboard into the panel");
+    assert!(
+        is_focused(&panels[2], cx),
+        "Enter moves the keyboard into the panel"
+    );
 }
 
 #[gpui::test]
@@ -150,11 +160,16 @@ fn test_the_rail_stays_while_the_sidebar_is_hidden_and_brings_it_back(cx: &mut T
     let (workspace, _panels, cx) = workspace_with_panels(cx);
     cx.update(|_window, cx| {
         workspace.update(cx, |workspace, cx| {
-            workspace.left_dock().update(cx, |dock, cx| dock.set_open(false, cx));
+            workspace
+                .left_dock()
+                .update(cx, |dock, cx| dock.set_open(false, cx));
         });
     });
     draw_window(cx);
-    assert!(cx.debug_bounds("left-dock").is_none(), "the sidebar is hidden");
+    assert!(
+        cx.debug_bounds("left-dock").is_none(),
+        "the sidebar is hidden"
+    );
     let history = rail_bounds(cx, "history");
     cx.simulate_click(history.center(), Modifiers::none());
     draw_window(cx);
@@ -173,7 +188,9 @@ fn test_rail_help_opens_the_command_palette(cx: &mut TestAppContext) {
         let toggles = toggles.clone();
         cx.on_action(move |_: &palette::Toggle, _cx| toggles.set(toggles.get() + 1));
     });
-    let help = cx.debug_bounds(RAIL_HELP_ID).expect("Help renders on the rail");
+    let help = cx
+        .debug_bounds(RAIL_HELP_ID)
+        .expect("Help renders on the rail");
     cx.simulate_click(help.center(), Modifiers::none());
     cx.run_until_parked();
     assert_eq!(toggles.get(), 1, "Help dispatches palette::Toggle");

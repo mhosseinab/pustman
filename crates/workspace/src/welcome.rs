@@ -299,13 +299,11 @@ impl Render for Welcome {
                         h_flex()
                             .gap(DynamicSpacing::Base03.rems(cx))
                             .child(
-                                div()
-                                    .debug_selector(|| format!("{WELCOME_ID}-icon"))
-                                    .child(
-                                        Icon::new(IconName::Send)
-                                            .size(IconSize::Medium)
-                                            .color(Color::Accent),
-                                    ),
+                                div().debug_selector(|| format!("{WELCOME_ID}-icon")).child(
+                                    Icon::new(IconName::Send)
+                                        .size(IconSize::Medium)
+                                        .color(Color::Accent),
+                                ),
                             )
                             .child(eyebrow("Welcome to Pustman", cx)),
                     )
@@ -414,7 +412,9 @@ fn recent_row(
         .gap(DynamicSpacing::Base06.rems(cx))
         .px(DynamicSpacing::Base06.rems(cx))
         .py(DynamicSpacing::Base04.rems(cx))
-        .when(divided, |row| row.border_t_1().border_color(colors.border_variant))
+        .when(divided, |row| {
+            row.border_t_1().border_color(colors.border_variant)
+        })
         .hover(|row| row.bg(colors.ghost_element_hover))
         .focus_visible(|row| row.border_1().border_color(colors.border_focused))
         .tooltip(Tooltip::text(path.clone()).builder())

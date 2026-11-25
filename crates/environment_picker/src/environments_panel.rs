@@ -22,8 +22,8 @@ use std::path::{Path, PathBuf};
 
 use api_model::{Environment, ItemId};
 use gpui::{
-    Action, App, Context, FocusHandle, Focusable, Render, Role, SharedString, Subscription,
-    Task, WeakEntity, Window,
+    Action, App, Context, FocusHandle, Focusable, Render, Role, SharedString, Subscription, Task,
+    WeakEntity, Window,
 };
 use pustman_actions::workspace::{CreateWorkspace, OpenWorkspace};
 use ui::prelude::*;
@@ -97,7 +97,12 @@ impl EnvironmentsPanel {
     }
 
     /// `＋ New`: write a new environment into the open workspace, off the foreground.
-    fn new_environment(&mut self, _: &NewEnvironment, _window: &mut Window, cx: &mut Context<Self>) {
+    fn new_environment(
+        &mut self,
+        _: &NewEnvironment,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(root) = self.root(cx) else {
             self.report("Open a workspace first — environments are saved in it.", cx);
             return;
@@ -134,10 +139,7 @@ impl EnvironmentsPanel {
             if let Err(error) = written {
                 // The panel went away with its window; nobody is left to tell.
                 this.update(cx, |panel, cx| {
-                    panel.report(
-                        format!("{name} could not be created — {error}"),
-                        cx,
-                    );
+                    panel.report(format!("{name} could not be created — {error}"), cx);
                 })
                 .ok();
             }

@@ -138,7 +138,12 @@ impl Workspace {
     /// on the panel's focus handle — so the panel's own handler answers it even though
     /// the click came from outside the panel. A sidebar that was hidden is drawn first
     /// and the action follows on the next frame, once the panel is in the dispatch tree.
-    pub fn run_panel_create(&mut self, panel_id: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn run_panel_create(
+        &mut self,
+        panel_id: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(action) = self.panel_create_action(panel_id, cx) else {
             return;
         };

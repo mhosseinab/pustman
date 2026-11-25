@@ -179,15 +179,26 @@ fn row_names(tree: &Entity<CollectionsTree>, cx: &VisualTestContext) -> Vec<Stri
 fn test_without_a_workspace_the_sidebar_offers_new_and_open_workspace(cx: &mut TestAppContext) {
     let opened = open(snapshot(PathBuf::new(), Vec::new()), cx);
     let cx = opened.cx;
-    assert!(cx.debug_bounds(NO_WORKSPACE_ID).is_some(), "the no-workspace state renders");
+    assert!(
+        cx.debug_bounds(NO_WORKSPACE_ID).is_some(),
+        "the no-workspace state renders"
+    );
     assert!(
         cx.debug_bounds(NEW_COLLECTION_BUTTON_ID).is_none(),
         "no ＋ New while there is no workspace to put a collection in"
     );
     click(cx, EMPTY_NEW_WORKSPACE_ID);
-    assert_eq!(opened.created.get(), 1, "New workspace… dispatches CreateWorkspace");
+    assert_eq!(
+        opened.created.get(),
+        1,
+        "New workspace… dispatches CreateWorkspace"
+    );
     click(cx, EMPTY_OPEN_WORKSPACE_ID);
-    assert_eq!(opened.opened.get(), 1, "Open workspace… dispatches OpenWorkspace");
+    assert_eq!(
+        opened.opened.get(),
+        1,
+        "Open workspace… dispatches OpenWorkspace"
+    );
 }
 
 #[gpui::test]
@@ -195,7 +206,10 @@ fn test_an_empty_workspace_offers_new_collection_and_import(cx: &mut TestAppCont
     let directory = tempfile::tempdir().expect("the temp dir is created");
     let opened = open(snapshot(directory.path().to_path_buf(), Vec::new()), cx);
     let cx = opened.cx;
-    assert!(cx.debug_bounds(NO_COLLECTIONS_ID).is_some(), "the empty-workspace state renders");
+    assert!(
+        cx.debug_bounds(NO_COLLECTIONS_ID).is_some(),
+        "the empty-workspace state renders"
+    );
     click(cx, EMPTY_NEW_COLLECTION_ID);
     assert_eq!(
         opened.new_collections.get(),
@@ -216,15 +230,20 @@ fn test_an_empty_workspace_offers_new_collection_and_import(cx: &mut TestAppCont
 #[gpui::test]
 fn test_the_new_button_beside_the_filter_dispatches_new_collection(cx: &mut TestAppContext) {
     let collection_id = ItemId::new();
+    // A real folder: the tree's own handler runs and writes the new collection there.
+    let directory = tempfile::tempdir().expect("the temp dir is created");
     let opened = open(
         snapshot(
-            PathBuf::from("fixtures/workspace"),
+            directory.path().to_path_buf(),
             vec![collection(collection_id, "Commerce API", Vec::new())],
         ),
         cx,
     );
     let cx = opened.cx;
-    assert!(cx.debug_bounds("collections-filter").is_some(), "the filter field renders");
+    assert!(
+        cx.debug_bounds("collections-filter").is_some(),
+        "the filter field renders"
+    );
     click(cx, NEW_COLLECTION_BUTTON_ID);
     assert_eq!(
         opened.new_collections.get(),
@@ -250,9 +269,15 @@ fn test_the_filter_keeps_matching_rows_and_their_containers(cx: &mut TestAppCont
         cx,
     );
     let (tree, cx) = (opened.tree, opened.cx);
-    assert_eq!(row_names(&tree, cx), vec!["Commerce API"], "the tree starts collapsed");
+    assert_eq!(
+        row_names(&tree, cx),
+        vec!["Commerce API"],
+        "the tree starts collapsed"
+    );
 
-    let filter = cx.read(|cx| tree.read(cx).filter().cloned()).expect("the tree has a filter");
+    let filter = cx
+        .read(|cx| tree.read(cx).filter().cloned())
+        .expect("the tree has a filter");
     filter.update(cx, |filter, cx| filter.set_text("LIST", cx));
     cx.run_until_parked();
     draw_window(cx);
@@ -265,7 +290,10 @@ fn test_the_filter_keeps_matching_rows_and_their_containers(cx: &mut TestAppCont
     filter.update(cx, |filter, cx| filter.set_text("nothing like it", cx));
     cx.run_until_parked();
     draw_window(cx);
-    assert!(cx.debug_bounds(NO_MATCHES_ID).is_some(), "an empty result says so");
+    assert!(
+        cx.debug_bounds(NO_MATCHES_ID).is_some(),
+        "an empty result says so"
+    );
 
     filter.update(cx, |filter, cx| filter.set_text("", cx));
     cx.run_until_parked();
@@ -290,7 +318,9 @@ fn test_the_selected_row_carries_the_accent_bar(cx: &mut TestAppContext) {
     let accent: &'static str = format!("tree-item-{collection_id}-accent").leak();
     assert!(cx.debug_bounds(accent).is_none(), "no row is selected yet");
     click(cx, format!("tree-item-{collection_id}-name").leak());
-    let bar = cx.debug_bounds(accent).expect("the selected row draws its accent bar");
+    let bar = cx
+        .debug_bounds(accent)
+        .expect("the selected row draws its accent bar");
     assert!(
         bar.size.width <= px(4.) && bar.size.height >= px(20.),
         "the bar is a thin full-height marker, got {bar:?}"
