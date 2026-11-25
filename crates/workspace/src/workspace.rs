@@ -231,12 +231,8 @@ impl Render for Workspace {
                 h_flex()
                     .flex_1()
                     .min_h_0()
-                    .children(
-                        self.left_dock
-                            .read(cx)
-                            .is_open()
-                            .then(|| self.left_dock.clone()),
-                    )
+                    // Drawn open or closed: a hidden sidebar keeps its icon rail (S48u3).
+                    .child(self.left_dock.clone())
                     .child(self.center_pane.clone()),
             )
             .children(
