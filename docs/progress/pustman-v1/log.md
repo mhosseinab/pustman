@@ -347,3 +347,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — Dispatched S50a (request kinds) and S51a (session events), Claude workers, 2 at once for disk (22 GB free). S50d (authorized EXPECTED_ACTIONS edit in the ledger) and S52b queued.
 - 2026-11-25 — S50a merged (protocol request kinds; security fix 1; authorized request_tests edit, ledger row now used; VERIFY OK; follow-ups #339).
 - 2026-11-25 — S51a merged (session events; security fix 1; merge renamed its MessageKind to SessionMessageKind next to S50a's authoring MessageKind; VERIFY OK; follow-ups #338).
+- 2026-11-25 — Disk hit 0 MB during S52b's full verify; freed 31 GB by pruning 269 stale duplicate test binaries in the main checkout's target/debug/deps (newest of each kept). S52b committed (e8fd46f, step Verify PASS 4) → security review. Dispatched S50d (authorized EXPECTED_ACTIONS edit) and S51b.
