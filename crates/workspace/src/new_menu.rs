@@ -5,6 +5,10 @@
 //! not landed yet answers no action; its entry is shown but cannot run, and says so.
 //!
 //! `Ctrl/Cmd-T` (`NewTab`) does not go through this menu: it still opens HTTP directly.
+//!
+//! Decision: the step's "Not available yet" tooltip is a visible inline note at the end of
+//! the disabled entry (the menu's hint) — `ui::ContextMenu` has no per-entry tooltip, and a
+//! note is readable from the keyboard, where a hover tooltip never appears.
 
 use gpui::{Action, Context, Entity, FocusHandle, IntoElement, Render, Subscription, Window};
 use pustman_actions::workspace::{

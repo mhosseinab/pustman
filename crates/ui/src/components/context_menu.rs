@@ -44,6 +44,9 @@ pub const HINT_SUFFIX: &str = "-hint";
 /// The narrowest a menu grows, so a two-word entry never wraps.
 const MIN_WIDTH_PX: f32 = 160.;
 
+/// How far a disabled entry's label fades, on top of its `text_disabled` color.
+const DISABLED_LABEL_OPACITY: f32 = 0.6;
+
 /// The height of one menu entry at the default scale.
 const ENTRY_HEIGHT_PX: f32 = 24.;
 
@@ -130,16 +133,23 @@ impl MenuItem {
                         colors.text
                     })
                     .when(selected, |this| this.bg(colors.element_selected))
-                    .child(div().flex_1().min_w_0().child(
-                        Label::new(label.clone()).truncate().map(|label| {
-                            // The entry's color is its identity (a method verb), not its
-                            // state: the highlight still marks the selection, by fill.
-                            match color {
-                                Some(color) => label.color(*color),
-                                None => label,
-                            }
-                        }),
-                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            // Only the label fades: the hint beside a disabled entry is
+                            // often the one thing that says why, so it must stay readable.
+                            .when(disabled, |label| label.opacity(DISABLED_LABEL_OPACITY))
+                            .child(Label::new(label.clone()).truncate().map(|label| {
+                                // The entry's color is its identity (a method verb), not
+                                // its state: the highlight still marks the selection, by
+                                // fill.
+                                match color {
+                                    Some(color) => label.color(*color),
+                                    None => label,
+                                }
+                            })),
+                    )
                     .when_some(hint.clone(), |row, hint| {
                         let hint_key = format!("{key}{HINT_SUFFIX}");
                         row.child(
@@ -147,18 +157,17 @@ impl MenuItem {
                                 .debug_selector(move || hint_key.clone())
                                 .flex_none()
                                 .pl(DynamicSpacing::Base08.rems(cx))
-                                .child(Label::new(hint).size(LabelSize::XSmall).color(
-                                    if disabled {
-                                        Color::Disabled
-                                    } else {
-                                        Color::Muted
-                                    },
-                                )),
+                                // Muted even on a disabled entry, where it explains why
+                                // the entry cannot run: text a reader needs is held to
+                                // 4.5:1 (REQ-NFR-06), which `text_disabled` is exempt from.
+                                .child(
+                                    Label::new(hint).size(LabelSize::XSmall).color(Color::Muted),
+                                ),
                         )
                     })
                     .map(|this| {
                         if disabled {
-                            this.cursor_not_allowed().opacity(0.6)
+                            this.cursor_not_allowed()
                         } else {
                             this.cursor_pointer()
                                 .hover(|style| style.bg(colors.ghost_element_hover))
