@@ -58,6 +58,9 @@ pub struct SavedMessage {
     pub kind: MessageKind,
     #[serde(default)]
     pub payload: String,
+    /// Unknown fields, preserved verbatim (REQ-MODEL-02).
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// A raw WebSocket request (REQ-WS-01, REQ-WS-03).
@@ -95,6 +98,9 @@ pub struct SavedEmit {
     /// Whether the emit asks the server for an acknowledgement.
     #[serde(default)]
     pub acknowledge: bool,
+    /// Unknown fields, preserved verbatim (REQ-MODEL-02).
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// A Socket.IO request (REQ-SIO-01..03).
@@ -134,22 +140,39 @@ fn default_socketio_namespace() -> String {
     "/".to_string()
 }
 
-/// Where a gRPC request's service definitions come from (REQ-GRPC-01).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Where a gRPC request's service definitions come from (REQ-GRPC-01). Every variant keeps
+/// unknown fields in `extra` (REQ-MODEL-02).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DescriptorSource {
     /// Ask the server (`grpc.reflection.v1`, falling back to `v1alpha`).
-    #[default]
-    Reflection,
+    Reflection {
+        #[serde(flatten)]
+        extra: BTreeMap<String, serde_json::Value>,
+    },
     /// `.proto` files, usually under the workspace's `protos/` folder.
     ProtoFiles {
         #[serde(default)]
         files: Vec<String>,
         #[serde(default)]
         import_paths: Vec<String>,
+        #[serde(flatten)]
+        extra: BTreeMap<String, serde_json::Value>,
     },
     /// A compiled `FileDescriptorSet` file.
-    DescriptorSet { path: String },
+    DescriptorSet {
+        path: String,
+        #[serde(flatten)]
+        extra: BTreeMap<String, serde_json::Value>,
+    },
+}
+
+impl Default for DescriptorSource {
+    fn default() -> Self {
+        DescriptorSource::Reflection {
+            extra: BTreeMap::new(),
+        }
+    }
 }
 
 /// A gRPC request (REQ-GRPC-01..04).

@@ -68,16 +68,19 @@ fn websocket_request_round_trips_with_saved_messages() {
                 name: "Hello".to_string(),
                 kind: MessageKind::Text,
                 payload: "hello".to_string(),
+                extra: BTreeMap::new(),
             },
             SavedMessage {
                 name: "Join".to_string(),
                 kind: MessageKind::Json,
                 payload: "{\"join\":\"room-1\"}".to_string(),
+                extra: BTreeMap::new(),
             },
             SavedMessage {
                 name: "Ping bytes".to_string(),
                 kind: MessageKind::Binary,
                 payload: "AAEC".to_string(),
+                extra: BTreeMap::new(),
             },
         ],
         extra: BTreeMap::new(),
@@ -133,8 +136,10 @@ fn socketio_request_defaults_path_and_namespace() {
                 name: "match".to_string(),
                 kind: MessageKind::Json,
                 payload: "{\"match\":7}".to_string(),
+                extra: BTreeMap::new(),
             }],
             acknowledge: true,
+            extra: BTreeMap::new(),
         }],
         ..socketio.clone()
     });
@@ -144,13 +149,17 @@ fn socketio_request_defaults_path_and_namespace() {
 #[test]
 fn grpc_request_round_trips_each_descriptor_source() {
     let sources = [
-        DescriptorSource::Reflection,
+        DescriptorSource::Reflection {
+            extra: BTreeMap::new(),
+        },
         DescriptorSource::ProtoFiles {
             files: vec!["protos/helloworld.proto".to_string()],
             import_paths: vec!["protos".to_string()],
+            extra: BTreeMap::new(),
         },
         DescriptorSource::DescriptorSet {
             path: "protos/greeter.pb".to_string(),
+            extra: BTreeMap::new(),
         },
     ];
 
@@ -194,4 +203,135 @@ fn mqtt_kind_still_preserved_as_unsupported() {
     let output = serde_json::to_value(&request).unwrap();
     let original: serde_json::Value = serde_json::from_slice(input.as_bytes()).unwrap();
     assert_eq!(output, original, "an MQTT request round-trips verbatim");
+}
+
+#[test]
+fn nested_unknown_keys_survive_a_save() {
+    let websocket = r#"{
+        "type": "websocket",
+        "id": "01BX5ZZKBKACTAV9WEVGEMMVRZ",
+        "name": "Chat",
+        "url": "wss://echo.example.test/ws",
+        "saved_messages": [
+            {"name": "Ping", "kind": "binary", "payload": "AAEC", "encoding": "base64"}
+        ]
+    }"#;
+    let socketio = r#"{
+        "type": "socketio",
+        "id": "01BX5ZZKBKACTAV9WEVGEMMVRZ",
+        "name": "Live",
+        "url": "https://scores.example.test",
+        "saved_emits": [
+            {
+                "name": "Join",
+                "event": "join",
+                "volatile": true,
+                "arguments": [{"name": "room", "kind": "text", "payload": "1", "encoding": "utf8"}]
+            }
+        ]
+    }"#;
+    let grpc_sources = [
+        r#"{"kind": "reflection", "include_well_known": true}"#,
+        r#"{"kind": "proto_files", "files": ["a.proto"], "include_well_known": true}"#,
+        r#"{"kind": "descriptor_set", "path": "a.pb", "include_well_known": true}"#,
+    ];
+
+    let mut inputs = vec![websocket.to_string(), socketio.to_string()];
+    for source in grpc_sources {
+        inputs.push(format!(
+            r#"{{"type": "grpc", "id": "01BX5ZZKBKACTAV9WEVGEMMVRZ", "name": "Hello",
+                "target": "localhost:50051", "descriptor_source": {source}}}"#
+        ));
+    }
+
+    for input in inputs {
+        let request: Request = serde_json::from_slice(input.as_bytes()).unwrap();
+        assert!(
+            !matches!(request, Request::Unsupported(_)),
+            "{input} must decode typed"
+        );
+        let saved = serde_json::to_vec(&request).unwrap();
+        let reopened: Request = serde_json::from_slice(&saved).unwrap();
+        assert_eq!(reopened, request, "{input} round-trips");
+
+        let written: serde_json::Value = serde_json::from_slice(&saved).unwrap();
+        let nested = match reopened.type_tag() {
+            "websocket" => &written["saved_messages"][0]["encoding"],
+            "socketio" => {
+                assert_eq!(written["saved_emits"][0]["volatile"], true);
+                &written["saved_emits"][0]["arguments"][0]["encoding"]
+            }
+            _ => &written["descriptor_source"]["include_well_known"],
+        };
+        assert!(
+            !nested.is_null(),
+            "{input}: a nested unknown key must survive a save"
+        );
+    }
+}
+
+#[test]
+fn minimal_grpc_request_defaults_to_tls_and_reflection() {
+    let input = r#"{
+        "type": "grpc",
+        "id": "01BX5ZZKBKACTAV9WEVGEMMVRZ",
+        "name": "Say hello",
+        "target": "greeter.example.test:443"
+    }"#;
+
+    let request: Request = serde_json::from_slice(input.as_bytes()).unwrap();
+    let Request::Grpc(grpc) = &request else {
+        panic!("a minimal grpc request must decode typed");
+    };
+    assert!(grpc.tls, "TLS is on unless a request opts out");
+    assert_eq!(
+        grpc.descriptor_source,
+        DescriptorSource::Reflection {
+            extra: BTreeMap::new()
+        }
+    );
+}
+
+#[test]
+fn unknown_top_level_keys_round_trip_for_each_kind() {
+    let inputs = [
+        r#"{"type": "graphql", "id": "01BX5ZZKBKACTAV9WEVGEMMVRZ", "name": "Q",
+            "url": "https://api.example.test/graphql", "query": "{ me }", "x_future": {"a": 1}}"#,
+        r#"{"type": "websocket", "id": "01BX5ZZKBKACTAV9WEVGEMMVRZ", "name": "W",
+            "url": "wss://example.test", "x_future": {"a": 1}}"#,
+        r#"{"type": "socketio", "id": "01BX5ZZKBKACTAV9WEVGEMMVRZ", "name": "S",
+            "url": "https://example.test", "settings": {"timeout_ms": 5}, "x_future": {"a": 1}}"#,
+        r#"{"type": "grpc", "id": "01BX5ZZKBKACTAV9WEVGEMMVRZ", "name": "G",
+            "target": "localhost:50051", "settings": {"timeout_ms": 5}, "x_future": {"a": 1}}"#,
+    ];
+
+    for input in inputs {
+        let request: Request = serde_json::from_slice(input.as_bytes()).unwrap();
+        assert!(
+            !matches!(request, Request::Unsupported(_)),
+            "{input} must decode typed"
+        );
+        let written = serde_json::to_value(&request).unwrap();
+        assert_eq!(written["x_future"], serde_json::json!({"a": 1}), "{input}");
+        let original: serde_json::Value = serde_json::from_slice(input.as_bytes()).unwrap();
+        if original.get("settings").is_some() {
+            assert_eq!(
+                written["settings"], original["settings"],
+                "{input}: a settings block the kind does not model is kept as an unknown key"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_known_kind_that_fails_to_decode_is_kept_verbatim() {
+    let input = r#"{"type":"grpc","id":"01BX5ZZKBKACTAV9WEVGEMMVRZ","name":"G","target":"localhost:50051","tls":"no"}"#;
+
+    let request: Request = serde_json::from_slice(input.as_bytes()).unwrap();
+    assert!(
+        matches!(request, Request::Unsupported(_)),
+        "an undecodable grpc request must be kept raw"
+    );
+    let output = serde_json::to_string(&request).unwrap();
+    assert_eq!(output, input, "it round-trips byte for byte");
 }
