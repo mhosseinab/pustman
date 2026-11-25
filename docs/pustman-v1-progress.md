@@ -128,7 +128,7 @@ Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub p
 | S44 | `git` crate + status bar branch and dirty count | done | 0 | | | S44a, S44b, S44w merged |
 | S45 | Import/export UI (Postman collection, environment, globals) | in_progress | 0 | | | S45a, S45c merged |
 | S46 | Quick open (`Ctrl/Cmd-P`) | done | 0 | | | S46 merged |
-| S47 | Sharing AC: two clones of one Git repository | pending | 0 | | |  |
+| S47 | Sharing AC: two clones of one Git repository | done | 0 | | | S47 merged |
 | S48 | M2 SIGN-OFF (HUMAN) | pending | 0 | | | HUMAN sign-off |
 | S49 | Declare the M3–M5 dependencies | pending | 0 | | |  |
 | S50 | Protocol request kinds, files, import, New menu, open from tree | pending | 0 | | | S50a–S50e |

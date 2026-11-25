@@ -24,7 +24,19 @@ gpui = { workspace = true, features = ["test-support"] }
 # Enabling `test-support` is what makes `FakeTransport` visible to this crate's tests:
 # dev-dependencies unify features with the test build.
 http_engine = { workspace = true, features = ["test-support"] }
+# S47 (sharing AC): the environment editor's own keychain save path (`secret_values`'
+# `SecretChange` + `AppliedChange`) and its scope id (`env_editor`'s `EditTarget`) — the
+# proof drives the app's save, not a copy of it.
+environment_picker.workspace = true
+# S47 (sharing AC): the keychain key derivation is the app's own
+# (`pustman::scope_wiring::workspace_key`), so the proof keys entries exactly as `pustman`
+# does and never a copy of it. A path dep: `pustman` is the app crate and root
+# `[workspace.dependencies]` does not list it (this step's edit set covers this manifest).
+pustman = { path = "../pustman" }
 secrets = { workspace = true, features = ["test-support"] }
+# S47: the two clones' `git` commands run through `smol::process` (AGENTS.md), like the
+# `git` crate's own commands.
+smol.workspace = true
 serde_json.workspace = true
 settings.workspace = true
 storage.workspace = true

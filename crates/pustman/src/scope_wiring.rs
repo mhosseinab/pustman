@@ -394,6 +394,22 @@ fn digest_hex(bytes: &[u8]) -> String {
     )
 }
 
+/// The keychain entry one secret variable keeps its value under on this installation:
+/// the workspace's key, the scope's id and the variable's name. This crate's key *reads*
+/// compose through here (`check_stored_secrets`, `scopes_for`); the environment editor's
+/// key *writes* compose through `environment_picker::secret_values::SecretChange::set`,
+/// which cannot call up into this crate. Both spellings bottom out in the one
+/// `secrets::SecretKey::new` constructor, and S47's sharing proof writes through the
+/// editor and reads through here against one store, so the two spellings drifting apart
+/// fails that test.
+pub fn secret_key(
+    workspace_key: &str,
+    scope_id: &str,
+    variable_key: &str,
+) -> Result<SecretKey, SecretError> {
+    SecretKey::new(workspace_key, scope_id, variable_key)
+}
+
 /// Install the OS keychain as the app's secret store ([`SecretInputs`]): where the
 /// environment editor saves secret values and every request editor resolves them from.
 /// Called where the app's local store lands, beside the other installs.
@@ -812,7 +828,7 @@ fn check_stored_secrets(cx: &mut App) {
             if variable.kind != VariableKind::Secret {
                 continue;
             }
-            match SecretKey::new(key_for_names, target.scope_id(), variable.key.as_str()) {
+            match secret_key(key_for_names, target.scope_id(), variable.key.as_str()) {
                 Ok(key) => {
                     keys.insert(key);
                 }
@@ -1201,7 +1217,7 @@ fn scopes_for(open: &OpenScopes, request_id: ItemId, cx: &App) -> (ScopeStack, S
                 store,
                 key_of: Arc::new(move |kind, name| {
                     let scope_id = scope_ids.get(&kind)?;
-                    SecretKey::new(workspace_key.as_str(), scope_id.as_str(), name)
+                    secret_key(workspace_key.as_str(), scope_id.as_str(), name)
                         .ok()
                         .filter(|key| stored.contains(key))
                 }),
