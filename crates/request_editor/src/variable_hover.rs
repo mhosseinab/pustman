@@ -731,7 +731,7 @@ impl RequestEditor {
 /// The scope kind the winning variable of `name` lives in — the keychain key names a
 /// secret by scope. [`ScopeStack::find`] does not return the scope, so this walks the
 /// same precedence rule it does: the narrowest scope holding an enabled `name` wins.
-pub(crate) fn scope_kind_of(scopes: &ScopeStack, name: &str) -> Option<ScopeKind> {
+pub fn scope_kind_of(scopes: &ScopeStack, name: &str) -> Option<ScopeKind> {
     scopes
         .scopes()
         .iter()

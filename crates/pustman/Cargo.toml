@@ -28,6 +28,8 @@ git = { workspace = true, features = ["gpui"] }
 gpui.workspace = true
 gpui_platform.workspace = true
 gpui_tokio.workspace = true
+hex.workspace = true
+sha2.workspace = true
 history_panel.workspace = true
 http_engine.workspace = true
 image.workspace = true
@@ -42,6 +44,9 @@ text_input.workspace = true
 theme.workspace = true
 ui.workspace = true
 workspace.workspace = true
+api_model.workspace = true
+variables.workspace = true
+workspace_store.workspace = true
 
 [dev-dependencies]
 api_model.workspace = true

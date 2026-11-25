@@ -15,7 +15,7 @@ the code disagree, the code is right and this file is a bug.
 
 | Module | Owns | Must not import | Entry points |
 | --- | --- | --- | --- |
-| `pustman` | binary (`main.rs` calls `pustman::init`) + library: init order, local-store wiring, restore/autosave wiring, the app-wide cookie jar (`AppCookieJar`: the transport's jar, loaded and saved through the local store, listed by Manage Cookies; S33p), window setup, app id + window icon (`app_icon`, artwork in `assets/pustman-icon-pack/`; desktop entry `scripts/install-desktop-entry.sh`, macOS bundle `scripts/bundle-macos.sh`) | — (top) | `pustman::init` (`crates/pustman/src/pustman.rs`) |
+| `pustman` | binary (`main.rs` calls `pustman::init`) + library: init order, local-store wiring, restore/autosave wiring, variable-scope wiring (`scope_wiring`: workspace globals, active environment, collection variables and the keychain into every request editor; S43w), the app-wide cookie jar (`AppCookieJar`: the transport's jar, loaded and saved through the local store, listed by Manage Cookies; S33p), window setup, app id + window icon (`app_icon`, artwork in `assets/pustman-icon-pack/`; desktop entry `scripts/install-desktop-entry.sh`, macOS bundle `scripts/bundle-macos.sh`) | — (top) | `pustman::init` (`crates/pustman/src/pustman.rs`) |
 | `api_model` | Request/Collection/Folder/Environment/Variable/Auth types; Postman v2.1 import/export; the shared `redact_*` helpers (D8) | IO, `gpui` | `api_model::{redact_text, redact_headers, redact_url}` |
 | `variables` | `{{var}}` resolution, scopes (narrowest wins), dynamic vars, cycle detection | `gpui` | `variables::resolve` |
 | `workspace_store` | on-disk workspace format (PRD §6.1), deterministic atomic writes, file watcher, conflict detection, item ↔ file mapping | `gpui`, UI crates | `workspace_store::{open, save_item, watch}` |
@@ -31,7 +31,9 @@ the code disagree, the code is right and this file is a bug.
 | `integration_tests` *(S37, S47)* | end-to-end proofs (redaction test S37, sharing AC S47) | — | `crates/integration_tests/tests/` |
 | later milestones | `websocket_client` (M4), `grpc_client` (M5), `mqtt_client` (M6) — same `SessionEvent` shape (PRD §9) | UI crates | `connect()` per crate |
 
-Init order in `pustman::init_with_store` (`crates/pustman/src/pustman.rs`): `settings → theme → ui → text_input → keymap → local store → workspace → console → feature crates (command_palette) → http client → response viewer → request editor → environment picker → history panel → restore wiring → collections panel → git branch item`.
+Init order in `pustman::init_with_store` (`crates/pustman/src/pustman.rs`): `settings → theme → ui → text_input → keymap → local store → workspace → console → feature crates (command_palette) → http client → response viewer → request editor → environment picker → history panel → restore wiring → collections panel → git branch item → variable scopes`.
+
+Variable scopes (`crates/pustman/src/scope_wiring.rs`, S43w): the opened workspace's globals (`pustman.json` `variables`), the active environment (the picker's choice, persisted per workspace id) and each request's collection become every `RequestEditor`'s `ScopeStack`; local values come from `storage` by the winning variable's scope; secret-kind values resolve only at send, from the OS keychain (`KeyringStore`, installed as `secret_values::SecretInputs` where the local store lands) through the editor's `SecretSources`. The same state installs the environment picker's, quick-look's and environment editor's inputs. Local values, the selection and keychain entries are keyed by `scope_wiring::workspace_key` — the `pustman.json` id bound to the canonical folder it was opened from on this installation, so a copied folder carrying the same ids never reads them; a tab left open from another folder resolves nothing, and the pre-send check warns about a secret the keychain has no entry for.
 
 ## Data flow (the flows that matter)
 

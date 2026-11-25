@@ -285,7 +285,7 @@ impl PickerDelegate for EnvironmentSelector {
 /// The kv key the active environment is stored under for one workspace: the workspace id
 /// is part of the key (REQ-VAR-08: "stored per workspace locally"), so two workspaces
 /// never share a selection.
-fn selection_key(workspace_id: &str) -> String {
+pub fn selection_key(workspace_id: &str) -> String {
     format!("environment_picker.active_environment.{workspace_id}")
 }
 

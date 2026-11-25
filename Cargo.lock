@@ -5011,6 +5011,7 @@ dependencies = [
  "gpui",
  "gpui_platform",
  "gpui_tokio",
+ "hex",
  "history_panel",
  "http_engine",
  "image",
@@ -5020,6 +5021,7 @@ dependencies = [
  "secrets",
  "serde_json",
  "settings",
+ "sha2 0.10.9",
  "smol",
  "storage",
  "tempfile",
@@ -5030,6 +5032,7 @@ dependencies = [
  "url",
  "variables",
  "workspace",
+ "workspace_store",
 ]
 
 [[package]]

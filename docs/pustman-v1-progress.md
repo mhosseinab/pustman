@@ -123,8 +123,8 @@ Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub p
 | S41 | Open, create and recent workspaces; format-version banner | done | 0 | | | S41a, S41b, S41c, S41d merged |
 | S41d | Read-only workspace disables editing in the request and environment editors; the env editor refuses before any write (driver-added, from the S41c review) | done | 0 | | | S41d merged |
 | S42 | External change bar and problem badges | done | 0 | | | S42a, S42b, S42c merged |
-| S43 | Environment editor: shared, local and secret values; set-secret prompt on send | in_progress | 0 | | | S43a, S43b, S43c merged; S43w in review |
-| S43w | Wire the active environment and globals into open editors (driver-added, S48 prereq; after S41, S43) | in_progress | 0 | | |  |
+| S43 | Environment editor: shared, local and secret values; set-secret prompt on send | done | 0 | | | S43a, S43b, S43c, S43w merged |
+| S43w | Wire the active environment and globals into open editors (driver-added, S48 prereq; after S41, S43) | done | 0 | | |  |
 | S44 | `git` crate + status bar branch and dirty count | done | 0 | | | S44a, S44b, S44w merged |
 | S45 | Import/export UI (Postman collection, environment, globals) | in_progress | 0 | | | S45c merged (export) |
 | S46 | Quick open (`Ctrl/Cmd-P`) | done | 0 | | | S46 merged |

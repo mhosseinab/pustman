@@ -1027,7 +1027,7 @@ fn row_item_id(row: &TreeRow) -> Option<ItemId> {
 /// Which container orders each item (REQ-WSP-01) — what "the item's parent" means
 /// everywhere in this file. A child two parents both claim keeps the first (in id
 /// order), which is what the tree draws it under too.
-pub(crate) fn parent_map(items: &BTreeMap<ItemId, Item>) -> BTreeMap<ItemId, ItemId> {
+pub fn parent_map(items: &BTreeMap<ItemId, Item>) -> BTreeMap<ItemId, ItemId> {
     let mut parents = BTreeMap::new();
     for (id, item) in items {
         if let Some(order) = container_order(&item.body) {
