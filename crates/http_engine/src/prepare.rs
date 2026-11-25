@@ -17,13 +17,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use api_model::{
-    Auth, Body, EffectiveAuth, HttpRequest, KeyValue, SecretValues, VariableKind, effective_auth,
+    Auth, Body, EffectiveAuth, GraphQlRequest, HttpRequest, KeyValue, SecretValues, VariableKind,
+    effective_auth,
 };
 use secrets::{SecretKey, SecretStore};
 use variables::{Binding, DynamicValues, ScopeKind, ScopeStack, resolve, spans};
 
 use crate::body;
 use crate::error::TransportError;
+use crate::graphql;
 use crate::pipeline::{PipelineError, Warning, resolve_request};
 use crate::request::ResolvedRequest;
 use crate::request_auth::{AppliedAuth, apply_auth, basic_credentials};
@@ -73,6 +75,46 @@ pub fn prepare(
     secrets: &dyn SecretStore,
     secret_key: &dyn Fn(ScopeKind, &str) -> Option<SecretKey>,
     dynamic: &mut DynamicValues,
+) -> Result<Prepared, PipelineError> {
+    prepare_with_body(
+        request, ancestors, scopes, secrets, secret_key, dynamic, None,
+    )
+}
+
+/// [`prepare`] for a GraphQL send (REQ-GQL-01): `request` is
+/// [`crate::graphql::to_http_request`]'s, whose body text references every secret the
+/// query, variables and operation name do, and the body that goes on the wire is
+/// [`crate::graphql::resolved_body`] — resolved against the same stack, then encoded —
+/// built before auth applies, so an auth that signs the body signs that one.
+pub(crate) fn prepare_graphql(
+    request: &HttpRequest,
+    graphql: &GraphQlRequest,
+    ancestors: &[&Auth],
+    scopes: &ScopeStack,
+    secrets: &dyn SecretStore,
+    secret_key: &dyn Fn(ScopeKind, &str) -> Option<SecretKey>,
+    dynamic: &mut DynamicValues,
+) -> Result<Prepared, PipelineError> {
+    prepare_with_body(
+        request,
+        ancestors,
+        scopes,
+        secrets,
+        secret_key,
+        dynamic,
+        Some(graphql),
+    )
+}
+
+/// [`prepare`], with the resolved body replaced by `graphql`'s when there is one.
+fn prepare_with_body(
+    request: &HttpRequest,
+    ancestors: &[&Auth],
+    scopes: &ScopeStack,
+    secrets: &dyn SecretStore,
+    secret_key: &dyn Fn(ScopeKind, &str) -> Option<SecretKey>,
+    dynamic: &mut DynamicValues,
+    graphql: Option<&GraphQlRequest>,
 ) -> Result<Prepared, PipelineError> {
     let effective = effective_auth_of(request, ancestors);
     let auth_templates = auth_field_templates(&effective);
@@ -129,6 +171,9 @@ pub fn prepare(
         mut warnings,
         auth_texts,
     } = resolve_with_auth(request, &auth_templates, &stack, dynamic)?;
+    if let Some(graphql) = graphql {
+        resolved.body = graphql::resolved_body(graphql, &stack, dynamic)?;
+    }
     let auth = apply_auth(&mut resolved, &request.auth, ancestors, |template| {
         auth_texts
             .get(template)
@@ -438,3 +483,7 @@ mod disabled_auto_tests;
 #[cfg(test)]
 #[path = "prepare_auth_warning_tests.rs"]
 mod auth_warning_tests;
+
+#[cfg(test)]
+#[path = "prepare_graphql_tests.rs"]
+mod graphql_tests;

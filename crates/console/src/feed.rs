@@ -199,6 +199,17 @@ fn warning_message(warning: &Warning) -> String {
 /// when the request is gone. No secret was ever substituted on a failed send, so the
 /// empty set redacts the pre-resolution URL and the message, as in [`record_error`].
 pub fn record_warnings(request: Option<&HttpRequest>, warnings: &[Warning], cx: &mut App) {
+    record_warnings_as(PROTOCOL, request, warnings, cx);
+}
+
+/// [`record_warnings`] for a send whose entries name `protocol` (REQ-GQL-01: a GraphQL
+/// send's warnings are listed as `graphql`).
+pub fn record_warnings_as(
+    protocol: &str,
+    request: Option<&HttpRequest>,
+    warnings: &[Warning],
+    cx: &mut App,
+) {
     if warnings.is_empty() {
         return;
     }
@@ -215,7 +226,7 @@ pub fn record_warnings(request: Option<&HttpRequest>, warnings: &[Warning], cx: 
             cx,
             ConsoleEntry {
                 level: ConsoleLevel::Warning,
-                protocol: PROTOCOL.to_string(),
+                protocol: protocol.to_string(),
                 method: method.clone(),
                 url: url.clone(),
                 status: None,
@@ -248,7 +259,8 @@ pub fn watch(client: &Entity<HttpClient>, cx: &mut App) -> Subscription {
             cx,
             ConsoleEntry {
                 level: ConsoleLevel::Warning,
-                protocol: PROTOCOL.to_string(),
+                // The send's own protocol: a cancelled GraphQL send is listed as one.
+                protocol: event.protocol.unwrap_or(PROTOCOL).to_string(),
                 method,
                 url,
                 status: None,
@@ -450,3 +462,7 @@ mod version_tests;
 #[cfg(test)]
 #[path = "feed_protocol_tests.rs"]
 mod protocol_tests;
+
+#[cfg(test)]
+#[path = "feed_graphql_cancel_tests.rs"]
+mod graphql_cancel_tests;

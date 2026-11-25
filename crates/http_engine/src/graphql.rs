@@ -1,24 +1,25 @@
 //! GraphQL over the HTTP engine (REQ-GQL-01): a [`GraphQlRequest`] goes on the wire as
 //! `POST application/json {query, variables, operationName}` through the normal pipeline.
 //!
-//! The body is built as raw JSON text with the variables editor's text spliced in as
-//! typed, so `{{variables}}` in the query and the variables resolve in [`crate::prepare`]
-//! exactly as they do in an HTTP request's raw body — including an unquoted
-//! `{"id": {{userId}}}`, which only becomes JSON once resolved.
+//! The variables editor's text goes into the body as typed, so its `{{variables}}`
+//! resolve as they do in an HTTP request's raw body — including an unquoted
+//! `{"id": {{userId}}}`, which only becomes JSON once resolved. The query and operation
+//! name resolve as plain text and are JSON-encoded afterwards ([`resolved_body`]), so a
+//! resolved value can never end their string or add keys to the body.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use api_model::{Auth, Body, GraphQlRequest, HttpRequest, Method, RawLanguage};
 use secrets::SecretStore;
-use variables::{ScopeStack, spans};
+use variables::{DynamicValues, ResolveError, ScopeStack, resolve, spans};
 
 use crate::SecretKeyLookup;
+use crate::request::RequestBody;
 
 #[cfg(test)]
 #[path = "graphql_tests.rs"]
 mod tests;
-
 /// Everything one [`crate::HttpClient::send_graphql`] needs: [`crate::SendInput`] with the
 /// GraphQL request in place of the HTTP one it is sent as.
 pub struct GraphQlSendInput {
@@ -64,25 +65,14 @@ pub enum GraphQlError {
 /// [`GraphQlError::InvalidVariables`] when the variables text is not JSON once every
 /// `{{placeholder}}` is read as a value.
 pub fn to_http_request(request: &GraphQlRequest) -> Result<HttpRequest, GraphQlError> {
-    let variables = request.variables.trim();
-    if !variables.is_empty() {
+    if !request.variables.trim().is_empty() {
         validate_variables(&request.variables)?;
     }
-    let mut body = String::from("{\"query\":");
-    body.push_str(&json_string(&request.query));
-    if !variables.is_empty() {
-        body.push_str(",\"variables\":");
-        body.push_str(variables);
-    }
-    if let Some(operation_name) = request
-        .operation_name
-        .as_deref()
-        .filter(|name| !name.trim().is_empty())
-    {
-        body.push_str(",\"operationName\":");
-        body.push_str(&json_string(operation_name));
-    }
-    body.push('}');
+    let body = envelope(
+        &request.query,
+        &request.variables,
+        request.operation_name.as_deref(),
+    );
     Ok(HttpRequest {
         id: request.id,
         name: request.name.clone(),
@@ -101,6 +91,49 @@ pub fn to_http_request(request: &GraphQlRequest) -> Result<HttpRequest, GraphQlE
         examples: Vec::new(),
         extra: BTreeMap::new(),
     })
+}
+
+/// The body `{query, variables, operationName}`: `query` and `operation_name` are
+/// JSON-encoded here, `variables` goes in as written. Blank variables and a blank
+/// operation name are left out.
+///
+/// [`to_http_request`] builds it from the templates — the request as History keeps it —
+/// and [`resolved_body`] from the resolved texts, the body that goes on the wire.
+fn envelope(query: &str, variables: &str, operation_name: Option<&str>) -> String {
+    let variables = variables.trim();
+    let mut body = String::from("{\"query\":");
+    body.push_str(&json_string(query));
+    if !variables.is_empty() {
+        body.push_str(",\"variables\":");
+        body.push_str(variables);
+    }
+    if let Some(operation_name) = operation_name.filter(|name| !name.trim().is_empty()) {
+        body.push_str(",\"operationName\":");
+        body.push_str(&json_string(operation_name));
+    }
+    body.push('}');
+    body
+}
+
+/// The body `request` goes on the wire with: the query and operation name resolved as
+/// plain text and only then JSON-encoded, so a resolved `"`, `\` or line break stays
+/// inside its string instead of ending it or adding keys. The variables resolve as typed,
+/// like an HTTP raw JSON body: their placeholders stand for JSON values. `stack` and
+/// `dynamic` are the send's own, so a `{{$guid}}` keeps one value across the request.
+pub(crate) fn resolved_body(
+    request: &GraphQlRequest,
+    stack: &ScopeStack,
+    dynamic: &mut DynamicValues,
+) -> Result<RequestBody, ResolveError> {
+    let query = resolve(&request.query, stack, dynamic)?.text;
+    let variables = resolve(&request.variables, stack, dynamic)?.text;
+    let operation_name = match request.operation_name.as_deref() {
+        Some(template) => Some(resolve(template, stack, dynamic)?.text),
+        None => None,
+    };
+    Ok(RequestBody::Bytes(
+        envelope(&query, &variables, operation_name.as_deref()).into_bytes(),
+    ))
 }
 
 /// `text` as a JSON string literal.
