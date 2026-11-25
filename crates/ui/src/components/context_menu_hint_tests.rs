@@ -41,11 +41,13 @@ fn test_an_entry_with_a_hint_draws_it_after_its_label_in_the_same_row(cx: &mut T
         "the hint sits at the end of the row, after the label"
     );
     assert!(
-        cx.debug_bounds(leak(format!("Send{HINT_SUFFIX}"))).is_some(),
+        cx.debug_bounds(leak(format!("Send{HINT_SUFFIX}")))
+            .is_some(),
         "a disabled entry still shows its binding"
     );
     assert!(
-        cx.debug_bounds(leak(format!("Plain{HINT_SUFFIX}"))).is_none(),
+        cx.debug_bounds(leak(format!("Plain{HINT_SUFFIX}")))
+            .is_none(),
         "an entry without a hint draws none"
     );
 }

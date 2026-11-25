@@ -112,7 +112,11 @@ fn test_the_switcher_lists_recent_workspaces_and_opens_the_one_chosen(cx: &mut T
     // The launch reopen brought back the newest one, and the switcher names it.
     assert_eq!(open_root(&workspace, cx).as_deref(), Some(pets.as_path()));
     let name = cx.update(|_window, cx| workspace_display_name(workspace.entity_id(), cx));
-    assert_eq!(name.as_ref(), "Pets API", "the switcher names the open workspace");
+    assert_eq!(
+        name.as_ref(),
+        "Pets API",
+        "the switcher names the open workspace"
+    );
     assert_eq!(
         cx.update(|_window, cx| recent_folders(cx).to_vec()),
         vec![pets.clone(), orders.clone()],
@@ -120,14 +124,20 @@ fn test_the_switcher_lists_recent_workspaces_and_opens_the_one_chosen(cx: &mut T
     );
 
     click(cx, SWITCHER_SELECTOR);
-    assert!(cx.debug_bounds(MENU_SELECTOR).is_some(), "the switcher opens");
+    assert!(
+        cx.debug_bounds(MENU_SELECTOR).is_some(),
+        "the switcher opens"
+    );
     for entry in ["pets", "orders", "New workspace…", "Open workspace…"] {
         assert!(
             cx.debug_bounds(entry).is_some(),
             "the switcher lists {entry}"
         );
     }
-    assert!(cx.debug_bounds("gone").is_none(), "a gone folder is not offered");
+    assert!(
+        cx.debug_bounds("gone").is_none(),
+        "a gone folder is not offered"
+    );
 
     click(cx, "orders");
 
@@ -136,7 +146,10 @@ fn test_the_switcher_lists_recent_workspaces_and_opens_the_one_chosen(cx: &mut T
         Some(orders.as_path()),
         "choosing a recent workspace opens it in this window"
     );
-    assert!(cx.debug_bounds(MENU_SELECTOR).is_none(), "and closes the switcher");
+    assert!(
+        cx.debug_bounds(MENU_SELECTOR).is_none(),
+        "and closes the switcher"
+    );
     let name = cx.update(|_window, cx| workspace_display_name(workspace.entity_id(), cx));
     assert_eq!(name.as_ref(), "Orders API");
 }

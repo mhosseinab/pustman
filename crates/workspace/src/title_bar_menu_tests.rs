@@ -4,8 +4,8 @@
 //! click or Enter and closed with Escape. An entry whose action has no handler where the
 //! user was is disabled, never a dead click.
 //!
-//! The model here is a small stand-in installed through `cx.set_menus`, exactly where
-//! the app installs its real one (`pustman::app_menus`); the app's own model is pinned
+//! The model here is a small stand-in installed through `install_app_menus`, exactly
+//! where the app installs its real one (`pustman::app_menus`); the app's own model is pinned
 //! by that crate's tests.
 
 use std::cell::Cell;
@@ -21,7 +21,7 @@ use crate::title_bar::{
     APP_TITLE_BAR_SELECTOR, SEARCH_SELECTOR, SWITCHER_SELECTOR, TITLE_BAR_HEIGHT_PX,
     TITLE_BAR_SELECTOR, menu_title_selector,
 };
-use crate::{Workspace, init};
+use crate::{Workspace, init, install_app_menus};
 
 fn leak(selector: String) -> &'static str {
     Box::leak(selector.into_boxed_str())
@@ -47,7 +47,7 @@ fn workspace_window(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualT
     cx.update(init_test);
     cx.update(|cx| {
         init(cx);
-        cx.set_menus(test_menus());
+        install_app_menus(test_menus(), cx);
     });
     let (workspace, cx) = cx.add_window_view(Workspace::new);
     cx.update(|window, _cx| window.activate_window());
@@ -91,7 +91,10 @@ fn test_a_server_decorated_window_still_draws_the_app_title_bar_with_menus_switc
         let control = cx
             .debug_bounds(selector)
             .unwrap_or_else(|| panic!("the title bar shows {selector}"));
-        assert!(bar.contains(&control.center()), "{selector} sits in the bar");
+        assert!(
+            bar.contains(&control.center()),
+            "{selector} sits in the bar"
+        );
     }
     assert!(
         cx.debug_bounds(TITLE_BAR_SELECTOR).is_none(),

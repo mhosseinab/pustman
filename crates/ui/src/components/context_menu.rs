@@ -130,18 +130,16 @@ impl MenuItem {
                         colors.text
                     })
                     .when(selected, |this| this.bg(colors.element_selected))
-                    .child(
-                        div().flex_1().min_w_0().child(
-                            Label::new(label.clone()).truncate().map(|label| {
-                                // The entry's color is its identity (a method verb), not its
-                                // state: the highlight still marks the selection, by fill.
-                                match color {
-                                    Some(color) => label.color(*color),
-                                    None => label,
-                                }
-                            }),
-                        ),
-                    )
+                    .child(div().flex_1().min_w_0().child(
+                        Label::new(label.clone()).truncate().map(|label| {
+                            // The entry's color is its identity (a method verb), not its
+                            // state: the highlight still marks the selection, by fill.
+                            match color {
+                                Some(color) => label.color(*color),
+                                None => label,
+                            }
+                        }),
+                    ))
                     .when_some(hint.clone(), |row, hint| {
                         let hint_key = format!("{key}{HINT_SUFFIX}");
                         row.child(

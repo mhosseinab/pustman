@@ -14,6 +14,7 @@ mod pane;
 mod pane_tabs;
 mod panel;
 pub mod read_only;
+pub mod recent_workspaces;
 mod restore;
 mod status_bar;
 mod title_bar;
@@ -29,7 +30,7 @@ pub use pane::Pane;
 pub use panel::{Panel, PanelHandle};
 pub use restore::{ItemFactory, Restore, SAVE_DEBOUNCE};
 pub use status_bar::StatusBar;
-pub use title_bar::TitleBar;
+pub use title_bar::{OpenApplicationMenu, TitleBar, install_app_menus};
 pub use toast_layer::{TOAST_DURATION, ToastAction, ToastHandler};
 pub use welcome::Welcome;
 pub use workspace_open::{OpenedWorkspace, WorkspaceOpen, WorkspaceOpenEvent};
@@ -88,13 +89,15 @@ impl Workspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
+        let workspace_id = cx.entity_id();
+        let title_bar_focus = focus_handle.clone();
         Self {
             focus_handle,
             left_dock: cx.new(|cx| Dock::new(DockPosition::Left, cx)),
             bottom_dock: cx.new(|cx| Dock::new(DockPosition::Bottom, cx)),
             center_pane: cx.new(Pane::new),
             status_bar: cx.new(StatusBar::new),
-            title_bar: cx.new(TitleBar::new),
+            title_bar: cx.new(|cx| TitleBar::new(workspace_id, title_bar_focus, cx)),
             toasts: cx.new(Toasts::new),
             modal_layer: ModalLayer::default(),
             _subscriptions: Vec::new(),
@@ -169,6 +172,19 @@ impl Workspace {
             .update(cx, |pane, cx| pane.activate_previous_tab(cx));
     }
 
+    /// Alt+letter: open the title bar's menu with that access letter. Answered here, on
+    /// the root every focused element sits under; the bar is a sibling of the content.
+    fn open_application_menu(
+        &mut self,
+        action: &OpenApplicationMenu,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.title_bar.update(cx, |title_bar, cx| {
+            title_bar.open_menu_by_mnemonic(&action.mnemonic, window, cx);
+        });
+    }
+
     /// Close the window: the title-bar Close control and any close command land here, so
     /// the app's own close button runs the same save-then-close flush a platform close
     /// takes (issue #85). The flush decides how the close ends — it removes the window
@@ -217,12 +233,11 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::save_all))
             .on_action(cx.listener(Self::close_window))
+            .on_action(cx.listener(Self::open_application_menu))
             .bg(cx.theme().colors().background)
-            // Only a client-decorated window draws its own title bar; the compositor draws
-            // one around a server-decorated window.
-            .when(matches!(decorations, Decorations::Client { .. }), |shell| {
-                shell.child(self.title_bar.clone())
-            })
+            // Every window has the app's title bar (menus, switcher, search); it carries
+            // the window controls only when the frame is the app's to draw.
+            .child(self.title_bar.clone())
             // The read-only banner states the workspace's one caveat at the top of the
             // shell (REQ-WSP-04), above the docks where the user looks for it.
             .children(read_only::is_read_only(cx).then(read_only::banner))
@@ -269,6 +284,8 @@ impl Render for Workspace {
 pub fn init(cx: &mut App) {
     workspace_open::init(cx);
     read_only::init(cx);
+    recent_workspaces::init(cx);
+    title_bar::init(cx);
 }
 
 #[cfg(test)]
