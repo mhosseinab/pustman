@@ -3,7 +3,7 @@
 //! choosing it from the switcher reopens that very folder instead of a lossy look-alike
 //! that does not exist.
 
-#![cfg(unix)]
+#![cfg(target_os = "linux")]
 
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
@@ -82,6 +82,7 @@ fn test_a_utf8_path_is_stored_as_itself_and_never_misread_as_encoded() {
     );
 }
 
+// Only Linux filesystems accept a non-UTF-8 name; APFS refuses it ("Illegal byte sequence").
 #[gpui::test]
 fn test_a_non_utf8_recent_workspace_reopens_from_the_switcher(cx: &mut TestAppContext) {
     let directory = tempfile::tempdir().expect("the temp dir must be created");
