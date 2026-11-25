@@ -4,8 +4,8 @@
 //!
 //! The bytes come from the network and are untrusted. The parser never indexes into them,
 //! splits lines on the ASCII terminators only (so a UTF-8 sequence split across chunks is
-//! reassembled before it is decoded), and bounds what it holds: see [`MAX_EVENT_BYTES`] and
-//! [`MAX_FIELD_BYTES`].
+//! reassembled before it is decoded), and bounds what it holds: see [`MAX_EVENT_BYTES`],
+//! [`MAX_FIELD_BYTES`] and [`MAX_ID_BYTES`].
 
 use std::fmt;
 use std::sync::Arc;
@@ -17,14 +17,20 @@ use api_model::{Message, Payload, ProtocolFields, SessionMessageKind};
 /// past this is dropped whole, counted in [`EventSourceParser::oversized_events_dropped`],
 /// and parsing resumes after the blank line that ends it. Without a cap a server that never
 /// sends a line end would grow the buffer until the app runs out of memory. The pending
-/// `id` is not counted here: it outlives the event and has its own cap, [`MAX_FIELD_BYTES`].
+/// `id` is not counted here: it outlives the event and has its own cap, [`MAX_ID_BYTES`].
 pub const MAX_EVENT_BYTES: usize = 16 * 1024 * 1024;
 
-/// The longest `id` or `event` value kept. A longer one is ignored, as if the line were
-/// absent, and counted in [`EventSourceParser::oversized_fields_ignored`]. The id is repeated
-/// on every later event, so without its own cap one huge `id` followed by many tiny events
-/// would multiply into gigabytes.
+/// The longest `event` value kept. A longer one is ignored, as if the line were absent, and
+/// counted in [`EventSourceParser::oversized_fields_ignored`]. The event type belongs to one
+/// event only, so the server sends its bytes on the wire for every event that carries it.
 pub const MAX_FIELD_BYTES: usize = 64 * 1024;
+
+/// The longest `id` value kept. A longer one is ignored, as if the line were absent, and
+/// counted in [`EventSourceParser::oversized_fields_ignored`]. Unlike the event type, the id
+/// is sent once and then repeated on every later event: [`SseEvent`]s share it, but
+/// [`SseEvent::into_message`] copies it into each logged message. This cap bounds that
+/// copy, so one long `id` followed by many tiny events cannot multiply into the log.
+pub const MAX_ID_BYTES: usize = 1024;
 
 const BOM: &[u8] = b"\xef\xbb\xbf";
 
@@ -37,8 +43,8 @@ pub struct SseEvent {
     /// The `data` lines joined with `\n`.
     pub data: String,
     /// The last event ID at dispatch: an `id` persists to later events until another `id`
-    /// replaces it. `None` when it is empty. Shared, not copied, between the events that
-    /// carry it.
+    /// replaces it. `None` when it is empty. Shared between the `SseEvent`s that carry it;
+    /// [`SseEvent::into_message`] copies it, at most [`MAX_ID_BYTES`].
     pub id: Option<Arc<str>>,
     /// A valid `retry` (milliseconds) given in this event's block.
     pub retry: Option<u64>,
@@ -188,8 +194,9 @@ impl EventSourceParser {
         self.oversized_events_dropped
     }
 
-    /// How many `id` or `event` values were ignored for passing [`MAX_FIELD_BYTES`], so the
-    /// caller can tell the user those fields were not applied.
+    /// How many `id` values (past [`MAX_ID_BYTES`]) or `event` values (past
+    /// [`MAX_FIELD_BYTES`]) were ignored, so the caller can tell the user those fields were
+    /// not applied.
     pub fn oversized_fields_ignored(&self) -> u64 {
         self.oversized_fields_ignored
     }
@@ -285,7 +292,7 @@ impl EventSourceParser {
         };
         match name {
             "event" => {
-                if self.ignore_oversized_field(value) {
+                if self.ignore_oversized_field(value, MAX_FIELD_BYTES) {
                     return;
                 }
                 if self.data.len() + value.len() > MAX_EVENT_BYTES {
@@ -303,7 +310,7 @@ impl EventSourceParser {
                 self.data.push('\n');
             }
             "id" => {
-                if value.contains('\0') || self.ignore_oversized_field(value) {
+                if value.contains('\0') || self.ignore_oversized_field(value, MAX_ID_BYTES) {
                     return;
                 }
                 value.clone_into(&mut self.pending_id);
@@ -324,8 +331,8 @@ impl EventSourceParser {
         }
     }
 
-    fn ignore_oversized_field(&mut self, value: &str) -> bool {
-        if value.len() <= MAX_FIELD_BYTES {
+    fn ignore_oversized_field(&mut self, value: &str, limit: usize) -> bool {
+        if value.len() <= limit {
             return false;
         }
         self.oversized_fields_ignored = self.oversized_fields_ignored.saturating_add(1);

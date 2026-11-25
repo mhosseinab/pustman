@@ -3,7 +3,10 @@
 
 use std::sync::Arc;
 
-use http_engine::event_source::{EventSourceParser, MAX_EVENT_BYTES, MAX_FIELD_BYTES, SseEvent};
+use api_model::ProtocolFields;
+use http_engine::event_source::{
+    EventSourceParser, MAX_EVENT_BYTES, MAX_FIELD_BYTES, MAX_ID_BYTES, SseEvent,
+};
 
 fn data_of(events: &[SseEvent]) -> Vec<&str> {
     events.iter().map(|event| event.data.as_str()).collect()
@@ -68,7 +71,7 @@ fn the_event_type_counts_toward_the_event_bound() {
 }
 
 #[test]
-fn a_huge_id_is_ignored_and_counted_and_never_copied_into_events() {
+fn a_huge_id_is_ignored_and_counted_so_later_events_keep_the_previous_id() {
     let mut parser = EventSourceParser::new();
     assert_eq!(parser.feed(b"id: kept\n\n"), vec![]);
 
@@ -86,18 +89,55 @@ fn a_huge_id_is_ignored_and_counted_and_never_copied_into_events() {
     assert_eq!(parser.last_event_id(), "kept");
 }
 
+fn id_line(len: usize) -> Vec<u8> {
+    let mut line = b"id: ".to_vec();
+    line.resize(line.len() + len, b'i');
+    line.extend_from_slice(b"\n\n");
+    line
+}
+
+#[test]
+fn an_id_one_byte_over_the_id_cap_is_ignored_and_counted() {
+    let mut parser = EventSourceParser::new();
+    parser.feed(b"id: kept\n\n");
+    parser.feed(&id_line(MAX_ID_BYTES + 1));
+
+    assert_eq!(parser.oversized_fields_ignored(), 1);
+    assert_eq!(parser.last_event_id(), "kept");
+}
+
+#[test]
+fn an_id_exactly_at_the_id_cap_is_kept() {
+    let mut parser = EventSourceParser::new();
+    parser.feed(&id_line(MAX_ID_BYTES));
+
+    assert_eq!(parser.oversized_fields_ignored(), 0);
+    assert_eq!(parser.last_event_id().len(), MAX_ID_BYTES);
+}
+
+#[test]
+fn a_logged_message_copies_at_most_the_id_cap() {
+    let mut parser = EventSourceParser::new();
+    parser.feed(&id_line(MAX_ID_BYTES));
+    parser.feed(&id_line(MAX_ID_BYTES + 1));
+    let events = parser.feed(b"data: x\n\n");
+
+    let message = events.into_iter().next().map(|event| event.into_message(0));
+    match message.map(|message| message.fields) {
+        Some(ProtocolFields::Sse { id: Some(id), .. }) => assert!(id.len() <= MAX_ID_BYTES),
+        other => panic!("expected an SSE message with an id, got {other:?}"),
+    }
+}
+
 #[test]
 fn an_id_at_the_cap_is_shared_between_events_not_copied() {
     let mut parser = EventSourceParser::new();
-    let mut id_line = b"id: ".to_vec();
-    id_line.resize(id_line.len() + MAX_FIELD_BYTES, b'i');
-    id_line.push(b'\n');
-    parser.feed(&id_line);
+    parser.feed(&id_line(MAX_ID_BYTES));
 
     let events = parser.feed(&b"data\n\n".repeat(100));
     assert_eq!(parser.oversized_fields_ignored(), 0);
     let first = events.first().and_then(|event| event.id.clone());
-    assert_eq!(first.as_deref().map(str::len), Some(MAX_FIELD_BYTES));
+    assert_eq!(first.as_deref().map(str::len), Some(MAX_ID_BYTES));
     for event in &events {
         assert!(
             matches!((&first, &event.id), (Some(first), Some(id)) if Arc::ptr_eq(first, id)),
