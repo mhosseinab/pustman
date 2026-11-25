@@ -15,6 +15,7 @@ pub mod external;
 pub mod import;
 pub mod import_environment;
 pub mod navigation;
+pub mod new_collection_form;
 pub mod problems;
 pub mod reorder;
 pub mod tree;
@@ -114,6 +115,7 @@ pub fn init(cx: &mut App) {
     import_environment::init(cx);
     reorder::init(cx);
     external::init(cx);
+    new_collection_form::init(cx);
 }
 
 /// The tree's content before a workspace is open (`workspace_open` is S41a): nothing to

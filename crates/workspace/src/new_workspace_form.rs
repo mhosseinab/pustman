@@ -29,6 +29,7 @@ use gpui::{
     PathPromptOptions, Render, Subscription, Task, WeakEntity,
 };
 use text_input::{TextInput, TextInputEvent};
+use ui::components::form_field::cycle_focus;
 use ui::prelude::*;
 
 use crate::{ModalView, Workspace, WorkspaceOpen};
@@ -433,28 +434,10 @@ impl NewWorkspaceForm {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let modifiers = event.keystroke.modifiers;
-        if event.keystroke.key != "tab"
-            || modifiers.control
-            || modifiers.alt
-            || modifiers.platform
-            || modifiers.function
-        {
-            return;
-        }
         let order = self.tab_order(cx);
-        let current = order.iter().position(|handle| handle.is_focused(window));
-        let count = order.len();
-        let next = match (current, modifiers.shift) {
-            (Some(index), false) => (index + 1) % count,
-            (Some(index), true) => (index + count - 1) % count,
-            (None, false) => 0,
-            (None, true) => count.saturating_sub(1),
-        };
-        if let Some(handle) = order.get(next) {
-            window.focus(handle, cx);
+        if cycle_focus(&order, event, window, cx) {
+            cx.stop_propagation();
         }
-        cx.stop_propagation();
     }
 }
 

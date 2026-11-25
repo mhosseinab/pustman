@@ -11,8 +11,9 @@
 //! the error that lives with its field).
 
 use gpui::{
-    AnyElement, App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
+    AnyElement, App, ElementId, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent,
+    ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    prelude::FluentBuilder,
 };
 use theme::ActiveTheme;
 
@@ -134,6 +135,39 @@ impl RenderOnce for FormField {
                 (None, None) => field,
             })
     }
+}
+
+/// A dialog's Tab and Shift-Tab: move focus through `order` and wrap, so focus never
+/// leaves the form for what is behind it. Returns whether the key was a focus move (the
+/// caller then stops its propagation).
+pub fn cycle_focus(
+    order: &[FocusHandle],
+    event: &KeyDownEvent,
+    window: &mut Window,
+    cx: &mut App,
+) -> bool {
+    let modifiers = event.keystroke.modifiers;
+    if event.keystroke.key != "tab"
+        || modifiers.control
+        || modifiers.alt
+        || modifiers.platform
+        || modifiers.function
+        || order.is_empty()
+    {
+        return false;
+    }
+    let count = order.len();
+    let current = order.iter().position(|handle| handle.is_focused(window));
+    let next = match (current, modifiers.shift) {
+        (Some(index), false) => (index + 1) % count,
+        (Some(index), true) => (index + count - 1) % count,
+        (None, false) => 0,
+        (None, true) => count - 1,
+    };
+    if let Some(handle) = order.get(next) {
+        window.focus(handle, cx);
+    }
+    true
 }
 
 #[cfg(test)]
