@@ -219,3 +219,93 @@ fn test_postman_graphql_item_imported_through_the_panel_arrives_as_graphql_reque
         "the report never carries the value"
     );
 }
+
+/// Import a one-item Postman collection holding `item` through the panel, then export the
+/// collection it became. Returns how many import credential lines name `name` and the
+/// export's literal-credential names.
+fn import_then_export(item: Value, name: &str) -> (usize, Vec<String>) {
+    let temp = TempDir::new().expect("a scratch folder");
+    let root = temp.path().join("workspace");
+    std::fs::create_dir_all(&root).expect("the workspace folder is created");
+    seed_workspace(&root);
+    let source = temp.path().join("graphql.postman_collection.json");
+    let collection = json!({
+        "info": {
+            "name": "GraphQL API",
+            "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+        },
+        "item": [item]
+    });
+    std::fs::write(
+        &source,
+        serde_json::to_vec(&collection).expect("the fixture serializes"),
+    )
+    .expect("the import source writes");
+
+    let outcome = import_work(&root, &source).expect("the import succeeds");
+    assert!(
+        outcome.report.problems.iter().all(|problem| {
+            !problem.path.contains(LITERAL_TOKEN) && !problem.detail.contains(LITERAL_TOKEN)
+        }),
+        "the import report never carries the value"
+    );
+    let reported = outcome
+        .report
+        .problems
+        .iter()
+        .filter(|problem| problem.path == name && problem.detail.contains("literal credential"))
+        .count();
+
+    let snapshot = workspace_store::open(&root).expect("the workspace reopens");
+    let collection_id = snapshot
+        .items
+        .iter()
+        .find_map(|(id, item)| matches!(item.body, ItemBody::Collection(_)).then_some(*id))
+        .expect("the import wrote a collection");
+    let (_directory, target) = export_target();
+    let exported = export_work(&root, collection_id, &target).expect("the export succeeds");
+    assert!(
+        !exported.message(&target).contains(LITERAL_TOKEN),
+        "the export report never shows the value"
+    );
+    (reported, exported.literal_credentials)
+}
+
+fn postman_graphql_item(name: &str) -> Value {
+    json!({
+        "name": name,
+        "request": {
+            "method": "POST",
+            "body": { "mode": "graphql", "graphql": { "query": "{ users { id } }" } },
+            "url": "https://api.test/graphql"
+        }
+    })
+}
+
+#[test]
+fn test_preserved_item_level_bearer_literal_is_reported_on_import_and_warned_on_export() {
+    let mut item = postman_graphql_item("Planted auth");
+    item["auth"] = json!({
+        "type": "bearer",
+        "bearer": [{ "key": "token", "value": LITERAL_TOKEN, "type": "string" }]
+    });
+
+    let (reported, warned) = import_then_export(item, "Planted auth");
+
+    assert_eq!(reported, 1, "the import names the request once");
+    assert_eq!(warned, vec![String::from("Planted auth")]);
+}
+
+#[test]
+fn test_preserved_certificate_passphrase_literal_is_reported_on_import_and_warned_on_export() {
+    let mut item = postman_graphql_item("Client cert");
+    item["request"]["certificate"] = json!({
+        "src": "/certs/client.pem",
+        "passphrase": LITERAL_TOKEN
+    });
+
+    let (reported, warned) = import_then_export(item, "Client cert");
+
+    assert_eq!(reported, 1, "the import names the request once");
+    assert_eq!(warned, vec![String::from("Client cert")]);
+}

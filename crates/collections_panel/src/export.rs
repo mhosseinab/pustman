@@ -342,6 +342,10 @@ fn scan_literal_children(children: &[Child], carrying: &mut Vec<String>) {
             }
             Child::Request(Request::GraphQl(graphql)) => {
                 scan_literal_request(&graphql.name, &graphql.headers, &graphql.auth, carrying);
+                // The Postman fields the import preserved are written back verbatim.
+                if crate::import::extra_carries_credential(&graphql.extra) {
+                    note_literal_credential(carrying, &graphql.name);
+                }
             }
             // Never exported (skipped above), so nothing of theirs reaches a file: like
             // Unsupported.

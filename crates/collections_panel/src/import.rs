@@ -699,8 +699,10 @@ fn harden_request(request: &mut Request, problems: &mut Vec<ImportProblem>) {
             }
         }
         // Hardened like HTTP: its own extras and rows lose modelled keys, and a literal
-        // credential — auth, header, URL, or a credential-named key in the variables
-        // text when that text is JSON — is reported by name.
+        // credential — auth, header, URL, a credential-named key in the variables text
+        // when that text is JSON, or anything in the extras the Postman export writes
+        // back (`api_model` keeps unmapped auth, certificate and request keys there) —
+        // is reported by name.
         Request::GraphQl(graphql) => {
             sanitize_name(&mut graphql.name, problems);
             strip_extra(&mut graphql.extra, &graphql.name, problems);
@@ -714,6 +716,7 @@ fn harden_request(request: &mut Request, problems: &mut Vec<ImportProblem>) {
             let variables_carry_credential = serde_json::from_str::<Value>(&graphql.variables)
                 .is_ok_and(|variables| raw_carries_credential(&variables));
             if variables_carry_credential
+                || extra_carries_credential(&graphql.extra)
                 || carries_literal_credential(&graphql.auth, &graphql.url, graphql.headers.iter())
             {
                 problems.push(credential_problem(&graphql.name));
@@ -860,6 +863,7 @@ const CREDENTIAL_KEYS: &[&str] = &[
     "passwd",
     "secret",
     "client_secret",
+    "passphrase",
 ];
 
 /// The headers that carry a credential in their value.
@@ -984,6 +988,18 @@ fn raw_carries_credential(value: &Value) -> bool {
         Value::Array(items) => items.iter().any(raw_carries_credential),
         _ => false,
     }
+}
+
+/// Whether a request's preserved `extra` holds a literal credential at any depth — the
+/// [`raw_carries_credential`] walk over the extras as one object, so a top-level key
+/// keeps its name for the check. Shared with the export's scan: whatever an import
+/// preserved is what the export writes back.
+pub(crate) fn extra_carries_credential(extra: &BTreeMap<String, Value>) -> bool {
+    let object: serde_json::Map<String, Value> = extra
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    raw_carries_credential(&Value::Object(object))
 }
 
 /// Whether a request carries a literal credential (fix 2): its auth, a credential
