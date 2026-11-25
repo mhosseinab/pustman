@@ -57,8 +57,13 @@ pub enum VariableFix {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EntryState {
     /// It resolves: `shown` is its value (the mask for a secret) and `source` the
-    /// "Source: …" text.
-    Resolved { shown: String, source: String },
+    /// "Source: …" text. `secret` marks a masked secret — the flag, never the text,
+    /// decides how it is drawn.
+    Resolved {
+        shown: String,
+        source: String,
+        secret: bool,
+    },
     /// Nothing resolves it: `message` says what is missing; `fix` is "Set it…".
     Unresolved { message: String, fix: VariableFix },
 }
@@ -68,6 +73,55 @@ pub enum EntryState {
 pub struct VariableLineEntry {
     pub name: String,
     pub state: EntryState,
+}
+
+impl VariableLineEntry {
+    /// The chip's text: the placeholder itself.
+    pub fn chip_text(&self) -> String {
+        format!("{{{{{}}}}}", self.name)
+    }
+
+    /// The tooltip over a resolved value: its full text, for a plain value only — a
+    /// secret is only ever the mask and carries none.
+    pub fn value_tooltip(&self) -> Option<String> {
+        match &self.state {
+            EntryState::Resolved {
+                shown,
+                secret: false,
+                ..
+            } => Some(shown.clone()),
+            EntryState::Resolved { secret: true, .. } | EntryState::Unresolved { .. } => None,
+        }
+    }
+
+    /// Every string this entry paints — labels, button text and tooltips — exactly the
+    /// ones `render_entry` draws (a test proves no secret value is among them).
+    pub fn rendered_texts(&self) -> Vec<String> {
+        let mut texts = vec![self.chip_text()];
+        match &self.state {
+            EntryState::Resolved { shown, source, .. } => {
+                texts.extend([String::from("→"), shown.clone(), source.clone()]);
+                texts.extend(self.value_tooltip());
+            }
+            EntryState::Unresolved { message, fix } => texts.extend([
+                message.clone(),
+                String::from(SET_IT_LABEL),
+                String::from(fix_tooltip(fix)),
+            ]),
+        }
+        texts
+    }
+}
+
+/// The fix button's label.
+const SET_IT_LABEL: &str = "Set it…";
+
+/// What the fix button's tooltip says it does.
+fn fix_tooltip(fix: &VariableFix) -> &'static str {
+    match fix {
+        VariableFix::EditSecret(_) => "Set this secret's value in the keychain",
+        VariableFix::OpenVariablesEditor => "Open the variables editor to define it",
+    }
 }
 
 /// Every name the request's enabled parts use, in first-appearance order: the URL, the
@@ -153,6 +207,7 @@ impl RequestEditor {
             return EntryState::Resolved {
                 shown: String::from("generated at send"),
                 source: String::from("Source: Dynamic"),
+                secret: false,
             };
         }
         let source = || {
@@ -167,6 +222,7 @@ impl RequestEditor {
                     EntryState::Resolved {
                         shown: MASK.to_string(),
                         source: source(),
+                        secret: true,
                     }
                 } else {
                     EntryState::Unresolved {
@@ -179,6 +235,7 @@ impl RequestEditor {
                 Some(value) => EntryState::Resolved {
                     shown: value.to_string(),
                     source: source(),
+                    secret: false,
                 },
                 None => EntryState::Unresolved {
                     message: format!(
@@ -272,7 +329,7 @@ impl RequestEditor {
                     .border_color(severity.border(cx))
             })
             .child(
-                Label::new(SharedString::from(format!("{{{{{}}}}}", entry.name)))
+                Label::new(SharedString::from(entry.chip_text()))
                     .size(LabelSize::Small)
                     .color(if resolved {
                         Color::Success
@@ -291,11 +348,11 @@ impl RequestEditor {
             .gap(DynamicSpacing::Base03.rems(cx))
             .child(chip);
         match &entry.state {
-            EntryState::Resolved { shown, source } => {
-                let is_secret = shown == MASK;
+            EntryState::Resolved { shown, source, .. } => {
                 let value = Label::new(SharedString::from(shown.clone()))
                     .size(LabelSize::Small)
                     .truncate();
+                let tooltip = entry.value_tooltip();
                 row.child(Label::new(SharedString::new_static("→")).size(LabelSize::Small))
                     .child(
                         div()
@@ -305,8 +362,8 @@ impl RequestEditor {
                             .child(value)
                             // A plain value truncates with its full text in the tooltip; a
                             // secret is only ever the mask, so it gets none.
-                            .when(!is_secret, |this| {
-                                this.tooltip(Tooltip::text(shown.clone()).builder())
+                            .when_some(tooltip, |this, tooltip| {
+                                this.tooltip(Tooltip::text(tooltip).builder())
                             }),
                     )
                     .child(
@@ -332,18 +389,11 @@ impl RequestEditor {
                         .child(
                             Button::new(
                                 SharedString::from(format!("variable-fix-{}", entry.name)),
-                                SharedString::new_static("Set it…"),
+                                SharedString::new_static(SET_IT_LABEL),
                             )
                             .style(ButtonStyle::Transparent)
                             .label_color(Color::Accent)
-                            .tooltip(Tooltip::text(match &fix {
-                                VariableFix::EditSecret(_) => {
-                                    "Set this secret's value in the keychain"
-                                }
-                                VariableFix::OpenVariablesEditor => {
-                                    "Open the variables editor to define it"
-                                }
-                            }))
+                            .tooltip(Tooltip::text(fix_tooltip(&fix)))
                             .on_click(cx.listener(
                                 move |editor, _event, window, cx| {
                                     editor.apply_variable_fix(&fix, window, cx)

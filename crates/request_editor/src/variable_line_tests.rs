@@ -96,6 +96,7 @@ fn test_the_variable_line_shows_source_and_masks_secrets(cx: &mut TestAppContext
         EntryState::Resolved {
             shown: String::from("https://api.dev.example.test"),
             source: String::from("Source: Environment"),
+            secret: false,
         }
     );
     assert_eq!(
@@ -103,6 +104,7 @@ fn test_the_variable_line_shows_source_and_masks_secrets(cx: &mut TestAppContext
         EntryState::Resolved {
             shown: MASK.to_string(),
             source: String::from("Source: Environment"),
+            secret: true,
         },
         "a secret with a value shows only the mask"
     );
@@ -119,7 +121,7 @@ fn test_the_variable_line_shows_source_and_masks_secrets(cx: &mut TestAppContext
             .variable_line()
             .iter()
             .any(|entry| match &entry.state {
-                EntryState::Resolved { shown, source } => {
+                EntryState::Resolved { shown, source, .. } => {
                     shown.contains(FAKE_SECRET) || source.contains(FAKE_SECRET)
                 }
                 EntryState::Unresolved { message, .. } => message.contains(FAKE_SECRET),
@@ -193,6 +195,7 @@ fn test_the_line_names_the_active_environment_it_was_given(cx: &mut TestAppConte
         EntryState::Resolved {
             shown: String::from("https://api.dev.example.test"),
             source: String::from("Source: Development"),
+            secret: false,
         }
     );
     match state_of(&editor, cx, "page_size") {
@@ -201,4 +204,38 @@ fn test_the_line_names_the_active_environment_it_was_given(cx: &mut TestAppConte
         }
         other => panic!("page_size is unresolved, got {other:?}"),
     }
+}
+
+#[gpui::test]
+fn test_no_text_the_line_renders_carries_a_secret_value(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx);
+    let texts: Vec<String> = editor.read_with(cx, |editor, _| {
+        editor
+            .variable_line()
+            .iter()
+            .flat_map(|entry| entry.rendered_texts())
+            .collect()
+    });
+    assert!(
+        texts.iter().any(|text| text == MASK),
+        "the secret is drawn as the mask: {texts:?}"
+    );
+    assert!(
+        texts
+            .iter()
+            .any(|text| text.contains("https://api.dev.example.test")),
+        "a plain value is drawn (and in its tooltip): {texts:?}"
+    );
+    assert!(
+        texts.iter().all(|text| !text.contains(FAKE_SECRET)),
+        "no label, tooltip or button text holds the secret's value"
+    );
+    let secret_tooltip = editor.read_with(cx, |editor, _| {
+        editor
+            .variable_line()
+            .iter()
+            .find(|entry| entry.name == "api_key")
+            .and_then(|entry| entry.value_tooltip())
+    });
+    assert_eq!(secret_tooltip, None, "a masked secret has no value tooltip");
 }
