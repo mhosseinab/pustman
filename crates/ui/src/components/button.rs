@@ -124,6 +124,39 @@ impl ButtonStyle {
     fn fades_on_hover(self) -> bool {
         matches!(self, Self::Filled | Self::Tinted(_))
     }
+
+    /// The fill, enabled or not. A disabled Filled button drops the accent for the
+    /// neutral disabled fill: disabled text over the accent cannot be read.
+    pub(crate) fn fill(self, disabled: bool, cx: &App) -> Option<Hsla> {
+        match self {
+            Self::Filled if disabled => Some(cx.theme().colors().element_disabled),
+            _ => self.background(cx),
+        }
+    }
+
+    /// The label colour, enabled or not.
+    pub(crate) fn label_color(self, disabled: bool, cx: &App) -> Hsla {
+        if disabled {
+            Color::Disabled.color(cx)
+        } else {
+            self.text_color(cx)
+        }
+    }
+
+    /// The frame, enabled or not: a disabled Filled button loses the accent edge too.
+    fn frame_color(self, disabled: bool, cx: &App) -> Option<Hsla> {
+        match self {
+            Self::Filled if disabled => Some(cx.theme().colors().border),
+            _ => self.border_color(cx),
+        }
+    }
+
+    /// Whether a disabled button is also drawn at reduced opacity. A disabled Filled
+    /// button already says so with its own neutral colours; fading it again would make
+    /// its label unreadable.
+    pub(crate) fn fades_when_disabled(self) -> bool {
+        !matches!(self, Self::Filled)
+    }
 }
 
 /// How big a button is: its height at the default scale (`references/components.md`).
@@ -397,16 +430,14 @@ impl RenderOnce for Button {
             .border_1()
             .border_color(
                 style
-                    .border_color(cx)
+                    .frame_color(disabled, cx)
                     .unwrap_or_else(|| cx.theme().colors().border_transparent),
             )
             .rounded_sm()
-            .text_color(if disabled {
-                Color::Disabled.color(cx)
-            } else {
-                style.text_color(cx)
+            .text_color(style.label_color(disabled, cx))
+            .when_some(style.fill(disabled, cx), |this, background| {
+                this.bg(background)
             })
-            .when_some(style.background(cx), |this, background| this.bg(background))
             .map(|this| match focus_handle.as_ref() {
                 // With a caller's handle the handle's own tab_stop and tab_index decide
                 // the tab order; the element-level ones only apply to handles GPUI creates.
@@ -430,8 +461,10 @@ impl RenderOnce for Button {
             .when(!tooltip.is_hidden(), |this| this.tooltip(tooltip.builder()))
             .child(content)
             .map(|this| {
-                if disabled {
+                if disabled && style.fades_when_disabled() {
                     this.cursor_not_allowed().opacity(0.6)
+                } else if disabled {
+                    this.cursor_not_allowed()
                 } else if style.fades_on_hover() {
                     this.cursor(self.cursor_style)
                         .hover(|s| s.opacity(0.88))
@@ -749,3 +782,7 @@ pub(crate) fn spinner(size: IconSize) -> gpui::AnyElement {
 #[cfg(test)]
 #[path = "button_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "button_disabled_tests.rs"]
+mod disabled_tests;
