@@ -356,3 +356,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — S50d UI review PASS_WITH_ISSUES: MEDIUM hint contrast (~1.7:1). Driver decision: S50d Edits extended to crates/ui/src/components/context_menu.rs for the hint colour/opacity fix only; worker resumed. LOWs filed.
 - 2026-11-25 — S50b merged (request files per kind; state-integrity PASS_WITH_ISSUES; VERIFY OK; LOW #343).
 - 2026-11-25 — S50d merged (New menu; UI fix 1 hint contrast; authorized EXPECTED_ACTIONS edit, ledger row now used; VERIFY OK; LOW #342).
+- 2026-11-25 — Dispatched S50c (GraphQL import/export, high-stakes) and S53 (GraphQL over the HTTP engine), http-engine-engineer. Disk 38 GB free.
