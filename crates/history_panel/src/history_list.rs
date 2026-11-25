@@ -12,6 +12,7 @@
 //! supersedes and only the newest result can land. Rows carry method, target,
 //! status and time (REQ-HIST-01) — never request or response content (REQ-HIST-03).
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -31,7 +32,7 @@ use workspace::{DockPosition, Panel, Workspace};
 
 use crate::actions::{ClearHistory, DeleteEntry};
 use crate::delete_entries::HistoryMaintenance;
-use crate::open_entry::open_entry;
+use crate::open_entry::open_entry_recorded_in;
 
 #[cfg(test)]
 #[path = "history_list_tests.rs"]
@@ -131,6 +132,10 @@ pub struct HistoryList {
     /// The rows of the last successful read, grouped and ordered for drawing. Read-only
     /// after a read lands, so rendering just clones the handle.
     rows: Arc<Vec<HistoryRow>>,
+    /// The installation key each listed entry was recorded in, by stored id, from the
+    /// same read as `rows`; an entry with none is absent. Opening an entry passes its
+    /// key on ([`crate::open_entry::open_entry_recorded_in`]).
+    installation_keys: Arc<BTreeMap<i64, String>>,
     /// Until the first read lands there is nothing to say about the history yet — the
     /// empty state must not flash "No requests sent yet" over a load in flight.
     is_loading: bool,
@@ -197,6 +202,7 @@ impl HistoryList {
             workspace_id: workspace_id.into(),
             search,
             rows: Arc::new(Vec::new()),
+            installation_keys: Arc::new(BTreeMap::new()),
             is_loading: true,
             error: None,
             pending_load: None,
@@ -323,6 +329,9 @@ impl HistoryList {
     fn open_row(&mut self, entry: HistoryEntry, window: &mut Window, cx: &mut Context<Self>) {
         self.selected_entry_id = entry.id;
         cx.notify();
+        let installation_key = entry
+            .id
+            .and_then(|id| self.installation_keys.get(&id).cloned());
         let window_handle = window.window_handle();
         cx.defer(move |cx| {
             let opened = window_handle.update(cx, |root, window, cx| {
@@ -331,7 +340,7 @@ impl HistoryList {
                     // to open anything in (the `save_body` toast's shape).
                     return;
                 };
-                open_entry(&entry, &workspace, window, cx);
+                open_entry_recorded_in(&entry, installation_key.as_deref(), &workspace, window, cx);
             });
             if opened.is_err() {
                 // Handled: the window closed between the keystroke and this callback;
@@ -416,10 +425,11 @@ impl HistoryList {
             let landed = this.update(cx, |this, cx| {
                 this.is_loading = false;
                 match loaded {
-                    Ok(entries) => {
+                    Ok((entries, installation_keys)) => {
                         this.error = None;
                         this.rows =
                             Arc::new(group_by_day(entries, OffsetDateTime::now_utc().date()));
+                        this.installation_keys = Arc::new(installation_keys);
                     }
                     Err(_error) => {
                         this.error = Some(SharedString::new_static(LOAD_FAILURE_MESSAGE));
@@ -817,18 +827,23 @@ fn clear_search_action(search: &Entity<TextInput>) -> impl IntoElement {
     )
 }
 
-/// One read of a workspace's history, off the foreground thread. The store lock guards
-/// the query only — it is never held across an `.await`
+/// One read of a workspace's history, off the foreground thread: the entries and the
+/// installation key each was recorded in, under one lock so both describe the same
+/// rows. The store lock guards the queries only — it is never held across an `.await`
 /// (`.agents/rules/rust-code.md`).
 fn read_entries(
     store: &Mutex<LocalStore>,
     workspace_id: &str,
     query: &str,
-) -> anyhow::Result<Vec<HistoryEntry>> {
+) -> anyhow::Result<(Vec<HistoryEntry>, BTreeMap<i64, String>)> {
     let store = store
         .lock()
         .map_err(|_| anyhow::anyhow!("the local store lock is poisoned"))?;
-    Ok(store.history().search(workspace_id, query)?)
+    let history = store.history();
+    Ok((
+        history.search(workspace_id, query)?,
+        history.installation_keys(workspace_id, query)?,
+    ))
 }
 
 /// Fold the newest-first entries into the day-grouped rows: one [`HistoryRow::Day`]

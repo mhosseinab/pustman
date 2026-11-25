@@ -62,12 +62,20 @@ pub struct Migration {
 
 /// Every migration this build knows, in ascending `version` order. Each entry is one
 /// `NNNN_name.up.sql` / `NNNN_name.down.sql` pair in `migrations/`.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "init",
-    up_sql: include_str!("../migrations/0001_init.up.sql"),
-    down_sql: include_str!("../migrations/0001_init.down.sql"),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "init",
+        up_sql: include_str!("../migrations/0001_init.up.sql"),
+        down_sql: include_str!("../migrations/0001_init.down.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "history_installation",
+        up_sql: include_str!("../migrations/0002_history_installation.up.sql"),
+        down_sql: include_str!("../migrations/0002_history_installation.down.sql"),
+    },
+];
 
 /// The per-user local store: a SQLite database plus its migration state.
 ///
@@ -371,8 +379,21 @@ pub struct HistoryRepo<'a> {
 }
 
 impl HistoryRepo<'_> {
-    /// Stores one entry and returns the assigned [`HistoryEntry::id`].
+    /// Stores one entry, recorded in no known folder, and returns the assigned
+    /// [`HistoryEntry::id`].
     pub fn insert(&self, entry: &HistoryEntry) -> Result<i64> {
+        self.insert_recorded_in(entry, None)
+    }
+
+    /// Stores one entry with the installation key of the folder it was sent from
+    /// (`None`: none known) and returns the assigned [`HistoryEntry::id`]. The key is
+    /// kept beside the row rather than in [`HistoryEntry`]: what a reopened entry may
+    /// resolve against is decided by it (`pustman::scope_wiring`).
+    pub fn insert_recorded_in(
+        &self,
+        entry: &HistoryEntry,
+        installation_key: Option<&str>,
+    ) -> Result<i64> {
         let request_json = serde_json::to_string(&entry.request_json)?;
         let response_summary_json = entry
             .response_summary_json
@@ -382,8 +403,8 @@ impl HistoryRepo<'_> {
         self.connection.execute(
             "INSERT INTO history (workspace_id, created_at, protocol, method, target, status,
                                   duration_ms, request_json, response_summary_json,
-                                  response_body_prefix)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                                  response_body_prefix, installation_key)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 entry.workspace_id,
                 to_millis(entry.created_at),
@@ -395,9 +416,30 @@ impl HistoryRepo<'_> {
                 request_json,
                 response_summary_json,
                 entry.response_body_prefix,
+                installation_key,
             ],
         )?;
         Ok(self.connection.last_insert_rowid())
+    }
+
+    /// The installation key each of `workspace_id`'s entries matching `query` was
+    /// recorded in (see [`HistoryRepo::insert_recorded_in`]), by [`HistoryEntry::id`] —
+    /// the same rows [`HistoryRepo::search`] returns. Entries with no key are left out.
+    pub fn installation_keys(
+        &self,
+        workspace_id: &str,
+        query: &str,
+    ) -> Result<std::collections::BTreeMap<i64, String>> {
+        let pattern = format!("%{}%", escape_like(query));
+        let sql = format!(
+            "SELECT id, installation_key FROM history
+             WHERE workspace_id = ?1 AND installation_key IS NOT NULL AND ({LIKE_QUERY})"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement.query_map(params![workspace_id, pattern], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     /// Entries recorded on `day` (UTC), newest first, ties broken by `id` so two sends
@@ -883,3 +925,7 @@ mod tests;
 #[cfg(test)]
 #[path = "schema_objects_tests.rs"]
 mod schema_objects_tests;
+
+#[cfg(test)]
+#[path = "history_installation_tests.rs"]
+mod history_installation_tests;

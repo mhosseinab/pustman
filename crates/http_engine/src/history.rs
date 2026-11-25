@@ -132,9 +132,21 @@ impl HistoryRecorder {
     /// yet, and this draft is only ever written for a send that never produced any — a
     /// cancelled one.
     pub fn draft(&self, request: &HttpRequest) -> Option<Arc<HistoryDraft>> {
+        self.draft_recorded_in(request, None)
+    }
+
+    /// [`HistoryRecorder::draft`] for a send from the folder whose installation key is
+    /// `installation_key` (`None`: no folder): the row keeps it, and only a tab reopened
+    /// in that same folder may resolve its variables (`pustman::scope_wiring`).
+    pub fn draft_recorded_in(
+        &self,
+        request: &HttpRequest,
+        installation_key: Option<String>,
+    ) -> Option<Arc<HistoryDraft>> {
         let (target, request_json) = redacted_parts(request, &SecretValues::new())?;
         Some(Arc::new(HistoryDraft {
             recorder: self.clone(),
+            installation_key,
             method: request.method.as_str().to_owned(),
             target,
             request_json,
@@ -161,6 +173,8 @@ impl fmt::Debug for HistoryRecorder {
 /// still request content, and request content never belongs in a log line.
 pub struct HistoryDraft {
     recorder: HistoryRecorder,
+    /// The installation key of the folder the send came from, stored beside the row.
+    installation_key: Option<String>,
     method: String,
     target: String,
     request_json: Value,
@@ -269,7 +283,10 @@ impl HistoryDraft {
         drop(recorded);
         match self.recorder.store.lock() {
             Ok(store) => {
-                match store.history().insert(&entry) {
+                match store
+                    .history()
+                    .insert_recorded_in(&entry, self.installation_key.as_deref())
+                {
                     Ok(_) => {}
                     Err(_) => log::error!("the history row could not be written"),
                 }

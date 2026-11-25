@@ -318,12 +318,25 @@ impl HttpClient {
         input: SendInput,
         cx: &mut Context<HttpClient>,
     ) -> Task<Result<SendOutcome, PipelineError>> {
+        self.send_request_recorded_in(owner, input, None, cx)
+    }
+
+    /// [`HttpClient::send_request_as`] from the folder whose installation key is
+    /// `installation_key` (`None`: no folder), which the history row keeps
+    /// ([`HistoryRecorder::draft_recorded_in`]).
+    pub fn send_request_recorded_in(
+        &mut self,
+        owner: SendOwner,
+        input: SendInput,
+        installation_key: Option<String>,
+        cx: &mut Context<HttpClient>,
+    ) -> Task<Result<SendOutcome, PipelineError>> {
         let transport = self.transport.clone();
         let workspace_root = self.workspace_root.clone();
         let draft = self
             .history
             .as_ref()
-            .and_then(|recorder| recorder.draft(&input.request));
+            .and_then(|recorder| recorder.draft_recorded_in(&input.request, installation_key));
         // The send names itself in the [`SendEvent`] a cancellation becomes: the method
         // and URL as the caller sent it, placeholders and all (REQ-HTTP-12).
         let identity = SendIdentity {
