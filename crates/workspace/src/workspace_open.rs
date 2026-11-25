@@ -69,7 +69,7 @@ const RECENT_READ_FAILURE_MESSAGE: &str = "The recent workspaces could not be re
 
 /// The workspace's own file (PRD §6.1) — named here because the create claims it
 /// exclusively (see [`create_workspace`]).
-const WORKSPACE_FILE: &str = "pustman.json";
+pub(crate) const WORKSPACE_FILE: &str = "pustman.json";
 
 /// REQ-COLLAB-06: what a workspace created inside a Git repository is told. The workspace
 /// folder holds only shared files, so there is nothing to add to `.gitignore` — and
@@ -119,7 +119,7 @@ enum Outcome {
 
 /// The local store the recent list lives in, once the app installs one (see the module
 /// docs). Not `Default`: absent means "not installed", which is not a failure.
-struct OpenStore(Arc<Mutex<LocalStore>>);
+pub(crate) struct OpenStore(Arc<Mutex<LocalStore>>);
 
 impl Global for OpenStore {}
 
@@ -436,7 +436,7 @@ fn create_workspace_action(_: &CreateWorkspace, cx: &mut App) {
 /// Ask the active window's [`WorkspaceOpen`] to run `prompt`. Deferred like
 /// `command_palette`'s toggle: the action dispatch runs while the window is on the update
 /// stack, and a window cannot be updated from there.
-fn with_active_opener(
+pub(crate) fn with_active_opener(
     cx: &mut App,
     prompt: impl FnOnce(&mut WorkspaceOpen, &mut Context<WorkspaceOpen>) + 'static,
 ) {
