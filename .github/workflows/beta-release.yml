@@ -1,12 +1,16 @@
 name: Beta release
 
 # Builds the desktop app for a beta tag (`v*-beta*`) and publishes it as a GitHub
-# pre-release, in three stages so a failure is retried without redoing the others:
+# pre-release, in stages so a failure is retried without redoing the others:
 #
-#   build      — compile and package each platform (macOS: the unsigned Pustman.app)
-#   sign-macos — Developer ID signing, .dmg and notarization (or the ad-hoc zip without
-#                the signing secrets); a rejected notarization re-runs only this job
-#   publish    — create the pre-release if it does not exist, attach what was produced
+#   build           — compile each platform's release binary (the only slow step)
+#   package-linux   — tarball with the desktop-entry installer and icons
+#   package-windows — zip (the place for Authenticode signing later)
+#   package-macos   — Pustman.app, Developer ID signing, .dmg and notarization (or the
+#                     ad-hoc zip without the signing secrets)
+#   publish         — create the pre-release if it does not exist, attach what was produced
+#
+# A packaging or signing failure re-runs only that job and publish, never the compile.
 #
 # Push the tag, or create the pre-release in the UI: either works. Promotions
 # (release/pustman-v1-<n>) stay a manual, human-smoked process.
@@ -73,13 +77,42 @@ jobs:
       - name: Build release
         run: cargo build --release --locked -p pustman
 
-      - name: Package (Linux)
-        if: runner.os == 'Linux'
+      # The release binary, tarred so its executable bit survives the artifact round trip.
+      - name: Stage the binary
+        shell: bash
         run: |
+          mkdir -p out
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            tar -C target/release -cf out/binary.tar pustman.exe
+          else
+            tar -C target/release -cf out/binary.tar pustman
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: out/binary.tar
+          if-no-files-found: error
+
+  package-linux:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binary-linux-x86_64
+          path: bin
+
+      - name: Package
+        run: |
+          tar -C bin -xf bin/binary.tar
           name="pustman-${TAG}-linux-x86_64"
           stage="dist/$name"
           mkdir -p "$stage/scripts" "$stage/assets/pustman-icon-pack"
-          cp target/release/pustman "$stage/pustman"
+          cp bin/pustman "$stage/pustman"
           cp scripts/install-desktop-entry.sh "$stage/scripts/"
           cp -R assets/pustman-icon-pack/linux "$stage/assets/pustman-icon-pack/"
           cat > "$stage/README.txt" <<'EOF'
@@ -95,35 +128,41 @@ jobs:
           mkdir -p out
           tar -C dist -czf "out/$name.tar.gz" "$name"
 
-      # The unsigned bundle, tarred so the executable bit and bundle layout survive the
-      # artifact round trip; sign-macos signs it.
-      - name: Bundle (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          scripts/bundle-macos.sh target/release/pustman dist
-          mkdir -p out
-          tar -C dist -cf out/Pustman.app.tar Pustman.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-linux-x86_64
+          path: out/*
+          if-no-files-found: error
 
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
+  package-windows:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: binary-windows-x86_64
+          path: bin
+
+      - name: Package
         shell: pwsh
         run: |
+          tar -C bin -xf bin/binary.tar
           $name = "pustman-$env:TAG-windows-x86_64"
           $stage = "dist/$name"
           New-Item -ItemType Directory -Force -Path $stage, out | Out-Null
-          Copy-Item target/release/pustman.exe "$stage/pustman.exe"
+          Copy-Item bin/pustman.exe "$stage/pustman.exe"
           "Pustman beta for Windows (x86_64)`r`n`r`nRun pustman.exe. The executable is not signed, so Windows SmartScreen may warn the first time.`r`nThis is a beta: expect rough edges." | Set-Content "$stage/README.txt"
           Compress-Archive -Path $stage -DestinationPath "out/$name.zip" -Force
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ runner.os == 'macOS' && 'unsigned-macos-arm64' || format('package-{0}', matrix.target) }}
+          name: package-windows-x86_64
           path: out/*
           if-no-files-found: error
 
-  sign-macos:
+  package-macos:
     needs: build
-    # Runs whenever the macOS app was built, whatever happened to the other platforms.
     if: ${{ !cancelled() }}
     runs-on: macos-latest
     steps:
@@ -131,8 +170,8 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: unsigned-macos-arm64
-          path: dist
+          name: binary-macos-arm64
+          path: bin
 
       - name: Sign, notarize and package
         env:
@@ -143,7 +182,8 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: |
-          tar -C dist -xf dist/Pustman.app.tar
+          tar -C bin -xf bin/binary.tar
+          scripts/bundle-macos.sh bin/pustman dist
           mkdir -p out
           name="pustman-${TAG}-macos-arm64"
           if [ -z "$MACOS_CERT_P12_BASE64" ] || [ -z "$APPLE_API_KEY_P8_BASE64" ]; then
@@ -161,7 +201,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [build, sign-macos]
+    needs: [package-linux, package-windows, package-macos]
     # Publish whatever platforms finished; the step fails only if nothing was produced.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
