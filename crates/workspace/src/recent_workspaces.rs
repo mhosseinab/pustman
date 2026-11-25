@@ -301,6 +301,6 @@ fn open_recent_workspace(action: &OpenRecentWorkspace, cx: &mut App) {
 #[path = "recent_single_source_tests.rs"]
 mod single_source_tests;
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 #[path = "recent_non_utf8_tests.rs"]
 mod non_utf8_tests;

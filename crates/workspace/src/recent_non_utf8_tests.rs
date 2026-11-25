@@ -3,6 +3,8 @@
 //! choosing it from the switcher reopens that very folder instead of a lossy look-alike
 //! that does not exist.
 
+#![cfg(unix)]
+
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
