@@ -6150,6 +6150,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "api_model",
+ "base64 0.23.1",
  "cookie_store",
  "environment_picker",
  "gpui",
@@ -6160,6 +6161,7 @@ dependencies = [
  "pustman_actions",
  "regex",
  "secrets",
+ "serde",
  "serde_json",
  "settings",
  "storage",

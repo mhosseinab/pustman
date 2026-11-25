@@ -351,3 +351,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — S52b security review: CHANGES_REQUESTED (1 MEDIUM: proxy object without `mode` fails to parse) → fixer dispatched; LOWs #340. Cleanup script now prunes stale test binaries in every target/debug/deps (harness; tests in scripts/pustman-v1-cleanup-prune.test.ts).
 - 2026-11-25 — S52b merged (network model; security fix 1: proxy without mode = system; VERIFY OK; LOW #340). S51a step record restored (committed empty at ed2b722).
 - 2026-11-25 — Driver decision: S50d Edits extended to crates/workspace/src/pane.rs (a NewMenu field and the tab-bar row in render only). The step assumed a '+' button the tab strip never had; without it NewMenu is dead code.
+- 2026-11-25 — S51b merged (message log store; security PASS_WITH_ISSUES; VERIFY OK; LOW #341).
