@@ -34,6 +34,10 @@ jobs:
             target: linux-x86_64
           - os: macos-latest
             target: macos-arm64
+          # Experimental: never built before this workflow; a failure here does not stop
+          # the Linux and macOS packages from being published.
+          - os: windows-latest
+            target: windows-x86_64
     steps:
       - uses: actions/checkout@v4
 
@@ -86,6 +90,17 @@ jobs:
           mkdir -p out
           ditto -c -k --keepParent dist/Pustman.app "out/pustman-${TAG}-macos-arm64.zip"
 
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "pustman-$env:TAG-windows-x86_64"
+          $stage = "dist/$name"
+          New-Item -ItemType Directory -Force -Path $stage, out | Out-Null
+          Copy-Item target/release/pustman.exe "$stage/pustman.exe"
+          "Pustman beta for Windows (x86_64)`r`n`r`nRun pustman.exe. The executable is not signed, so Windows SmartScreen may warn the first time.`r`nThis is a beta: expect rough edges." | Set-Content "$stage/README.txt"
+          Compress-Archive -Path $stage -DestinationPath "out/$name.zip" -Force
+
       - uses: actions/upload-artifact@v4
         with:
           name: package-${{ matrix.target }}
@@ -94,6 +109,9 @@ jobs:
 
   publish:
     needs: package
+    # Publish whatever platforms packaged: one failing build (Windows is experimental)
+    # must not hold back the others. The step fails if nothing was packaged at all.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -101,12 +119,17 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           path: out
           merge-multiple: true
 
       - name: Create the pre-release if it does not exist, then attach the packages
         run: |
+          if ! ls out/* >/dev/null 2>&1; then
+            echo "no platform packaged; nothing to publish" >&2
+            exit 1
+          fi
           notes="docs/releases/${TAG}.md"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             if [ -f "$notes" ]; then
