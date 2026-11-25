@@ -39,4 +39,13 @@ cat > "$bundle/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# Ad-hoc sign the whole bundle. Copying the binary in and adding Info.plist leaves the
+# bundle without a valid signature, and Apple silicon then reports a downloaded copy as
+# "damaged and can't be opened". An ad-hoc signature is not a Developer ID: Gatekeeper
+# still asks the user to allow the app once, but it no longer calls it damaged.
+if command -v codesign >/dev/null; then
+    codesign --force --deep --sign - "$bundle"
+    codesign --verify --deep --strict "$bundle"
+fi
+
 echo "bundled $bundle"
