@@ -138,8 +138,9 @@ impl Workspace {
     }
 
     /// Show or hide the console in the bottom dock (REQ-UI-04); the left dock is untouched.
-    fn toggle_console(&mut self, _: &ToggleConsole, _window: &mut Window, cx: &mut Context<Self>) {
-        self.bottom_dock.update(cx, |dock, cx| dock.toggle(cx));
+    fn toggle_console(&mut self, _: &ToggleConsole, window: &mut Window, cx: &mut Context<Self>) {
+        self.bottom_dock
+            .update(cx, |dock, cx| dock.toggle_in(window, cx));
         cx.notify();
     }
 

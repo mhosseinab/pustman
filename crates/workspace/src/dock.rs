@@ -70,11 +70,19 @@ impl DockPosition {
 pub struct Dock {
     position: DockPosition,
     is_open: bool,
-    /// Open but folded down to its panel header row (S48u5): the app starts the console
-    /// this way, a one-line strip that opens on a click or `ToggleConsole`, instead of a
-    /// 200 px empty pane taking room from the request. Only drawn for the bottom dock;
+    /// Open but folded down to its panel header row (S48u5): a one-line strip instead of
+    /// a 200 px pane taking room from the request. Only the bottom dock folds;
     /// [`Self::is_open`] stays true, because the strip is on screen.
     collapsed: bool,
+    /// The strip is this dock's resting state ([`Self::rest_as_strip`]): toggling moves
+    /// between strip and full height and never hides the dock.
+    rests_as_strip: bool,
+    /// A saved layout was applied ([`Self::apply_saved_layout`]); from then on the resting
+    /// default must not overwrite it, whichever of the two arrives first.
+    saved_layout_applied: bool,
+    /// The strip's expand button: where the keyboard goes when the dock folds with focus
+    /// inside its panel, so focus never lands on an element that is gone.
+    expand_focus: FocusHandle,
     size_px: f32,
     panels: Vec<Box<dyn PanelHandle>>,
     active_panel: Option<usize>,
@@ -86,11 +94,14 @@ pub struct Dock {
 impl Dock {
     /// A dock at `position`, open and at its default size — the workspace opens with both
     /// docks visible.
-    pub fn new(position: DockPosition, _cx: &mut Context<Self>) -> Self {
+    pub fn new(position: DockPosition, cx: &mut Context<Self>) -> Self {
         Self {
             position,
             is_open: true,
             collapsed: false,
+            rests_as_strip: false,
+            saved_layout_applied: false,
+            expand_focus: cx.focus_handle().tab_stop(true),
             size_px: position.default_size_px(),
             panels: Vec::new(),
             active_panel: None,
@@ -132,21 +143,92 @@ impl Dock {
         self.collapsed
     }
 
-    /// Fold the dock down to its header strip, or unfold it to its full size.
+    /// Fold the dock down to its header strip, or unfold it to its full size. Only the
+    /// bottom dock folds: the left dock has its rail for that, so it ignores this.
     pub fn set_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) {
-        self.collapsed = collapsed;
+        self.collapsed = collapsed && self.position == DockPosition::Bottom;
         cx.notify();
     }
 
-    /// Flip between hidden and showing. A collapsed dock counts as asking to be seen:
-    /// the toggle unfolds it rather than hiding the strip the user just asked about.
+    /// Make the strip this dock's resting state (S48u5): it folds to the strip now —
+    /// unless a saved layout was already applied, which wins — and from here on
+    /// toggling moves between strip and full height instead of hiding the dock.
+    pub fn rest_as_strip(&mut self, cx: &mut Context<Self>) {
+        if self.position != DockPosition::Bottom {
+            return;
+        }
+        self.rests_as_strip = true;
+        if !self.saved_layout_applied {
+            self.is_open = true;
+            self.collapsed = true;
+        }
+        cx.notify();
+    }
+
+    /// Apply the layout saved for this dock (`restore.rs`): it replaces whatever default
+    /// the dock holds and marks the dock as restored, so a resting default set later
+    /// ([`Self::rest_as_strip`]) leaves it alone.
+    pub fn apply_saved_layout(
+        &mut self,
+        is_open: bool,
+        collapsed: bool,
+        size_px: f32,
+        cx: &mut Context<Self>,
+    ) {
+        self.saved_layout_applied = true;
+        self.is_open = is_open;
+        self.set_collapsed(collapsed, cx);
+        self.set_size_px(size_px, cx);
+    }
+
+    /// The strip's expand button's focus handle.
+    #[cfg(test)]
+    pub(crate) fn expand_focus_handle(&self) -> &FocusHandle {
+        &self.expand_focus
+    }
+
+    /// Flip between hidden and showing — or, for a dock that rests as a strip, between
+    /// strip and full height. A hidden or folded dock counts as asking to be seen.
     pub fn toggle(&mut self, cx: &mut Context<Self>) {
+        if self.rests_as_strip {
+            let unfold = !self.is_open || self.collapsed;
+            self.is_open = true;
+            self.set_collapsed(!unfold, cx);
+            return;
+        }
         if self.is_open && self.collapsed {
             self.set_collapsed(false, cx);
             return;
         }
         self.collapsed = false;
         self.set_open(!self.is_open, cx);
+    }
+
+    /// [`Self::toggle`] from a key or a click: when it folds the dock with the keyboard
+    /// inside the panel, the keyboard moves to the strip's expand button — the panel is
+    /// no longer drawn, and focus on an undrawn element is focus nowhere.
+    pub fn toggle_in(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.toggle(cx);
+        self.keep_focus_on_screen(window, cx);
+    }
+
+    /// Fold to the strip from the open console's header action, keeping focus visible.
+    fn fold_in(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_collapsed(true, cx);
+        self.keep_focus_on_screen(window, cx);
+    }
+
+    fn keep_focus_on_screen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.shows_strip() {
+            return;
+        }
+        let focus_in_panel = self
+            .panels
+            .iter()
+            .any(|panel| panel.focus_handle(cx).contains_focused(window, cx));
+        if focus_in_panel {
+            window.focus(&self.expand_focus, cx);
+        }
     }
 
     /// The panels this dock holds, in registration order.
@@ -227,7 +309,10 @@ impl Dock {
             return;
         };
         self.active_panel = Some(index);
-        // Choosing a panel is asking to see it: a collapsed strip unfolds.
+        // Activation moves the keyboard into the panel (below), and focus inside a folded
+        // strip would be focus on nothing drawn — so any activation unfolds. Every caller
+        // is a user's choice (a header or rail click, a panel's "+ New", History's
+        // show action); registration never activates, so a panel never unfolds itself.
         self.collapsed = false;
         cx.notify();
         if let Some(panel) = self.panels.get(index) {
@@ -389,6 +474,7 @@ impl Dock {
                 IconName::ChevronUp,
                 Tooltip::for_action("Show console", &pustman_actions::workspace::ToggleConsole),
             )
+            .focus_handle(self.expand_focus.clone())
             .on_click(cx.listener(|dock, _event, _window, cx| dock.set_collapsed(false, cx))),
         )
     }
@@ -400,6 +486,10 @@ impl Dock {
         let selector = dock_hide_selector(self.position);
         let (icon, label) = match self.position {
             DockPosition::Left => (IconName::ChevronLeft, "Hide sidebar"),
+            // A console that rests as a strip folds back to it rather than vanishing.
+            DockPosition::Bottom if self.rests_as_strip => {
+                (IconName::ChevronDown, "Collapse console")
+            }
             DockPosition::Bottom => (IconName::ChevronDown, "Hide console"),
         };
         div().debug_selector(move || selector.clone()).child(
@@ -414,7 +504,13 @@ impl Dock {
                 DockPosition::Left => button.size(ButtonSize::Default),
                 DockPosition::Bottom => button,
             })
-            .on_click(cx.listener(|dock, _event, _window, cx| dock.set_open(false, cx))),
+            .on_click(cx.listener(|dock, _event, window, cx| {
+                if dock.rests_as_strip {
+                    dock.fold_in(window, cx);
+                } else {
+                    dock.set_open(false, cx);
+                }
+            })),
         )
     }
 }

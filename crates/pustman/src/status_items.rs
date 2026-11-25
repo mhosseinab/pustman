@@ -20,8 +20,9 @@
 //! than none. "Saved to <collection>" and Globals are not shown: nothing in the app holds
 //! a saved-to state or a globals scope to name, and the bar shows nothing that does nothing.
 //!
-//! The app also starts every window's console collapsed to its one-line strip
-//! ([`collapse_console`]): a saved layout, restored after, wins.
+//! The app also makes the one-line strip every window's console's resting state
+//! ([`collapse_console`]): Ctrl+Alt+C and the Console control move between strip and
+//! full height, and a saved layout wins whichever lands first.
 
 use console::ConsoleStore;
 use environment_picker::SelectorInputs;
@@ -234,14 +235,14 @@ pub(crate) fn init(cx: &mut App) {
         .push(subscription);
 }
 
-/// Start the window's console as its one-line strip (S48u5): an empty console pane took
-/// ~200 px from the request on every launch. This runs as the window opens, before the
-/// saved layout is read back, so a layout saved with the console open still wins.
+/// Make the strip the window's console's resting state (S48u5): an empty console pane
+/// took ~200 px from the request on every launch. A layout saved for the window wins
+/// whichever lands first — `Dock::rest_as_strip` leaves a restored layout alone.
 fn collapse_console(workspace: &gpui::Entity<Workspace>, cx: &mut App) {
     workspace.update(cx, |workspace, cx| {
         workspace
             .bottom_dock()
-            .update(cx, |dock, cx| dock.set_collapsed(true, cx));
+            .update(cx, |dock, cx| dock.rest_as_strip(cx));
     });
 }
 
