@@ -1,10 +1,15 @@
 name: Beta release
 
-# Builds the desktop app for Linux and macOS for a beta tag (`v*-beta*`) and publishes the
-# packages as a GitHub pre-release. Push the tag, or create the pre-release in the UI: either
-# works, because the publish job creates the release when it does not exist yet and only
-# uploads when it does. Promotions (release/pustman-v1-<n>) stay a manual, human-smoked
-# process.
+# Builds the desktop app for a beta tag (`v*-beta*`) and publishes it as a GitHub
+# pre-release, in three stages so a failure is retried without redoing the others:
+#
+#   build      — compile and package each platform (macOS: the unsigned Pustman.app)
+#   sign-macos — Developer ID signing, .dmg and notarization (or the ad-hoc zip without
+#                the signing secrets); a rejected notarization re-runs only this job
+#   publish    — create the pre-release if it does not exist, attach what was produced
+#
+# Push the tag, or create the pre-release in the UI: either works. Promotions
+# (release/pustman-v1-<n>) stay a manual, human-smoked process.
 
 on:
   push:
@@ -22,9 +27,9 @@ env:
   TAG: ${{ github.event.release.tag_name || github.ref_name }}
 
 jobs:
-  package:
+  build:
     if: github.event_name == 'push' || github.event.release.prerelease
-    name: package (${{ matrix.target }})
+    name: build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -34,8 +39,7 @@ jobs:
             target: linux-x86_64
           - os: macos-latest
             target: macos-arm64
-          # Experimental: never built before this workflow; a failure here does not stop
-          # the Linux and macOS packages from being published.
+          # Windows is newer than the others; a failure here never holds back their release.
           - os: windows-latest
             target: windows-x86_64
     steps:
@@ -91,26 +95,14 @@ jobs:
           mkdir -p out
           tar -C dist -czf "out/$name.tar.gz" "$name"
 
-      - name: Package (macOS)
+      # The unsigned bundle, tarred so the executable bit and bundle layout survive the
+      # artifact round trip; sign-macos signs it.
+      - name: Bundle (macOS)
         if: runner.os == 'macOS'
-        env:
-          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
-          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: |
           scripts/bundle-macos.sh target/release/pustman dist
           mkdir -p out
-          name="pustman-${TAG}-macos-arm64"
-          if [ -z "$MACOS_CERT_P12_BASE64" ] || [ -z "$APPLE_API_KEY_P8_BASE64" ]; then
-            # No Developer ID secrets: ship the ad-hoc signed app (Gatekeeper asks once).
-            echo "::notice::Developer ID secrets not set; shipping the ad-hoc signed zip"
-            ditto -c -k --keepParent dist/Pustman.app "out/$name.zip"
-            exit 0
-          fi
-          scripts/sign-notarize-macos.sh dist/Pustman.app "out/$name.dmg"
+          tar -C dist -cf out/Pustman.app.tar Pustman.app
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -125,14 +117,52 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: package-${{ matrix.target }}
+          name: ${{ runner.os == 'macOS' && 'unsigned-macos-arm64' || format('package-{0}', matrix.target) }}
+          path: out/*
+          if-no-files-found: error
+
+  sign-macos:
+    needs: build
+    # Runs whenever the macOS app was built, whatever happened to the other platforms.
+    if: ${{ !cancelled() }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: unsigned-macos-arm64
+          path: dist
+
+      - name: Sign, notarize and package
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          tar -C dist -xf dist/Pustman.app.tar
+          mkdir -p out
+          name="pustman-${TAG}-macos-arm64"
+          if [ -z "$MACOS_CERT_P12_BASE64" ] || [ -z "$APPLE_API_KEY_P8_BASE64" ]; then
+            # No Developer ID secrets: ship the ad-hoc signed app (Gatekeeper asks once).
+            echo "::notice::Developer ID secrets not set; shipping the ad-hoc signed zip"
+            ditto -c -k --keepParent dist/Pustman.app "out/$name.zip"
+          else
+            scripts/sign-notarize-macos.sh dist/Pustman.app "out/$name.dmg"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-macos-arm64
           path: out/*
           if-no-files-found: error
 
   publish:
-    needs: package
-    # Publish whatever platforms packaged: one failing build (Windows is experimental)
-    # must not hold back the others. The step fails if nothing was packaged at all.
+    needs: [build, sign-macos]
+    # Publish whatever platforms finished; the step fails only if nothing was produced.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     env:
@@ -143,6 +173,7 @@ jobs:
       - uses: actions/download-artifact@v4
         continue-on-error: true
         with:
+          pattern: package-*
           path: out
           merge-multiple: true
 
