@@ -22,6 +22,11 @@ fn open(cx: &mut TestAppContext) -> (Entity<RequestEditor>, FakeTransport, &mut 
         text_input::init(cx);
         crate::init(cx);
         set_http_client(client, cx);
+        let problems = pustman_actions::load_default_keymap(cx);
+        assert!(
+            problems.is_empty(),
+            "the default keymap binds: {problems:?}"
+        );
     });
     let mut request = crate::new_request::fresh_request();
     request.url = String::from("https://example.test/menu");
@@ -86,5 +91,42 @@ fn test_the_send_menu_send_entry_dispatches_send(cx: &mut TestAppContext) {
     assert!(
         cx.debug_bounds(SEND_MENU_SELECTOR).is_none(),
         "the chevron steps aside while the request is in flight"
+    );
+}
+
+#[gpui::test]
+fn test_a_send_from_the_keyboard_closes_the_open_send_menu(cx: &mut TestAppContext) {
+    let (editor, _transport, cx) = open(cx);
+    cx.update(|window, _cx| window.activate_window());
+    open_menu(cx);
+    assert!(
+        cx.debug_bounds("Copy as cURL").is_some(),
+        "the menu is open"
+    );
+
+    let os = cx.read(|cx| cx.platform_info().os);
+    let keys = if os == gpui::OperatingSystem::Mac {
+        "cmd-enter"
+    } else {
+        "ctrl-enter"
+    };
+    cx.simulate_keystrokes(keys);
+    cx.run_until_parked();
+    assert!(
+        editor.read_with(cx, |editor, _| editor.is_sending()),
+        "the keystroke sent"
+    );
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(61));
+    cx.run_until_parked();
+    draw_window(cx);
+
+    assert!(
+        !editor.read_with(cx, |editor, _| editor.is_sending()),
+        "the response landed"
+    );
+    assert!(
+        cx.debug_bounds("Copy as cURL").is_none(),
+        "the menu closed when the send started; it does not come back with the chevron"
     );
 }

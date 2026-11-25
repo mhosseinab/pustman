@@ -182,9 +182,13 @@ impl RequestEditor {
     pub(super) fn handle_send(
         &mut self,
         _: &request::Send,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The send closes the split Send's menu; the keyboard must not go with it.
+        if self.send_menu.is_some() {
+            window.focus(&self.focus_handle, cx);
+        }
         self.start_send(cx);
     }
 
@@ -227,6 +231,8 @@ impl RequestEditor {
     /// bar only ever holds names really unresolved against the editor's scopes, and
     /// those names stay literal and go out as they are (REQ-VAR-07).
     fn begin_send(&mut self, cx: &mut Context<Self>, send_unresolved: bool) {
+        // A send closes the split Send's menu, however it was started (`send_menu`).
+        self.send_menu = None;
         let Some(client) = cx
             .try_global::<RequestClient>()
             .map(|client| client.0.clone())
