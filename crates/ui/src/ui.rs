@@ -41,6 +41,7 @@ pub use components::button::{
 };
 pub use components::context_menu::{ContextMenu, floating_menu};
 pub use components::divider::{Divider, DividerColor};
+pub use components::form_field::FormField;
 pub use components::key_binding::{KeyBinding, keystroke_label};
 pub use components::label::{Headline, Label, LabelSize};
 pub use components::list::VirtualList;
