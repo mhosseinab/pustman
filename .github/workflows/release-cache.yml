@@ -9,9 +9,11 @@ on:
     branches: [pustman-v1/main]
   workflow_dispatch:
 
+# Never cancel a running warm-up: a cancelled build saves nothing, and with pushes minutes
+# apart it would never finish. GitHub keeps at most one run waiting behind it (the newest).
 concurrency:
-  group: release-cache
-  cancel-in-progress: true
+  group: release-cache-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   warm:
