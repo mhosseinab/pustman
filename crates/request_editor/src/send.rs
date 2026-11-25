@@ -477,7 +477,13 @@ impl RequestEditor {
             .items_center()
             .children(self.render_sending(cx))
             .children(self.render_tls_badge(cx))
-            .child(self.render_send_button(cx))
+            // The split Send: the button and its chevron menu, joined (`send_menu`).
+            .child(
+                h_flex()
+                    .gap(DynamicSpacing::Base01.rems(cx))
+                    .child(self.render_send_button(cx))
+                    .children(self.render_send_menu(cx)),
+            )
             .into_any_element()
     }
 

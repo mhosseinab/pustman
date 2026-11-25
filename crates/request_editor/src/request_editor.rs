@@ -25,6 +25,7 @@ pub mod request_tabs;
 mod response_split;
 pub mod save;
 pub mod send;
+pub mod send_menu;
 mod settings_tab;
 mod unresolved_warning;
 pub mod url_bar;
@@ -129,6 +130,8 @@ pub struct RequestEditor {
     /// The send task (S26b): replacing it cancels the request in flight, because
     /// dropping a `Task` cancels it.
     pending_send: Option<Task<()>>,
+    /// The split Send's chevron menu while it is open (`send_menu`).
+    send_menu: Option<send_menu::SendMenu>,
     /// Why the last send failed, shown under the URL bar.
     inline_error: Option<InlineError>,
     /// The TLS failure whose inline display carries the "Disable verification for this
@@ -293,6 +296,7 @@ impl RequestEditor {
             settings_tab,
             pre_import_request: None,
             pending_send: None,
+            send_menu: None,
             inline_error: None,
             tls_offer_error: None,
             unresolved_warning: None,
