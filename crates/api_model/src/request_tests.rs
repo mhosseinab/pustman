@@ -40,19 +40,19 @@ fn request_roundtrip_preserves_unknown_fields() {
 fn unknown_request_type_roundtrips() {
     // A request kind v1 does not model (plan D7 grows the enum one milestone at a time).
     let input = r#"{
-        "type": "websocket",
+        "type": "mqtt",
         "id": "01BX5ZZKBKACTAV9WEVGEMMVRZ",
         "name": "Chat",
-        "url": "wss://example.com/ws",
-        "subprotocols": ["graphql-ws"]
+        "url": "mqtt://broker.example.com:1883",
+        "topic": "chat/room-1"
     }"#;
 
     let request: Request = serde_json::from_slice(input.as_bytes()).unwrap();
     let Request::Unsupported(raw) = &request else {
         panic!("an unknown request type must be kept raw");
     };
-    assert_eq!(raw["type"], "websocket");
-    assert_eq!(raw["subprotocols"][0], "graphql-ws");
+    assert_eq!(raw["type"], "mqtt");
+    assert_eq!(raw["topic"], "chat/room-1");
 
     let output = serde_json::to_value(&request).unwrap();
     let original: serde_json::Value = serde_json::from_slice(input.as_bytes()).unwrap();

@@ -391,6 +391,16 @@ fn write_child(
             let mut body = request.clone();
             let id = match &mut body {
                 Request::Http(http) => http.id,
+                // A file's identity is never trusted for these kinds either: a fresh id,
+                // exactly like Unsupported.
+                typed @ (Request::GraphQl(_)
+                | Request::WebSocket(_)
+                | Request::SocketIo(_)
+                | Request::Grpc(_)) => {
+                    let id = ItemId::new();
+                    typed.set_id(id);
+                    id
+                }
                 Request::Unsupported(raw) => {
                     // Identity is ours to mint, never the file's (fix 1): a preserved
                     // request is written under a fresh id whatever its raw `id` said, so
@@ -682,6 +692,12 @@ fn harden_request(request: &mut Request, problems: &mut Vec<ImportProblem>) {
                     ),
                 });
             }
+        }
+        // Not hardened field by field yet: made inert exactly like Unsupported. A value
+        // that does not serialize becomes `null`, which the writer refuses with a reason.
+        Request::GraphQl(_) | Request::WebSocket(_) | Request::SocketIo(_) | Request::Grpc(_) => {
+            *request = Request::Unsupported(serde_json::to_value(&*request).unwrap_or(Value::Null));
+            harden_request(request, problems);
         }
         Request::Unsupported(raw) => {
             let name = raw.get("name").and_then(Value::as_str).map(str::to_owned);

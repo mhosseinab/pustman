@@ -1289,12 +1289,7 @@ fn reidentify(body: &mut ItemBody, id: ItemId) {
         ItemBody::Collection(collection) => collection.id = id,
         ItemBody::Folder(folder) => folder.id = id,
         ItemBody::Environment(environment) => environment.id = id,
-        ItemBody::Request(Request::Http(request)) => request.id = id,
-        ItemBody::Request(Request::Unsupported(raw)) => {
-            if let Some(object) = raw.as_object_mut() {
-                object.insert(String::from("id"), serde_json::Value::from(id.to_string()));
-            }
-        }
+        ItemBody::Request(request) => request.set_id(id),
     }
 }
 

@@ -346,8 +346,8 @@ fn import_children(
 
 fn request_id(request: &Request) -> ItemId {
     match request {
-        Request::Http(http) => http.id,
         Request::Unsupported(_) => ItemId::new(),
+        typed => typed.id().unwrap_or_else(ItemId::new),
     }
 }
 
@@ -879,7 +879,14 @@ fn export_children(children: &[crate::Child], out: &mut Vec<Value>, report: &mut
                 }
                 out.push(Value::Object(object));
             }
-            crate::Child::Request(Request::Unsupported(_)) => {
+            // v2.1 has no shape for these kinds either: skipped exactly like Unsupported.
+            crate::Child::Request(
+                Request::GraphQl(_)
+                | Request::WebSocket(_)
+                | Request::SocketIo(_)
+                | Request::Grpc(_)
+                | Request::Unsupported(_),
+            ) => {
                 report.warnings.push(
                     "a non-HTTP request kind was skipped: v2.1 has no shape for it".to_owned(),
                 );
