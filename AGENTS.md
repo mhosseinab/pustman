@@ -237,6 +237,11 @@ These are the mistakes that actually bite in GPUI codebases. Zed enforces most w
 Docs ship only with the code they describe: a doc edit lands in the same commit as the change it
 describes (e.g. `docs/ARCHITECTURE.md` gains the crate it maps). `docs/pustman-v1-implementation-steps.md`
 and existing test files are read-only for workers — enforced by `.claude/hooks/protect-steps-and-tests.sh`.
+The only exception is a human authorization: the driver records it as an `open` row in
+`docs/progress/pustman-v1/test-edit-authorizations.tsv` on `pustman-v1/main` (quoting the human), the
+hook then allows that one file, and the row becomes `used` with the commit once the edit lands.
+`scripts/promote-check.sh` item 4 fails any test file changed in the release window without a row.
+Never edit an existing test past the hook any other way.
 
 ## Security (it's an API client — it handles secrets)
 - Never log request/response bodies, `Authorization` headers, cookies, or variable values marked secret.

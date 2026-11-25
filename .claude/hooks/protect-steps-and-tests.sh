@@ -37,7 +37,14 @@ case "$file_path" in
 esac
 
 if git -C "$repo_root" cat-file -e "pustman-v1/main:$rel" 2>/dev/null; then
-  echo "protect-steps-and-tests: $rel already exists on pustman-v1/main; existing test files are read-only (add a NEW test file instead)" >&2
+  # A human-authorized edit: an `open` row for this path in the ledger ON pustman-v1/main
+  # (never the worktree's copy, so a worker cannot authorize itself by editing the file).
+  ledger="docs/progress/pustman-v1/test-edit-authorizations.tsv"
+  if git -C "$repo_root" show "pustman-v1/main:$ledger" 2>/dev/null \
+    | awk -F'\t' -v path="$rel" '$1 == path && $2 == "open" { found = 1 } END { exit !found }'; then
+    exit 0
+  fi
+  echo "protect-steps-and-tests: $rel already exists on pustman-v1/main; existing test files are read-only (add a NEW test file instead, or ask the human to authorize this edit: the driver then records an \`open\` row in $ledger on pustman-v1/main)" >&2
   exit 2
 fi
 exit 0

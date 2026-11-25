@@ -1,0 +1,19 @@
+# Human authorizations to edit EXISTING test files (AGENTS.md › Test placement).
+# One row per authorized file. Read from `pustman-v1/main` by:
+#   - .claude/hooks/protect-steps-and-tests.sh: an `open` row lets a worker edit that file;
+#   - scripts/promote-check.sh item 4: a modified test file passes only if it has a row.
+# Only the driver adds rows, on pustman-v1/main, after the human authorizes in chat, quoting
+# them. When the edit lands, flip the row to `used` and fill in the commit.
+# Columns (tab-separated): path	status(open|used)	commit	date	authorization
+path	status	commit	date	authorization
+crates/http_engine/src/reqwest_transport_tests.rs	used	a193c5c	2026-11-23	#269 (release 3), human-authorized
+crates/response_viewer/src/cookie_dialog_clear_domain_tests.rs	used	ade193e	2026-11-23	R3 (release 3), human-authorized
+crates/pustman/src/status_items_tests.rs	used	442e0e6	2026-11-24	S44w: left status items 1→2 ("Edit the test")
+crates/pustman_actions/src/pustman_actions_tests.rs	used	787963a	2026-11-24	S43c: one EXPECTED_ACTIONS line for environment::EditSecret ("Authorize the edit")
+crates/workspace/src/workspace_open_tests.rs	used	f71214b	2026-11-25	S48u1: create_workspace_writes_pustman_json drives the form ("Authorize the edit")
+crates/response_viewer/src/response_area_tests.rs	used	5c91e91	2026-11-25	macOS CI: Send hint compared with the platform's own binding ("Authorize the edit")
+crates/ui/src/components/key_binding_keymap_tests.rs	used	7b9ad16	2026-11-25	macOS CI: key label from the platform ("Authorize both")
+crates/workspace/src/recent_non_utf8_tests.rs	used	7b9ad16	2026-11-25	macOS CI: non-UTF-8 tests Linux-only ("Authorize both"; "Apply it despite hook")
+crates/workspace_store/tests/watcher.rs	used	d15413a	2026-11-25	#336: settle before acting, tolerate Rescan ("authorize the watcher test edit and fix it forever")
+crates/workspace_store/tests/watcher_symlinked_root.rs	used	d15413a	2026-11-25	#336: same ("authorize the watcher test edit and fix it forever")
+crates/workspace/src/dock_header_tests.rs	open		2026-11-25	#333: drop the header switches that duplicate the icon rail ("do them all"); not used yet

@@ -40,9 +40,19 @@ eval "$ENV_VALIDATE" >/tmp/pc_env.log 2>&1 && item PASS "env validator green on 
 TW="$(eval "$TRIPWIRE_CMD" 2>/dev/null | tr -d '[:space:]')"
 [ -n "$TW" ] && [ "$TW" -le "$TRIPWIRE_BASELINE" ] && item PASS "tripwire $TW ≤ baseline $TRIPWIRE_BASELINE" || item FAIL "tripwire $TW > baseline $TRIPWIRE_BASELINE"
 
-# 4. no existing test modified/deleted in window (added is fine)
-MOD="$(git diff --name-status "$RANGE" -- $TEST_PATHS 2>/dev/null | grep -Ev '^A' || true)"
-[ -z "$MOD" ] && item PASS "no existing test modified in window" || item FAIL "modified/deleted tests: $(echo "$MOD" | awk '{print $2}' | tr '\n' ' ')"
+# 4. no existing test modified/deleted in window (added is fine) unless the human authorized
+#    it. Checked commit by commit: the net diff misses a test file that was added and then
+#    edited inside the window. An authorization is a row in the ledger at the candidate.
+AUTH_LEDGER="docs/progress/${SLUG}/test-edit-authorizations.tsv"
+MOD="$(for c in $(git rev-list --no-merges "$RANGE" 2>/dev/null); do
+  git diff-tree --no-commit-id -r --name-status "$c" -- $TEST_PATHS 2>/dev/null | grep -Ev '^A' | awk '{print $NF}'
+done | sort -u)"
+AUTHORIZED="$(git show "$SHA:$AUTH_LEDGER" 2>/dev/null | awk -F'\t' '!/^#/ && $1 != "path" && NF >= 2 {print $1}' | sort -u)"
+UNAUTHORIZED="$(comm -23 <(printf '%s\n' "$MOD" | sed '/^$/d') <(printf '%s\n' "$AUTHORIZED" | sed '/^$/d'))"
+WAIVED="$(comm -12 <(printf '%s\n' "$MOD" | sed '/^$/d') <(printf '%s\n' "$AUTHORIZED" | sed '/^$/d') | tr '\n' ' ')"
+if [ -n "$UNAUTHORIZED" ]; then item FAIL "modified/deleted tests without a human authorization in $AUTH_LEDGER: $(echo "$UNAUTHORIZED" | tr '\n' ' ')"
+elif [ -n "$WAIVED" ]; then item PASS "existing tests modified in window, all human-authorized ($AUTH_LEDGER): $WAIVED"
+else item PASS "no existing test modified in window"; fi
 
 # 5. every migration in window has a down
 if [ -n "$MIGRATIONS_DIR" ]; then
