@@ -222,6 +222,8 @@ pub struct Button {
     tab_index: Option<isize>,
     on_click: Option<ClickHandler>,
     cursor_style: CursorStyle,
+    role: Role,
+    expanded: Option<bool>,
 }
 
 impl std::fmt::Debug for Button {
@@ -258,6 +260,8 @@ impl Button {
             tab_index: None,
             on_click: None,
             cursor_style: CursorStyle::PointingHand,
+            role: Role::Button,
+            expanded: None,
         }
     }
 
@@ -272,6 +276,19 @@ impl Button {
     /// keeps its disabled text instead.
     pub fn label_color(mut self, color: Color) -> Self {
         self.label_color = Some(color);
+        self
+    }
+
+    /// What assistive tech is told the button is — [`Role::Button`] unless a composite
+    /// control says otherwise (a menu bar's titles are [`Role::MenuItem`]s).
+    pub fn role(mut self, role: Role) -> Self {
+        self.role = role;
+        self
+    }
+
+    /// Whether the popup this button opens is showing, for assistive tech.
+    pub fn aria_expanded(mut self, expanded: bool) -> Self {
+        self.expanded = Some(expanded);
         self
     }
 
@@ -413,8 +430,9 @@ impl RenderOnce for Button {
             .id(self.id)
             .font_ui(cx)
             .key_context(ACTIVATION_CONTEXT)
-            .role(Role::Button)
+            .role(self.role)
             .aria_label(label)
+            .when_some(self.expanded, |this, expanded| this.aria_expanded(expanded))
             .items_center()
             .flex_shrink_0()
             .px(self.size.padding_x().rems(cx))

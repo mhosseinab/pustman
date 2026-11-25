@@ -17,15 +17,15 @@ use std::rc::Rc;
 use gpui::{
     Action, Anchor, AnyElement, App, Bounds, ClickEvent, Context, CursorStyle, Decorations, Entity,
     EntityId, FocusHandle, Focusable, Global, HitboxBehavior, IntoElement,
-    KeyBindingContextPredicate, Menu, MouseButton, MouseDownEvent, OwnedMenu, OwnedMenuItem,
-    ParentElement, Pixels, Point, Render, ResizeEdge, Role, Size, Subscription, Tiling, WeakEntity,
-    WeakFocusHandle, Window, anchored, canvas, deferred, point, px,
+    KeyBindingContextPredicate, KeyDownEvent, Menu, MouseButton, MouseDownEvent, OwnedMenu,
+    OwnedMenuItem, ParentElement, Pixels, Point, Render, ResizeEdge, Role, Size, Subscription,
+    Tiling, WeakEntity, WeakFocusHandle, Window, anchored, canvas, deferred, point, px,
 };
 use pustman_actions::quick_open;
 use pustman_actions::workspace::{CreateWorkspace, OpenWorkspace};
 use ui::components::context_menu::ContextMenuEvent;
 use ui::prelude::*;
-use ui::{Icon, IconName, IconSize, keymap_binding_text, px_to_rems};
+use ui::{Cancel, Icon, IconName, IconSize, keymap_binding_text, px_to_rems};
 use workspace_store::ItemBody;
 
 use crate::CloseWindow;
@@ -234,7 +234,13 @@ struct OpenPopover {
     /// The element that had focus when the first popover opened. Actions run from there,
     /// so a menu entry acts exactly like its key binding would have.
     restore_focus: FocusHandle,
+    /// For a submenu (File › Open recent), the top-level menu it replaced in place: Left
+    /// or Escape goes back to it (#332).
+    parent: Option<SharedString>,
     _subscription: Subscription,
+    /// Closes the popover when the keyboard leaves it for anywhere but another popover
+    /// of this bar (#332).
+    _focus_out: Subscription,
 }
 
 // The title-bar actions: the arrows walk from an open menu to its neighbours.
@@ -583,7 +589,48 @@ impl TitleBar {
             .as_ref()
             .map(|open| open.anchor.clone())
             .unwrap_or(PopoverAnchor::Switcher);
+        let parent = match &anchor {
+            PopoverAnchor::Menu(name) => Some(name.clone()),
+            PopoverAnchor::Switcher => None,
+        };
         self.show(anchor, items, window, cx);
+        if let Some(open) = self.open.as_mut() {
+            open.parent = parent;
+        }
+    }
+
+    /// Back from a submenu to the menu it replaced (Left or Escape in File › Open
+    /// recent). `false` when the open popover is not a submenu.
+    fn back_to_parent(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(parent) = self.open.as_ref().and_then(|open| open.parent.clone()) else {
+            return false;
+        };
+        self.open_menu(parent, window, cx);
+        true
+    }
+
+    /// Escape: a submenu goes back to its menu; anywhere else the menu's own Escape
+    /// closes it.
+    fn cancel_in_menu(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
+        if self.back_to_parent(window, cx) {
+            cx.stop_propagation();
+        }
+    }
+
+    /// Tab while a popover is open closes it: the keyboard goes back to where the user
+    /// was instead of wandering off behind a menu that stays on screen.
+    fn close_on_tab(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let modifiers = event.keystroke.modifiers;
+        if event.keystroke.key != "tab"
+            || modifiers.control
+            || modifiers.alt
+            || modifiers.platform
+            || self.open.is_none()
+        {
+            return;
+        }
+        self.close(window, cx);
+        cx.stop_propagation();
     }
 
     /// Build a menu of `items` under `anchor`, focus it and show it.
@@ -664,13 +711,28 @@ impl TitleBar {
         cx: &mut Context<Self>,
     ) {
         let subscription = cx.subscribe_in(&menu, window, Self::on_menu_event);
+        let menu_focus = menu.read(cx).focus_handle(cx);
+        let focus_out = cx.on_focus_out(&menu_focus, window, {
+            let menu = menu.downgrade();
+            move |bar, _event, window, cx| {
+                let still_open = bar
+                    .open
+                    .as_ref()
+                    .is_some_and(|open| open.menu.downgrade() == menu);
+                if still_open {
+                    bar.close(window, cx);
+                }
+            }
+        });
         menu.update(cx, |menu, cx| menu.focus(window, cx));
         self.closed_by_press = None;
         self.open = Some(OpenPopover {
             anchor,
             menu,
             restore_focus,
+            parent: None,
             _subscription: subscription,
+            _focus_out: focus_out,
         });
         cx.notify();
     }
@@ -786,6 +848,10 @@ impl TitleBar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // In a submenu, Left is "back", the way a desktop menu leaves a cascade.
+        if self.back_to_parent(window, cx) {
+            return;
+        }
         self.step_menu(false, window, cx);
     }
 
@@ -854,6 +920,8 @@ impl TitleBar {
             }))
             .child(
                 Button::new(SharedString::from(format!("app-menu-button-{name}")), name.clone())
+                    .role(Role::MenuItem)
+                    .aria_expanded(is_open)
                     .size(ButtonSize::Medium)
                     .style(if is_open {
                         ButtonStyle::Tinted(TintColor::Accent)
@@ -885,6 +953,7 @@ impl TitleBar {
             .ml(DynamicSpacing::Base06.rems(cx))
             .child(
                 Button::new("workspace-switcher-button", switcher_label(&name))
+                    .aria_expanded(is_open)
                     .size(ButtonSize::Medium)
                     .style(if is_open {
                         ButtonStyle::Tinted(TintColor::Accent)
@@ -1059,6 +1128,8 @@ impl Render for TitleBar {
             .gap(DynamicSpacing::Base02.rems(cx))
             .on_action(cx.listener(Self::select_next_menu))
             .on_action(cx.listener(Self::select_previous_menu))
+            .capture_action(cx.listener(Self::cancel_in_menu))
+            .capture_key_down(cx.listener(Self::close_on_tab))
             .child(
                 // The app's mark: identity only, it runs nothing.
                 div()
@@ -1152,3 +1223,7 @@ mod focus_tests;
 #[cfg(test)]
 #[path = "title_bar_installed_menus_tests.rs"]
 mod installed_menus_tests;
+
+#[cfg(test)]
+#[path = "title_bar_submenu_tests.rs"]
+mod submenu_tests;
