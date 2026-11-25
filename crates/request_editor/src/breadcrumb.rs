@@ -107,14 +107,14 @@ impl RequestEditor {
         opener: &Entity<WorkspaceOpen>,
         cx: &mut Context<Self>,
     ) {
-        self._location_subscription = Some(cx.subscribe(
-            opener,
-            |editor, opener, event, cx| match event {
-                WorkspaceOpenEvent::Opened { .. } | WorkspaceOpenEvent::SnapshotChanged => {
-                    editor.refresh_location(&opener, cx)
-                }
-            },
-        ));
+        self._location_subscription =
+            Some(
+                cx.subscribe(opener, |editor, opener, event, cx| match event {
+                    WorkspaceOpenEvent::Opened { .. } | WorkspaceOpenEvent::SnapshotChanged => {
+                        editor.refresh_location(&opener, cx)
+                    }
+                }),
+            );
         self.refresh_location(opener, cx);
     }
 

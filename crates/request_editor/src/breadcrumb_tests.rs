@@ -25,7 +25,14 @@ fn container(kind: &str, name: &str, path: &str) -> (ItemId, Item) {
         .and_then(|own| own.parent())
         .map(PathBuf::from)
         .unwrap_or_default();
-    (id, Item { body, dir, path: Some(path) })
+    (
+        id,
+        Item {
+            body,
+            dir,
+            path: Some(path),
+        },
+    )
 }
 
 #[test]
@@ -35,8 +42,16 @@ fn test_a_saved_request_is_located_under_its_collection_then_its_folder() {
     let request_id = request.id;
     let mut items = BTreeMap::new();
     for (id, item) in [
-        container("folder", "Orders", "collections/commerce-api/orders/folder.json"),
-        container("collection", "Commerce API", "collections/commerce-api/collection.json"),
+        container(
+            "folder",
+            "Orders",
+            "collections/commerce-api/orders/folder.json",
+        ),
+        container(
+            "collection",
+            "Commerce API",
+            "collections/commerce-api/collection.json",
+        ),
         container("collection", "Other", "collections/other/collection.json"),
     ] {
         items.insert(id, item);

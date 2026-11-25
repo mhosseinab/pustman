@@ -190,12 +190,9 @@ impl RequestEditor {
         cx: &mut Context<Self>,
     ) {
         match fix {
-            VariableFix::EditSecret(name) => window.dispatch_action(
-                Box::new(EditSecret {
-                    name: name.clone(),
-                }),
-                cx,
-            ),
+            VariableFix::EditSecret(name) => {
+                window.dispatch_action(Box::new(EditSecret { name: name.clone() }), cx)
+            }
             VariableFix::OpenVariablesEditor => {
                 match cx.build_action(OPEN_VARIABLES_EDITOR, None) {
                     Ok(action) => window.dispatch_action(action, cx),
@@ -249,7 +246,11 @@ impl RequestEditor {
             .child(
                 Label::new(SharedString::from(format!("{{{{{}}}}}", entry.name)))
                     .size(LabelSize::Small)
-                    .color(if resolved { Color::Success } else { Color::Error }),
+                    .color(if resolved {
+                        Color::Success
+                    } else {
+                        Color::Error
+                    }),
             );
         let row = h_flex()
             .id(SharedString::from(format!("variable-line-{}", entry.name)))
@@ -315,9 +316,11 @@ impl RequestEditor {
                                     "Open the variables editor to define it"
                                 }
                             }))
-                            .on_click(cx.listener(move |editor, _event, window, cx| {
-                                editor.apply_variable_fix(&fix, window, cx)
-                            })),
+                            .on_click(cx.listener(
+                                move |editor, _event, window, cx| {
+                                    editor.apply_variable_fix(&fix, window, cx)
+                                },
+                            )),
                         ),
                 )
                 .into_any_element()

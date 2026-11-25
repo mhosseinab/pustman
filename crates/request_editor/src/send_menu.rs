@@ -34,9 +34,12 @@ impl RequestEditor {
         let curl_target = self.focus_handle.clone();
         let menu = cx.new(|cx| {
             ContextMenu::new(cx)
-                .entry(SharedString::new_static("Send"), move |_event, window, cx| {
-                    send_target.dispatch_action(&request::Send, window, cx)
-                })
+                .entry(
+                    SharedString::new_static("Send"),
+                    move |_event, window, cx| {
+                        send_target.dispatch_action(&request::Send, window, cx)
+                    },
+                )
                 .entry(
                     SharedString::new_static("Copy as cURL"),
                     move |_event, window, cx| {
@@ -89,9 +92,9 @@ impl RequestEditor {
                     )
                     .style(ButtonStyle::Filled)
                     .size(ButtonSize::Large)
-                    .on_click(cx.listener(|editor, _event, window, cx| {
-                        editor.open_send_menu(window, cx)
-                    })),
+                    .on_click(
+                        cx.listener(|editor, _event, window, cx| editor.open_send_menu(window, cx)),
+                    ),
                 )
                 .children(floating_menu(&open, px_to_rems(SEND_ROW_HEIGHT_PX), cx))
                 .into_any_element(),

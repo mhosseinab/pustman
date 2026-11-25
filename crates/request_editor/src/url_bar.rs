@@ -442,24 +442,22 @@ impl Render for UrlBar {
             .on_action(cx.listener(Self::cancel))
             .child(
                 // One bordered control: method, separator, URL (mockup section 1).
-                h_flex()
-                    .child(self.render_method_control(cx))
-                    .child(
-                        div()
-                            .debug_selector(|| URL_FIELD_SELECTOR.to_string())
-                            .flex()
-                            .flex_col()
-                            .justify_center()
-                            .flex_1()
-                            .min_w_0()
-                            .h(px_to_rems(URL_ROW_HEIGHT_PX))
-                            .border_1()
-                            .border_color(cx.theme().colors().border)
-                            .rounded_r_sm()
-                            .bg(cx.theme().colors().editor_background)
-                            .px(DynamicSpacing::Base04.rems(cx))
-                            .child(self.hover.clone()),
-                    ), // S26b's Send button lands at the end of this row.
+                h_flex().child(self.render_method_control(cx)).child(
+                    div()
+                        .debug_selector(|| URL_FIELD_SELECTOR.to_string())
+                        .flex()
+                        .flex_col()
+                        .justify_center()
+                        .flex_1()
+                        .min_w_0()
+                        .h(px_to_rems(URL_ROW_HEIGHT_PX))
+                        .border_1()
+                        .border_color(cx.theme().colors().border)
+                        .rounded_r_sm()
+                        .bg(cx.theme().colors().editor_background)
+                        .px(DynamicSpacing::Base04.rems(cx))
+                        .child(self.hover.clone()),
+                ), // S26b's Send button lands at the end of this row.
             )
             .children(
                 self.custom_error

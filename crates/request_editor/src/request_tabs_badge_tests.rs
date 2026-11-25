@@ -22,7 +22,11 @@ fn request() -> HttpRequest {
     let mut request = crate::new_request::fresh_request();
     request.url = String::from("https://example.test/orders?status=open");
     request.params = vec![row("status", true)];
-    request.headers = vec![row("Accept", true), row("X-Trace", true), row("X-Off", false)];
+    request.headers = vec![
+        row("Accept", true),
+        row("X-Trace", true),
+        row("X-Off", false),
+    ];
     request.auth = Auth::Bearer {
         token: Some(String::from("{{token}}")),
         extra: Default::default(),
@@ -30,7 +34,10 @@ fn request() -> HttpRequest {
     request
 }
 
-fn open(cx: &mut TestAppContext, request: HttpRequest) -> (Entity<RequestEditor>, &mut VisualTestContext) {
+fn open(
+    cx: &mut TestAppContext,
+    request: HttpRequest,
+) -> (Entity<RequestEditor>, &mut VisualTestContext) {
     cx.update(init_test);
     cx.update(|cx| {
         text_input::init(cx);
@@ -47,7 +54,11 @@ fn test_tab_badges_count_enabled_rows_and_mark_set_auth(cx: &mut TestAppContext)
 
     let badges = editor.read_with(cx, |editor, _| editor.tab_badges());
     assert_eq!(badges.params, Some(1), "one enabled query param");
-    assert_eq!(badges.headers, Some(2), "the disabled header is not counted");
+    assert_eq!(
+        badges.headers,
+        Some(2),
+        "the disabled header is not counted"
+    );
     assert!(badges.auth_set, "a bearer token is set auth");
     assert!(!badges.body_set, "no body is not set");
     assert!(

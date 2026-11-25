@@ -295,9 +295,7 @@ impl RenderOnce for Tab {
             // a label a fixed width may truncate. Repeating a visible label covers the bar.
             .when(
                 self.dirty || self.width.is_some() || self.indicator.is_some(),
-                |this| {
-                    this.tooltip(Tooltip::text(tooltip_text.clone()).builder())
-                },
+                |this| this.tooltip(Tooltip::text(tooltip_text.clone()).builder()),
             )
             .map(|this| match (style, active) {
                 (TabStyle::Section, true) => this.text_color(colors.text),

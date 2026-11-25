@@ -12,9 +12,7 @@ use super::SEND_MENU_SELECTOR;
 use crate::RequestEditor;
 use crate::send::set_http_client;
 
-fn open(
-    cx: &mut TestAppContext,
-) -> (Entity<RequestEditor>, FakeTransport, &mut VisualTestContext) {
+fn open(cx: &mut TestAppContext) -> (Entity<RequestEditor>, FakeTransport, &mut VisualTestContext) {
     let transport = FakeTransport::new(cx.executor());
     // Answered late, so the request is still in flight when the test looks.
     transport.push_response(std::time::Duration::from_secs(60), 200, "ok");

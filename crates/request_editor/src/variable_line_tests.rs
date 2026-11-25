@@ -40,7 +40,11 @@ fn scopes() -> ScopeStack {
     scopes.push(
         ScopeKind::Environment,
         vec![
-            variable("base_url", Some("https://api.dev.example.test"), VariableKind::Default),
+            variable(
+                "base_url",
+                Some("https://api.dev.example.test"),
+                VariableKind::Default,
+            ),
             variable("api_key", None, VariableKind::Secret),
             variable("token", None, VariableKind::Secret),
         ],
@@ -103,16 +107,23 @@ fn test_the_variable_line_shows_source_and_masks_secrets(cx: &mut TestAppContext
         "a secret with a value shows only the mask"
     );
     let names: Vec<String> = editor.read_with(cx, |editor, _| {
-        editor.variable_line().iter().map(|entry| entry.name.clone()).collect()
+        editor
+            .variable_line()
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect()
     });
     assert_eq!(names, ["base_url", "page_size", "api_key", "token"]);
     let leaked = editor.read_with(cx, |editor, _| {
-        editor.variable_line().iter().any(|entry| match &entry.state {
-            EntryState::Resolved { shown, source } => {
-                shown.contains(FAKE_SECRET) || source.contains(FAKE_SECRET)
-            }
-            EntryState::Unresolved { message, .. } => message.contains(FAKE_SECRET),
-        })
+        editor
+            .variable_line()
+            .iter()
+            .any(|entry| match &entry.state {
+                EntryState::Resolved { shown, source } => {
+                    shown.contains(FAKE_SECRET) || source.contains(FAKE_SECRET)
+                }
+                EntryState::Unresolved { message, .. } => message.contains(FAKE_SECRET),
+            })
     });
     assert!(!leaked, "the secret's value never reaches the line");
 }
@@ -136,7 +147,11 @@ fn test_an_unresolved_secret_set_it_dispatches_edit_secret(cx: &mut TestAppConte
     cx.simulate_click(button.center(), Modifiers::none());
     cx.run_until_parked();
 
-    assert_eq!(*seen.borrow(), ["token"], "Set it… dispatched EditSecret for the name");
+    assert_eq!(
+        *seen.borrow(),
+        ["token"],
+        "Set it… dispatched EditSecret for the name"
+    );
 }
 
 #[gpui::test]

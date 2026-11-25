@@ -32,11 +32,17 @@ fn test_api_key_auth_shows_key_value_and_add_to_beside_the_help(cx: &mut TestApp
     let (tab, cx) = open(cx);
     choose(&tab, AuthType::ApiKey, cx);
 
-    for field in ["auth-control-key", "auth-control-value", "auth-control-location"] {
+    for field in [
+        "auth-control-key",
+        "auth-control-value",
+        "auth-control-location",
+    ] {
         assert!(shown(cx, field), "API key auth shows {field}");
     }
     assert!(!shown(cx, "auth-control-username"));
-    let help = cx.debug_bounds(AUTH_HELP_SELECTOR).expect("the help column is drawn");
+    let help = cx
+        .debug_bounds(AUTH_HELP_SELECTOR)
+        .expect("the help column is drawn");
     let key = cx.debug_bounds("auth-control-key").expect("the key field");
     assert!(
         help.right() <= key.left(),
@@ -61,7 +67,11 @@ fn test_each_auth_type_shows_only_its_own_fields(cx: &mut TestAppContext) {
     assert!(!shown(cx, "auth-control-username") && !shown(cx, "auth-control-key"));
 
     choose(&tab, AuthType::None, cx);
-    for field in ["auth-control-token", "auth-control-username", "auth-control-key"] {
+    for field in [
+        "auth-control-token",
+        "auth-control-username",
+        "auth-control-key",
+    ] {
         assert!(!shown(cx, field), "no auth has no {field}");
     }
     assert!(shown(cx, "auth-control-type"), "the type picker stays");

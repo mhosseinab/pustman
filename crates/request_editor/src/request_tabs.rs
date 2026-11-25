@@ -108,15 +108,17 @@ impl RequestEditor {
             .border_color(cx.theme().colors().border_variant)
             .child(div().flex_1().min_w_0().child(self.tab_bar.clone()))
             .child(
-                div().debug_selector(|| COOKIES_LINK_SELECTOR.to_string()).child(
-                    Button::new("request-cookies-link", SharedString::new_static("Cookies"))
-                        .style(ButtonStyle::Transparent)
-                        .label_color(Color::Accent)
-                        .tooltip(Tooltip::for_action("Open the cookie jar", &Manage))
-                        .on_click(|_event, window, cx| {
-                            window.dispatch_action(Box::new(Manage), cx)
-                        }),
-                ),
+                div()
+                    .debug_selector(|| COOKIES_LINK_SELECTOR.to_string())
+                    .child(
+                        Button::new("request-cookies-link", SharedString::new_static("Cookies"))
+                            .style(ButtonStyle::Transparent)
+                            .label_color(Color::Accent)
+                            .tooltip(Tooltip::for_action("Open the cookie jar", &Manage))
+                            .on_click(|_event, window, cx| {
+                                window.dispatch_action(Box::new(Manage), cx)
+                            }),
+                    ),
             )
             .into_any_element()
     }

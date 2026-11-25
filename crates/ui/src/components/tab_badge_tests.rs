@@ -22,7 +22,10 @@ fn test_a_tab_with_a_count_paints_the_count_beside_its_label(cx: &mut TestAppCon
     let count = cx
         .debug_bounds("headers-count")
         .expect("a counted tab paints its count");
-    assert!(tab.contains(&count.center()), "the count sits inside its tab");
+    assert!(
+        tab.contains(&count.center()),
+        "the count sits inside its tab"
+    );
     assert!(
         cx.debug_bounds("params-count").is_none(),
         "a tab without a count paints none"
