@@ -357,3 +357,4 @@ Append-only. One entry per dispatch, verdict, merge, gate, decision or promotion
 - 2026-11-25 — S50b merged (request files per kind; state-integrity PASS_WITH_ISSUES; VERIFY OK; LOW #343).
 - 2026-11-25 — S50d merged (New menu; UI fix 1 hint contrast; authorized EXPECTED_ACTIONS edit, ledger row now used; VERIFY OK; LOW #342).
 - 2026-11-25 — Dispatched S50c (GraphQL import/export, high-stakes) and S53 (GraphQL over the HTTP engine), http-engine-engineer. Disk 38 GB free.
+- 2026-11-25 — Driver decision: S53 Edits extended to crates/http_engine/src/history.rs (per-draft protocol field + draft_for_protocol; existing callers pass "http") and crates/console/src/feed.rs (record_outcome_as / record_error_as taking the protocol; existing functions call them with "http"). The step's goal names History and Console as protocol graphql, but both hard-code "http" in files outside its Edits.
