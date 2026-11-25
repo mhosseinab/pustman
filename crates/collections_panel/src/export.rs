@@ -270,7 +270,13 @@ fn assemble_children(
                     // The one skip REQ-IO-03 names: v2.1 has no request shape for a
                     // kind this build does not model. `export_collection` drops the
                     // same children; this walk names them.
-                    Request::Unsupported(_) => {
+                    // GraphQL, WebSocket, Socket.IO and gRPC have no v2.1 shape either:
+                    // skipped exactly like Unsupported.
+                    Request::GraphQl(_)
+                    | Request::WebSocket(_)
+                    | Request::SocketIo(_)
+                    | Request::Grpc(_)
+                    | Request::Unsupported(_) => {
                         skipped.push(format!("“{name}”: a request kind v2.1 cannot represent"));
                     }
                     // What `export_collection` drops below the child level: saved
@@ -329,7 +335,15 @@ fn scan_literal_children(children: &[Child], carrying: &mut Vec<String>) {
                 }
                 scan_literal_auth(&http.name, &http.auth, carrying);
             }
-            Child::Request(Request::Unsupported(_)) => {}
+            // Never exported (skipped above), so nothing of theirs reaches a file: like
+            // Unsupported.
+            Child::Request(
+                Request::GraphQl(_)
+                | Request::WebSocket(_)
+                | Request::SocketIo(_)
+                | Request::Grpc(_)
+                | Request::Unsupported(_),
+            ) => {}
         }
     }
 }

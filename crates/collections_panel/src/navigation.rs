@@ -282,7 +282,14 @@ impl CollectionsTree {
         // The request the row names, straight out of the snapshot the rows came from.
         let request = match self.snapshot.items.get(&id).map(|item| &item.body) {
             Some(ItemBody::Request(Request::Http(request))) => Some(request.clone()),
-            Some(ItemBody::Request(Request::Unsupported(_))) => None,
+            // No editor for these kinds yet: unopenable exactly like Unsupported.
+            Some(ItemBody::Request(
+                Request::GraphQl(_)
+                | Request::WebSocket(_)
+                | Request::SocketIo(_)
+                | Request::Grpc(_)
+                | Request::Unsupported(_),
+            )) => None,
             // The row's file is gone since the last flatten; its story belongs to the
             // watcher (S42a).
             _ => return,

@@ -92,12 +92,7 @@ impl Item {
             ItemBody::Collection(collection) => collection.name.clone(),
             ItemBody::Folder(folder) => folder.name.clone(),
             ItemBody::Environment(environment) => environment.name.clone(),
-            ItemBody::Request(Request::Http(request)) => request.name.clone(),
-            ItemBody::Request(Request::Unsupported(raw)) => raw
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
+            ItemBody::Request(request) => request.name().to_string(),
         }
     }
 
@@ -109,12 +104,7 @@ impl Item {
             ItemBody::Collection(collection) => collection.name = name.to_string(),
             ItemBody::Folder(folder) => folder.name = name.to_string(),
             ItemBody::Environment(environment) => environment.name = name.to_string(),
-            ItemBody::Request(Request::Http(request)) => request.name = name.to_string(),
-            ItemBody::Request(Request::Unsupported(raw)) => {
-                if let Some(object) = raw.as_object_mut() {
-                    object.insert("name".to_string(), serde_json::Value::from(name));
-                }
-            }
+            ItemBody::Request(request) => request.set_name(name),
         }
     }
 
@@ -293,11 +283,7 @@ fn body_id(body: &ItemBody) -> Option<ItemId> {
         ItemBody::Collection(collection) => Some(collection.id),
         ItemBody::Folder(folder) => Some(folder.id),
         ItemBody::Environment(environment) => Some(environment.id),
-        ItemBody::Request(Request::Http(request)) => Some(request.id),
-        ItemBody::Request(Request::Unsupported(raw)) => raw
-            .get("id")
-            .and_then(serde_json::Value::as_str)
-            .and_then(|id| id.parse().ok()),
+        ItemBody::Request(request) => request.id(),
     }
 }
 

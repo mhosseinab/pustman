@@ -737,6 +737,7 @@ fn scopes_of(snapshot: &WorkspaceSnapshot) -> Option<OpenScopes> {
                 ItemBody::Request(Request::Http(request)) => {
                     Some((*id, RequestTarget::of(request)))
                 }
+                // GraphQL, WebSocket, Socket.IO and gRPC are not sent yet: skipped like Unsupported.
                 _ => None,
             })
             .collect(),

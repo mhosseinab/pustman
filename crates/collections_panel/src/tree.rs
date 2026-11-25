@@ -1199,10 +1199,7 @@ pub(crate) fn container_order(body: &ItemBody) -> Option<&Vec<ItemId>> {
 fn request_kind(request: &Request) -> String {
     match request {
         Request::Http(request) => request.method.as_str().to_owned(),
-        Request::Unsupported(raw) => raw
-            .get("type")
-            .and_then(|kind| kind.as_str())
-            .unwrap_or("request")
-            .to_owned(),
+        // Badged by kind tag, exactly like Unsupported.
+        other => other.type_tag().to_owned(),
     }
 }

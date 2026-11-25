@@ -10,6 +10,7 @@ use std::str::FromStr;
 
 use crate::auth::Auth;
 use crate::example::Example;
+use crate::protocol_request::{GraphQlRequest, GrpcRequest, SocketIoRequest, WebSocketRequest};
 use crate::settings::RequestSettings;
 use crate::{ItemId, extra_to_map, map_to_extra, object_tag, serialize_tagged, take_field};
 
@@ -268,18 +269,102 @@ pub struct HttpRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Request {
     Http(HttpRequest),
-    /// A request kind we do not model yet (GraphQL, WebSocket, gRPC, MQTT, …), preserved
-    /// verbatim so an export never drops it.
+    GraphQl(GraphQlRequest),
+    WebSocket(WebSocketRequest),
+    SocketIo(SocketIoRequest),
+    Grpc(GrpcRequest),
+    /// A request kind we do not model yet (MQTT, …), or a known kind whose fields do not
+    /// decode, preserved verbatim so an export never drops it.
     Unsupported(serde_json::Value),
+}
+
+impl Request {
+    /// The `type` tag the request is saved under; for a kind we do not model, the tag its
+    /// raw JSON carries (`"request"` when it carries none).
+    pub fn type_tag(&self) -> &str {
+        match self {
+            Request::Http(_) => "http",
+            Request::GraphQl(_) => "graphql",
+            Request::WebSocket(_) => "websocket",
+            Request::SocketIo(_) => "socketio",
+            Request::Grpc(_) => "grpc",
+            Request::Unsupported(raw) => object_tag(raw, "type").unwrap_or("request"),
+        }
+    }
+
+    /// The request's identity; for a raw kind, the `id` its JSON carries when that parses.
+    pub fn id(&self) -> Option<ItemId> {
+        match self {
+            Request::Http(request) => Some(request.id),
+            Request::GraphQl(request) => Some(request.id),
+            Request::WebSocket(request) => Some(request.id),
+            Request::SocketIo(request) => Some(request.id),
+            Request::Grpc(request) => Some(request.id),
+            Request::Unsupported(raw) => raw
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|id| id.parse().ok()),
+        }
+    }
+
+    /// Give the request a new identity. A raw kind keeps its shape and swaps only the `id`
+    /// key; a raw value that is not an object has nowhere to hold one and is left as is.
+    pub fn set_id(&mut self, id: ItemId) {
+        match self {
+            Request::Http(request) => request.id = id,
+            Request::GraphQl(request) => request.id = id,
+            Request::WebSocket(request) => request.id = id,
+            Request::SocketIo(request) => request.id = id,
+            Request::Grpc(request) => request.id = id,
+            Request::Unsupported(raw) => {
+                if let Some(object) = raw.as_object_mut() {
+                    object.insert("id".to_string(), serde_json::Value::from(id.to_string()));
+                }
+            }
+        }
+    }
+
+    /// The display name; for a raw kind, its `name` string, or empty when it has none.
+    pub fn name(&self) -> &str {
+        match self {
+            Request::Http(request) => &request.name,
+            Request::GraphQl(request) => &request.name,
+            Request::WebSocket(request) => &request.name,
+            Request::SocketIo(request) => &request.name,
+            Request::Grpc(request) => &request.name,
+            Request::Unsupported(raw) => raw
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default(),
+        }
+    }
+
+    /// Rename the request. A raw kind that is not an object has nowhere to hold a name and
+    /// is left as is.
+    pub fn set_name(&mut self, name: &str) {
+        match self {
+            Request::Http(request) => request.name = name.to_string(),
+            Request::GraphQl(request) => request.name = name.to_string(),
+            Request::WebSocket(request) => request.name = name.to_string(),
+            Request::SocketIo(request) => request.name = name.to_string(),
+            Request::Grpc(request) => request.name = name.to_string(),
+            Request::Unsupported(raw) => {
+                if let Some(object) = raw.as_object_mut() {
+                    object.insert("name".to_string(), serde_json::Value::from(name));
+                }
+            }
+        }
+    }
 }
 
 impl Serialize for Request {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            Request::Http(request) => {
-                let fields = to_field_map::<S>(request)?;
-                serialize_tagged(serializer, "type", "http", fields)
-            }
+            Request::Http(request) => serialize_kind(serializer, "http", request),
+            Request::GraphQl(request) => serialize_kind(serializer, "graphql", request),
+            Request::WebSocket(request) => serialize_kind(serializer, "websocket", request),
+            Request::SocketIo(request) => serialize_kind(serializer, "socketio", request),
+            Request::Grpc(request) => serialize_kind(serializer, "grpc", request),
             Request::Unsupported(raw) => raw.serialize(serializer),
         }
     }
@@ -291,31 +376,37 @@ impl<'de> Deserialize<'de> for Request {
     }
 }
 
-/// Decode one request object. Only `type: http` with decodable fields becomes typed; every
+/// Decode one request object. A known `type` with decodable fields becomes typed; every
 /// other shape is kept raw so export preserves it.
 fn parse_request(value: serde_json::Value) -> Request {
-    if object_tag(&value, "type") != Some("http") {
-        return Request::Unsupported(value);
-    }
-    let Some(object) = value.as_object() else {
-        return Request::Unsupported(value);
+    let parsed = match object_tag(&value, "type") {
+        Some("http") => decode_kind(&value).map(Request::Http),
+        Some("graphql") => decode_kind(&value).map(Request::GraphQl),
+        Some("websocket") => decode_kind(&value).map(Request::WebSocket),
+        Some("socketio") => decode_kind(&value).map(Request::SocketIo),
+        Some("grpc") => decode_kind(&value).map(Request::Grpc),
+        _ => None,
     };
-    let mut fields = object.clone();
-    fields.remove("type");
-    match serde_json::from_value::<HttpRequest>(serde_json::Value::Object(fields)) {
-        Ok(request) => Request::Http(request),
-        Err(_) => Request::Unsupported(value),
-    }
+    parsed.unwrap_or(Request::Unsupported(value))
 }
 
-/// Flatten an HTTP request into the JSON object its `type` tag is added to.
-fn to_field_map<S: Serializer>(
-    request: &HttpRequest,
-) -> Result<serde_json::Map<String, serde_json::Value>, S::Error> {
+/// Decode a tagged request object's fields (everything but `type`) as one request kind.
+fn decode_kind<T: serde::de::DeserializeOwned>(value: &serde_json::Value) -> Option<T> {
+    let mut fields = value.as_object()?.clone();
+    fields.remove("type");
+    serde_json::from_value(serde_json::Value::Object(fields)).ok()
+}
+
+/// Serialize one request kind as a JSON object with its `type` tag first.
+fn serialize_kind<S: Serializer, T: Serialize>(
+    serializer: S,
+    tag: &str,
+    request: &T,
+) -> Result<S::Ok, S::Error> {
     match serde_json::to_value(request) {
-        Ok(serde_json::Value::Object(fields)) => Ok(fields),
+        Ok(serde_json::Value::Object(fields)) => serialize_tagged(serializer, "type", tag, fields),
         Ok(_) => Err(serde::ser::Error::custom(
-            "an HTTP request must serialize to an object",
+            "a request must serialize to an object",
         )),
         Err(error) => Err(serde::ser::Error::custom(error)),
     }

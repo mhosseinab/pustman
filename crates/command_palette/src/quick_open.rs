@@ -232,7 +232,14 @@ fn open_request(id: ItemId, display: String, window: &mut Window, cx: &mut App) 
     });
     let http = match located {
         Some(Request::Http(http)) => http,
-        Some(Request::Unsupported(_)) => {
+        // No editor for these kinds yet: refused exactly like Unsupported.
+        Some(
+            Request::GraphQl(_)
+            | Request::WebSocket(_)
+            | Request::SocketIo(_)
+            | Request::Grpc(_)
+            | Request::Unsupported(_),
+        ) => {
             workspace.update(cx, |workspace, cx| {
                 workspace.show_toast(unopenable_message(&display), Severity::Warning, None, cx);
             });
@@ -356,11 +363,8 @@ fn container_order(body: &ItemBody) -> &[ItemId] {
 fn method_badge(request: &Request) -> String {
     match request {
         Request::Http(request) => request.method.as_str().to_owned(),
-        Request::Unsupported(raw) => raw
-            .get("type")
-            .and_then(|kind| kind.as_str())
-            .unwrap_or("request")
-            .to_owned(),
+        // Badged by kind tag, exactly like Unsupported.
+        other => other.type_tag().to_owned(),
     }
 }
 
