@@ -42,7 +42,9 @@ fn test_history_rows_keep_the_installation_they_were_recorded_in() -> Result<()>
     assert_eq!(keys.get(&keyed).map(String::as_str), Some(INSTALLATION));
     assert!(!keys.contains_key(&unkeyed), "a row with no key has none");
     assert!(
-        history.installation_keys("workspace", "b.example")?.is_empty(),
+        history
+            .installation_keys("workspace", "b.example")?
+            .is_empty(),
         "the keys follow the same search the rows do"
     );
     assert!(history.installation_keys("other", "")?.is_empty());
@@ -62,7 +64,12 @@ fn test_rows_recorded_before_the_migration_have_no_installation() -> Result<()> 
     )?;
     store.migrate()?;
     assert_eq!(store.history().search("workspace", "")?.len(), 1);
-    assert!(store.history().installation_keys("workspace", "")?.is_empty());
+    assert!(
+        store
+            .history()
+            .installation_keys("workspace", "")?
+            .is_empty()
+    );
     Ok(())
 }
 
@@ -86,6 +93,11 @@ fn test_installation_migration_down_drops_the_column_and_keeps_the_rows() -> Res
 
     store.migrate()?;
     assert!(has_installation_column(&store.connection)?);
-    assert!(store.history().installation_keys("workspace", "")?.is_empty());
+    assert!(
+        store
+            .history()
+            .installation_keys("workspace", "")?
+            .is_empty()
+    );
     Ok(())
 }

@@ -198,14 +198,17 @@ fn copy_tree(from: &Path, to: &Path) {
 
 /// The one file under `directory` (the fixture's environments hold one).
 fn find_file(directory: &Path) -> PathBuf {
-    for entry in std::fs::read_dir(directory).expect("the directory reads") {
-        let path = entry.expect("the entry reads").path();
-        if path.is_dir() {
-            return find_file(&path);
-        }
-        return path;
+    let path = std::fs::read_dir(directory)
+        .expect("the directory reads")
+        .next()
+        .unwrap_or_else(|| panic!("{} holds no file", directory.display()))
+        .expect("the entry reads")
+        .path();
+    if path.is_dir() {
+        find_file(&path)
+    } else {
+        path
     }
-    panic!("{} holds no file", directory.display())
 }
 
 /// Store `secret` as `fixture`'s Development `token` on this installation.
