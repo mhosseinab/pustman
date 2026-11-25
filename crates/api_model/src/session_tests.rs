@@ -2,8 +2,48 @@ use base64::Engine;
 
 use crate::{
     CloseReason, ConnectionDetails, MASK, Message, MessageKind, Payload, ProtocolFields,
-    SessionError, SessionEvent, WebSocketOpcode, to_jsonl_line,
+    SecretValues, SessionError, SessionEvent, WebSocketOpcode, to_jsonl_line,
 };
+
+const SECRET: &str = "token-REDACTED-example";
+
+fn secrets() -> SecretValues {
+    SecretValues::from_values([SECRET])
+}
+
+fn redacted_line(event: &SessionEvent) -> String {
+    to_jsonl_line(&event.redacted(&secrets()))
+}
+
+fn received_text(payload: Payload, fields: ProtocolFields) -> SessionEvent {
+    SessionEvent::Received(Message {
+        at: 1_767_225_600_000,
+        kind: MessageKind::Text,
+        size: 1024,
+        payload,
+        fields,
+    })
+}
+
+fn decoded_payload(line: &str) -> Vec<u8> {
+    let value = parse_line(line);
+    let payload = &value["message"]["payload"];
+    let data = payload["data"].as_str().unwrap_or_default();
+    if payload["encoding"] == "base64" {
+        match base64::engine::general_purpose::STANDARD.decode(data) {
+            Ok(bytes) => bytes,
+            Err(error) => panic!("payload is not base64 ({error}): {line}"),
+        }
+    } else {
+        data.as_bytes().to_vec()
+    }
+}
+
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
 
 fn text_message(text: &str) -> Message {
     Message {
@@ -166,4 +206,173 @@ fn connecting_debug_never_prints_url_credentials() {
         debug.contains("host/x"),
         "Debug still names the target: {debug}"
     );
+}
+
+#[test]
+fn debug_prints_no_query_error_text_or_close_reason_text() {
+    let connecting = SessionEvent::Connecting {
+        target: format!("wss://host/x?token={SECRET}"),
+    };
+    let error = SessionEvent::Error(SessionError {
+        message: format!("server rejected {SECRET}"),
+    });
+    let closed = SessionEvent::Closed {
+        reason: CloseReason::Server {
+            code: Some(4001),
+            reason: format!("bad {SECRET}"),
+        },
+    };
+
+    for event in [&connecting, &error, &closed] {
+        let debug = format!("{event:?}");
+        assert!(!debug.contains(SECRET), "Debug leaked text: {debug}");
+    }
+    let connecting_debug = format!("{connecting:?}");
+    assert!(
+        connecting_debug.contains("wss://host/x"),
+        "Debug keeps scheme, host and path: {connecting_debug}"
+    );
+    assert!(
+        format!("{closed:?}").contains("4001"),
+        "Debug keeps the close code"
+    );
+}
+
+#[test]
+fn secret_in_text_payload_is_masked_in_export() {
+    let event = received_text(
+        Payload::Inline(format!("{{\"token\":\"{SECRET}\"}}").into_bytes()),
+        ProtocolFields::None,
+    );
+
+    let line = redacted_line(&event);
+    assert!(!line.contains(SECRET), "the secret leaked: {line}");
+    assert_eq!(
+        parse_line(&line)["message"]["payload"]["data"],
+        format!("{{\"token\":\"{MASK}\"}}")
+    );
+}
+
+#[test]
+fn secret_straddling_spilled_prefix_end_is_cut() {
+    let head = "auth ";
+    let event = received_text(
+        Payload::Spilled {
+            path: "/tmp/spill-1".into(),
+            len: 4096,
+            prefix: format!("{head}{}", &SECRET[..14]).into_bytes(),
+        },
+        ProtocolFields::None,
+    );
+
+    let line = redacted_line(&event);
+    assert!(
+        !line.contains(&SECRET[..14]),
+        "the start of a secret cut by the prefix end leaked: {line}"
+    );
+    let value = parse_line(&line);
+    assert_eq!(value["message"]["payload"]["data"], head);
+    assert_eq!(value["message"]["payload"]["spilled"], true);
+    assert_eq!(value["message"]["payload"]["len"], 4096);
+}
+
+#[test]
+fn secret_in_close_reason_and_error_is_masked() {
+    let closed = SessionEvent::Closed {
+        reason: CloseReason::Server {
+            code: Some(4001),
+            reason: format!("bad token {SECRET}"),
+        },
+    };
+    let error = SessionEvent::Error(SessionError {
+        message: format!("rejected {SECRET}"),
+    });
+
+    let closed_line = redacted_line(&closed);
+    assert!(!closed_line.contains(SECRET), "leaked: {closed_line}");
+    assert_eq!(
+        parse_line(&closed_line)["reason"]["reason"],
+        format!("bad token {MASK}")
+    );
+    let error_line = redacted_line(&error);
+    assert!(!error_line.contains(SECRET), "leaked: {error_line}");
+    assert_eq!(
+        parse_line(&error_line)["message"],
+        format!("rejected {MASK}")
+    );
+}
+
+#[test]
+fn non_utf8_text_payload_is_still_redacted() {
+    let mut bytes = b"before \xff after ".to_vec();
+    bytes.extend_from_slice(SECRET.as_bytes());
+    bytes.extend_from_slice(b" \xfe end");
+    let event = received_text(Payload::Inline(bytes), ProtocolFields::None);
+
+    let line = redacted_line(&event);
+    let exported = decoded_payload(&line);
+    assert!(
+        !contains_bytes(&exported, SECRET.as_bytes()),
+        "a secret in invalid UTF-8 text leaked: {line}"
+    );
+    let mut expected = b"before \xff after ".to_vec();
+    expected.extend_from_slice(MASK.as_bytes());
+    expected.extend_from_slice(b" \xfe end");
+    assert_eq!(exported, expected, "invalid bytes are kept, text is masked");
+}
+
+#[test]
+fn spilled_prefix_cut_inside_a_multibyte_character_is_redacted() {
+    // "é" is 0xC3 0xA9; the prefix ends after its first byte.
+    let mut prefix = format!("key {SECRET} caf").into_bytes();
+    prefix.push(0xC3);
+    let event = received_text(
+        Payload::Spilled {
+            path: "/tmp/spill-2".into(),
+            len: 2048,
+            prefix,
+        },
+        ProtocolFields::None,
+    );
+
+    let line = redacted_line(&event);
+    assert!(!line.contains(SECRET), "the secret leaked: {line}");
+    let value = parse_line(&line);
+    assert_eq!(value["message"]["payload"]["encoding"], "utf8");
+    assert_eq!(
+        value["message"]["payload"]["data"],
+        format!("key {MASK} caf"),
+        "the partial trailing character is dropped"
+    );
+}
+
+#[test]
+fn secret_in_protocol_fields_is_masked_in_export() {
+    let sse = received_text(
+        Payload::Inline(b"data".to_vec()),
+        ProtocolFields::Sse {
+            event: Some(format!("evt-{SECRET}")),
+            id: Some(SECRET.to_owned()),
+            retry: None,
+        },
+    );
+    let socket_io = received_text(
+        Payload::Inline(b"data".to_vec()),
+        ProtocolFields::SocketIo {
+            event: format!("room:{SECRET}"),
+            ack_id: Some(7),
+        },
+    );
+
+    let sse_line = redacted_line(&sse);
+    assert!(!sse_line.contains(SECRET), "leaked: {sse_line}");
+    let sse_fields = &parse_line(&sse_line)["message"]["fields"];
+    assert_eq!(sse_fields["id"], MASK);
+    assert_eq!(sse_fields["event"], format!("evt-{MASK}"));
+
+    let socket_io_line = redacted_line(&socket_io);
+    assert!(!socket_io_line.contains(SECRET), "leaked: {socket_io_line}");
+    let socket_io_fields = &parse_line(&socket_io_line)["message"]["fields"];
+    assert_eq!(socket_io_fields["event"], format!("room:{MASK}"));
+    assert_eq!(socket_io_fields["ack_id"], 7);
 }

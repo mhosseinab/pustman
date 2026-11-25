@@ -5,6 +5,13 @@
 //! Plain data: no IO, no GPUI. A payload too large to keep in memory is spilled to a file by
 //! the session store; this module only describes it, and an export reads the spilled bytes
 //! back in a later step.
+//!
+//! Redaction limits, which callers must cover:
+//! - Binary payloads are never masked: replacing bytes inside a length-prefixed format
+//!   (protobuf, MessagePack, framed binary) would corrupt it. They are exported as they are.
+//! - Redaction works on one message at a time. A secret split across WebSocket fragments,
+//!   SSE chunks or gRPC frames is not caught here, so the session store (S51b) and the
+//!   export (S51c) must redact the reassembled message.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -25,14 +32,15 @@ pub enum SessionEvent {
     Closed { reason: CloseReason },
 }
 
-// A target URL can carry `user:password@`; Debug shows it through `redact_url`. The other
-// variants delegate to Debug impls that already hide header values and payload bytes.
+// Debug has no secret set, so it shows only what cannot hold one by construction: a target's
+// scheme, host and path (never userinfo, query or fragment). The other variants delegate to
+// Debug impls that hide header values, payload bytes and free-form text.
 impl fmt::Debug for SessionEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Connecting { target } => f
                 .debug_struct("Connecting")
-                .field("target", &redact_url(target, &SecretValues::new()))
+                .field("target", &debug_target(target))
                 .finish(),
             Self::Connected { details } => f
                 .debug_struct("Connected")
@@ -43,6 +51,19 @@ impl fmt::Debug for SessionEvent {
             Self::Error(error) => f.debug_tuple("Error").field(error).finish(),
             Self::Closed { reason } => f.debug_struct("Closed").field("reason", reason).finish(),
         }
+    }
+}
+
+/// `scheme://host/path` of a target, or only its length when it does not parse as a URL.
+fn debug_target(target: &str) -> String {
+    match url::Url::parse(target) {
+        Ok(url) => format!(
+            "{}://{}{}",
+            url.scheme(),
+            url.host_str().unwrap_or_default(),
+            url.path()
+        ),
+        Err(_) => format!("<unparsed target, {} bytes>", target.len()),
     }
 }
 
@@ -200,13 +221,22 @@ impl fmt::Debug for ConnectionDetails {
 }
 
 /// A failure the session reports to the user, already phrased for them.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SessionError {
     pub message: String,
 }
 
+// The message can quote server text that holds a secret; Debug shows its length only.
+impl fmt::Debug for SessionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SessionError")
+            .field("message_len", &self.message.len())
+            .finish()
+    }
+}
+
 /// Why a session ended.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum CloseReason {
     /// The user closed it, or its driving task was dropped.
     Client,
@@ -214,6 +244,21 @@ pub enum CloseReason {
     Server { code: Option<u16>, reason: String },
     /// The connection was lost without a close handshake.
     Lost,
+}
+
+// The server's reason is free text; Debug shows the code and the reason's length only.
+impl fmt::Debug for CloseReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Client => f.write_str("Client"),
+            Self::Server { code, reason } => f
+                .debug_struct("Server")
+                .field("code", code)
+                .field("reason_len", &reason.len())
+                .finish(),
+            Self::Lost => f.write_str("Lost"),
+        }
+    }
 }
 
 impl SessionEvent {
@@ -253,37 +298,88 @@ impl Message {
             self.payload.clone()
         } else {
             match &self.payload {
-                Payload::Inline(bytes) => match std::str::from_utf8(bytes) {
-                    Ok(text) => Payload::Inline(redact_text(text, secrets).into_bytes()),
-                    Err(_) => self.payload.clone(),
-                },
-                Payload::Spilled { path, len, prefix } => match std::str::from_utf8(prefix) {
-                    // The prefix ends mid-payload, so a secret can start inside it and end
-                    // past it; cut that tail before masking.
-                    Ok(text) => Payload::Spilled {
-                        path: path.clone(),
-                        len: *len,
-                        prefix: redact_text(secrets.straddle_free_prefix(text), secrets)
-                            .into_bytes(),
-                    },
-                    Err(_) => self.payload.clone(),
+                Payload::Inline(bytes) => Payload::Inline(redact_text_bytes(bytes, secrets, false)),
+                // The prefix ends mid-payload: a character or a secret can start inside it
+                // and end past it, so both partial tails are cut before masking.
+                Payload::Spilled { path, len, prefix } => Payload::Spilled {
+                    path: path.clone(),
+                    len: *len,
+                    prefix: redact_text_bytes(without_partial_trailing_char(prefix), secrets, true),
                 },
             }
         };
         Self {
             payload,
-            fields: self.fields.clone(),
+            fields: self.fields.redacted(secrets),
             ..*self
         }
     }
+}
+
+impl ProtocolFields {
+    fn redacted(&self, secrets: &SecretValues) -> Self {
+        match self {
+            Self::SocketIo { event, ack_id } => Self::SocketIo {
+                event: redact_text(event, secrets),
+                ack_id: *ack_id,
+            },
+            Self::Sse { event, id, retry } => Self::Sse {
+                event: event.as_deref().map(|event| redact_text(event, secrets)),
+                id: id.as_deref().map(|id| redact_text(id, secrets)),
+                retry: *retry,
+            },
+            Self::None | Self::Grpc { .. } | Self::WebSocket { .. } => self.clone(),
+        }
+    }
+}
+
+/// Mask every secret in text that may not be valid UTF-8. A secret is valid UTF-8, so each
+/// occurrence lies inside one valid run; invalid bytes between runs are kept as they are, so
+/// the text is never rewritten beyond the masks. With `cut_straddling_tail`, a run that
+/// reaches the end is first cut where a secret could continue past it.
+fn redact_text_bytes(bytes: &[u8], secrets: &SecretValues, cut_straddling_tail: bool) -> Vec<u8> {
+    let mut redacted = Vec::with_capacity(bytes.len());
+    let mut chunks = bytes.utf8_chunks().peekable();
+    while let Some(chunk) = chunks.next() {
+        let reaches_end = chunks.peek().is_none() && chunk.invalid().is_empty();
+        let valid = if cut_straddling_tail && reaches_end {
+            secrets.straddle_free_prefix(chunk.valid())
+        } else {
+            chunk.valid()
+        };
+        redacted.extend_from_slice(redact_text(valid, secrets).as_bytes());
+        redacted.extend_from_slice(chunk.invalid());
+    }
+    redacted
+}
+
+/// `bytes` without an incomplete UTF-8 sequence at its end: the first bytes of a character
+/// the prefix cut in two. Invalid bytes elsewhere are left for [`redact_text_bytes`].
+fn without_partial_trailing_char(bytes: &[u8]) -> &[u8] {
+    for tail_len in 1..=3 {
+        let Some(start) = bytes.len().checked_sub(tail_len) else {
+            break;
+        };
+        let tail = bytes.get(start..).unwrap_or_default();
+        if let Err(error) = std::str::from_utf8(tail)
+            && error.valid_up_to() == 0
+            && error.error_len().is_none()
+        {
+            return bytes.get(..start).unwrap_or_default();
+        }
+    }
+    bytes
 }
 
 /// One event as one JSON line (no trailing newline), for the session log export.
 ///
 /// Credential headers and URL passwords are always masked; a caller that knows the session's
 /// secret values passes the event through [`SessionEvent::redacted`] first. Binary payloads
-/// are base64, text payloads stay readable, and a spilled payload carries its in-memory prefix
-/// with `"spilled": true` until the export reads the spilled bytes back.
+/// are base64 and are exported unmasked (see the module docs); text payloads stay readable,
+/// or are base64 when they are not valid UTF-8 (masked all the same). A spilled payload
+/// carries its in-memory prefix with `"spilled": true` until the export reads the spilled
+/// bytes back. Only one message's own bytes are redacted: a secret split across fragments is
+/// for the caller to catch on the reassembled message.
 pub fn to_jsonl_line(event: &SessionEvent) -> String {
     let event = event.redacted(&SecretValues::new());
     let value = match &event {
