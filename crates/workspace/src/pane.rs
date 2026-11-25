@@ -9,6 +9,7 @@ use gpui::{
 use ui::prelude::*;
 
 use crate::item::{AnyViewItem, ItemHandle};
+use crate::new_menu::NewMenu;
 use crate::pane_tabs::PaneTab;
 use crate::welcome::Welcome;
 
@@ -23,6 +24,8 @@ pub struct Pane {
     pub(crate) active_id: Option<EntityId>,
     pub(crate) tab_bar: Entity<TabBar>,
     pub(crate) welcome: Entity<Welcome>,
+    /// The "+" at the end of the tab strip and the "New" menu it opens (REQ-UI-03).
+    pub(crate) new_menu: Entity<NewMenu>,
     pub(crate) _tab_bar_subscription: Subscription,
 }
 
@@ -36,6 +39,7 @@ impl Pane {
             active_id: None,
             tab_bar,
             welcome: cx.new(Welcome::new),
+            new_menu: cx.new(NewMenu::new),
             _tab_bar_subscription,
         }
     }
@@ -84,7 +88,12 @@ impl Render for Pane {
             .bg(ElevationIndex::Surface.bg(cx))
             // The tab strip only exists while the pane holds tabs; the empty state is
             // the Welcome item this pane owns, not a tab.
-            .children((!self.tabs.is_empty()).then(|| self.tab_bar.clone()))
+            .children((!self.tabs.is_empty()).then(|| {
+                h_flex()
+                    .bg(cx.theme().colors().tab_bar_background)
+                    .child(div().flex_1().min_w_0().child(self.tab_bar.clone()))
+                    .child(self.new_menu.clone())
+            }))
             // The item gets the height left under the tab strip and no more: without
             // `min_h_0` a tall item (the Settings form) squeezes the strip and pushes
             // its own top out of view instead of scrolling inside.
