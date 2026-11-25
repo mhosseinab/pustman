@@ -1,19 +1,29 @@
 name: Beta release
 
-# Builds the desktop app for Linux and macOS when a GitHub *pre-release* is published and
-# attaches the packages to it. Promotions (release/pustman-v1-<n>) stay a manual,
-# human-smoked process; this only publishes betas.
+# Builds the desktop app for Linux and macOS for a beta tag (`v*-beta*`) and publishes the
+# packages as a GitHub pre-release. Push the tag, or create the pre-release in the UI: either
+# works, because the publish job creates the release when it does not exist yet and only
+# uploads when it does. Promotions (release/pustman-v1-<n>) stay a manual, human-smoked
+# process.
 
 on:
+  push:
+    tags: ['v*-beta*']
   release:
     types: [published]
 
 permissions:
   contents: write
 
+concurrency:
+  group: beta-${{ github.event.release.tag_name || github.ref_name }}
+
+env:
+  TAG: ${{ github.event.release.tag_name || github.ref_name }}
+
 jobs:
   package:
-    if: github.event.release.prerelease
+    if: github.event_name == 'push' || github.event.release.prerelease
     name: package (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -24,9 +34,6 @@ jobs:
             target: linux-x86_64
           - os: macos-latest
             target: macos-arm64
-    env:
-      TAG: ${{ github.event.release.tag_name }}
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
@@ -69,13 +76,44 @@ jobs:
           Needs the usual GPUI desktop libraries: xkbcommon, wayland or X11, vulkan,
           fontconfig, freetype. This is a beta: expect rough edges.
           EOF
-          tar -C dist -czf "dist/$name.tar.gz" "$name"
-          gh release upload "$TAG" "dist/$name.tar.gz" --clobber
+          mkdir -p out
+          tar -C dist -czf "out/$name.tar.gz" "$name"
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
           scripts/bundle-macos.sh target/release/pustman dist
-          name="pustman-${TAG}-macos-arm64"
-          ditto -c -k --keepParent dist/Pustman.app "dist/$name.zip"
-          gh release upload "$TAG" "dist/$name.zip" --clobber
+          mkdir -p out
+          ditto -c -k --keepParent dist/Pustman.app "out/pustman-${TAG}-macos-arm64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.target }}
+          path: out/*
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Create the pre-release if it does not exist, then attach the packages
+        run: |
+          notes="docs/releases/${TAG}.md"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            if [ -f "$notes" ]; then
+              gh release create "$TAG" --verify-tag --prerelease --title "Pustman $TAG" --notes-file "$notes"
+            else
+              gh release create "$TAG" --verify-tag --prerelease --title "Pustman $TAG" --generate-notes
+            fi
+          fi
+          gh release upload "$TAG" out/* --clobber
+          gh release view "$TAG" --json assets --jq '.assets[].name'
