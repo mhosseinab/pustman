@@ -18,14 +18,18 @@ use std::sync::Arc;
 
 use api_model::{ItemId, Request};
 use gpui::{
-    AnyElement, ClickEvent, Context, Div, ElementId, FocusHandle, Focusable, InteractiveText,
-    MouseButton, MouseDownEvent, Render, Role, SharedString, Stateful, Styled, StyledText, Window,
+    Action, AnyElement, ClickEvent, Context, Div, ElementId, Entity, FocusHandle, Focusable,
+    InteractiveText, MouseButton, MouseDownEvent, Render, Role, SharedString, Stateful, Styled,
+    StyledText, Subscription, Window,
 };
+use pustman_actions::import_export::Import;
+use pustman_actions::workspace::{CreateWorkspace, OpenWorkspace};
+use text_input::{TextInput, TextInputEvent};
 use ui::prelude::*;
 use workspace::{DockPosition, Panel};
 use workspace_store::{ItemBody, WorkspaceSnapshot};
 
-use crate::crud::Crud;
+use crate::crud::{Crud, NewCollection};
 use crate::navigation::{COLLECTIONS_TREE_CONTEXT, Navigation};
 use crate::problems::Problems;
 use crate::reorder::Reorder;
@@ -34,6 +38,24 @@ use crate::reorder::Reorder;
 #[path = "tree_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "tree_sidebar_tests.rs"]
+mod sidebar_tests;
+
+/// The sidebar's controls' stable ids and test selectors (S48u3).
+pub(crate) const NEW_COLLECTION_BUTTON_ID: &str = "collections-new";
+pub(crate) const FILTER_ID: &str = "collections-filter";
+pub(crate) const NO_WORKSPACE_ID: &str = "collections-no-workspace";
+pub(crate) const NO_COLLECTIONS_ID: &str = "collections-empty";
+pub(crate) const NO_MATCHES_ID: &str = "collections-no-matches";
+pub(crate) const EMPTY_NEW_WORKSPACE_ID: &str = "collections-empty-new-workspace";
+pub(crate) const EMPTY_OPEN_WORKSPACE_ID: &str = "collections-empty-open-workspace";
+pub(crate) const EMPTY_NEW_COLLECTION_ID: &str = "collections-empty-new-collection";
+pub(crate) const EMPTY_IMPORT_ID: &str = "collections-empty-import";
+
+/// The selected row's accent bar: the blueprint's 3 px marker at the row's left edge.
+const ACCENT_BAR_PX: f32 = 3.;
+
 /// The panel's stable id: its dock selector entry and its hitbox.
 pub const PANEL_ID: &str = "collections";
 
@@ -41,8 +63,14 @@ pub const PANEL_ID: &str = "collections";
 /// which is what a navigation list of one-line rows draws at.
 const ROW_HEIGHT_PX: f32 = 32.;
 
-/// The width of a row's method column: fixed so the names line up down the tree.
-const METHOD_COLUMN_PX: f32 = 48.;
+/// The width of a request row's method column: fixed so the names line up down the
+/// tree, and as wide as the mockup's method label (44 px) — DELETE in the content font.
+const METHOD_COLUMN_PX: f32 = 44.;
+
+/// How far a request row sits in from its depth's indent: the room a container's
+/// disclosure takes, less the indent step, so a request's method starts a little past
+/// where a sibling folder's chevron does (the blueprint's 22 → 36 px step).
+const LEAF_INSET_PX: f32 = 8.;
 
 /// The width of a row's disclosure column: fixed so a row's name starts in the same
 /// place whether its row expands and collapses or is a leaf.
@@ -157,6 +185,18 @@ pub struct CollectionsTree {
     /// popover ([`crate::problems`]).
     pub(crate) problems: Problems,
     focus_handle: FocusHandle,
+    /// "Find in collections" (S48u3): a plain, case-insensitive name filter. Built by
+    /// [`Self::new_in_window`] — a text field needs the window — so a tree made without
+    /// one simply has no filter field.
+    filter: Option<Entity<TextInput>>,
+    /// The filter's text as of its last edit, lower-cased and trimmed.
+    filter_query: String,
+    /// The containers the user closed while a filter shows the whole tree open. Kept
+    /// apart from [`Self::expanded`], so toggling a row while filtering never changes
+    /// what the tree shows once the filter is cleared; reset on every new query.
+    filter_collapsed: BTreeSet<ItemId>,
+    /// Kept so the filter's edits keep reaching [`Self::on_filter_event`].
+    _filter_subscription: Option<Subscription>,
 }
 
 impl CollectionsTree {
@@ -178,7 +218,92 @@ impl CollectionsTree {
             crud: Crud::new(),
             reorder: Reorder::new(),
             focus_handle,
+            filter: None,
+            filter_query: String::new(),
+            filter_collapsed: BTreeSet::new(),
+            _filter_subscription: None,
         }
+    }
+
+    /// [`Self::new`] with the sidebar's "Find in collections" field — what the app's
+    /// panel registration builds.
+    pub fn new_in_window(
+        snapshot: WorkspaceSnapshot,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut tree = Self::new(snapshot, cx);
+        let filter = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .with_placeholder(SharedString::new_static("Find in collections"))
+        });
+        tree._filter_subscription = Some(cx.subscribe(&filter, Self::on_filter_event));
+        tree.filter = Some(filter);
+        tree
+    }
+
+    /// The filter field, when the tree has one.
+    pub fn filter(&self) -> Option<&Entity<TextInput>> {
+        self.filter.as_ref()
+    }
+
+    /// Whether a workspace folder is open: the tree's snapshot before any open has no
+    /// root ([`crate::collections_panel`]'s empty snapshot).
+    pub fn has_workspace(&self) -> bool {
+        !self.snapshot.root.as_os_str().is_empty()
+    }
+
+    /// The filter changed: re-derive the rows under the new query.
+    fn on_filter_event(
+        &mut self,
+        filter: Entity<TextInput>,
+        event: &TextInputEvent,
+        cx: &mut Context<Self>,
+    ) {
+        if *event != TextInputEvent::Changed {
+            return;
+        }
+        let query = filter.read(cx).text().trim().to_lowercase();
+        if query != self.filter_query {
+            self.filter_query = query;
+            self.filter_collapsed.clear();
+            self.reflatten(cx);
+            self.reanchor_selection();
+        }
+    }
+
+    /// The filter hid the selected row: the selection moves to the first row the filter
+    /// shows, so the keyboard never acts on a row the user cannot see.
+    fn reanchor_selection(&mut self) {
+        if self.navigation.selected_key().is_none()
+            || self.navigation.selected_index(&self.rows).is_some()
+        {
+            return;
+        }
+        if let Some(first) = self.rows.first() {
+            self.navigation.select(first.element_id(), 0);
+        }
+    }
+
+    /// Escape in the filter field: clear the filter. With the filter already empty the
+    /// key goes on to the tree's own Escape (backing out of a rename).
+    fn clear_filter(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(filter) = self.filter.clone() else {
+            cx.propagate();
+            return;
+        };
+        if filter.read(cx).text().is_empty() {
+            cx.propagate();
+            return;
+        }
+        // Clearing emits `Changed`, which re-derives the rows through the subscription.
+        filter.update(cx, |filter, cx| filter.set_text("", cx));
+        window.focus(&self.focus_handle, cx);
+    }
+
+    /// Whether the rows are filtered right now.
+    fn is_filtering(&self) -> bool {
+        !self.filter_query.is_empty()
     }
 
     /// The rows the tree draws.
@@ -200,7 +325,13 @@ impl CollectionsTree {
     /// Open or close one container. Recording the state of a leaf is harmless: it draws
     /// no disclosure and has no children to hold back.
     pub fn set_expanded(&mut self, id: ItemId, is_expanded: bool, cx: &mut Context<Self>) {
-        if is_expanded {
+        if self.is_filtering() {
+            if is_expanded {
+                self.filter_collapsed.remove(&id);
+            } else {
+                self.filter_collapsed.insert(id);
+            }
+        } else if is_expanded {
             self.expanded.insert(id);
         } else {
             self.expanded.remove(&id);
@@ -212,14 +343,36 @@ impl CollectionsTree {
     pub fn toggle_expanded(&mut self, id: ItemId, cx: &mut Context<Self>) {
         // The rows move under an open details popover.
         self.close_problem_details(cx);
-        let is_expanded = !self.expanded.contains(&id);
+        let is_expanded = if self.is_filtering() {
+            self.filter_collapsed.contains(&id)
+        } else {
+            !self.expanded.contains(&id)
+        };
         self.set_expanded(id, is_expanded, cx);
     }
 
     /// Re-derive the rows after a structural change (an expand, a collapse, a new
     /// snapshot) and redraw. Never called per frame (`references/performance.md`).
     pub(crate) fn reflatten(&mut self, cx: &mut Context<Self>) {
-        self.rows = Arc::new(visible_rows(&self.snapshot, &self.expanded, &self.problems));
+        self.rows = Arc::new(if self.filter_query.is_empty() {
+            visible_rows(&self.snapshot, &self.expanded, &self.problems)
+        } else {
+            // A filter looks through the whole tree, whatever the user had collapsed —
+            // less what they closed while filtering.
+            let every_container: BTreeSet<ItemId> = self
+                .snapshot
+                .items
+                .iter()
+                .filter(|(id, item)| {
+                    container_order(&item.body).is_some() && !self.filter_collapsed.contains(id)
+                })
+                .map(|(id, _)| *id)
+                .collect();
+            filter_rows(
+                visible_rows(&self.snapshot, &every_container, &self.problems),
+                &self.filter_query,
+            )
+        });
         cx.notify();
     }
 
@@ -311,7 +464,21 @@ impl CollectionsTree {
                     this.row_context_menu(menu_key.clone(), event.position, window, cx);
                 }),
             )
-            .when(selected, |row| row.bg(cx.theme().colors().element_selected))
+            .relative()
+            .when(selected, |row| {
+                let accent_selector = format!("{row_key}-accent");
+                row.bg(cx.theme().colors().element_selected).child(
+                    div()
+                        .debug_selector(move || accent_selector)
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .bottom_0()
+                        .w(px_to_rems(ACCENT_BAR_PX))
+                        .rounded_sm()
+                        .bg(accent_bar_color(cx)),
+                )
+            })
             .when(!selected, |row| {
                 row.hover(|row| row.bg(cx.theme().colors().ghost_element_hover))
             })
@@ -337,7 +504,6 @@ impl CollectionsTree {
             // insertion line rides over its content.
             .map(|frame| self.row_drag(frame, id, name.clone(), cx))
             .child(self.disclosure(id, is_expanded, name.clone(), cx))
-            .child(self.method_column(row_key, None, cx))
             .child(self.name_element(id, name, row_key, cx))
             .children(self.drop_indicator(id, cx))
             .into_any_element()
@@ -354,10 +520,12 @@ impl CollectionsTree {
         row_key: &ElementId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let indent = INDENT_PX * f32::from(u16::try_from(depth).unwrap_or(u16::MAX));
         self.row_frame(depth, row_key, Some(id), cx)
+            // A leaf has no disclosure: its column folds into the indent.
+            .pl(px_to_rems(indent + LEAF_INSET_PX))
             .map(|frame| self.row_drag(frame, id, name.clone(), cx))
-            .child(div().flex_none().w(px_to_rems(DISCLOSURE_COLUMN_PX)))
-            .child(self.method_column(row_key, Some(method), cx))
+            .child(self.method_column(row_key, method, cx))
             .child(self.name_element(id, name, row_key, cx))
             .children(self.drop_indicator(id, cx))
             .into_any_element()
@@ -428,7 +596,9 @@ impl CollectionsTree {
             IconName::ChevronRight
         };
         let verb = if is_expanded { "Collapse" } else { "Expand" };
+        let selector = format!("tree-toggle-{id}");
         div()
+            .debug_selector(move || selector)
             .flex_none()
             .w(px_to_rems(DISCLOSURE_COLUMN_PX))
             .child(
@@ -444,32 +614,23 @@ impl CollectionsTree {
             .into_any_element()
     }
 
-    /// The method column: the request's method (or the `type` of a request kind this
-    /// build does not model) in the content font, or nothing on a row that is not a
-    /// request.
-    fn method_column(
-        &self,
-        row_id: &ElementId,
-        method: Option<SharedString>,
-        cx: &App,
-    ) -> AnyElement {
-        let column = div().flex_none().w(px_to_rems(METHOD_COLUMN_PX)).min_w_0();
-        match method {
-            Some(method) => {
-                let color = method_color(&method, cx);
-                column
-                    .child(row_label(
-                        method,
-                        ElementId::from(format!("{row_id}-method")),
-                        LabelFont::Buffer,
-                        TextSize::XSmall,
-                        color,
-                        cx,
-                    ))
-                    .into_any_element()
-            }
-            None => column.into_any_element(),
-        }
+    /// A request row's method column: its method (or the `type` of a request kind this
+    /// build does not model) in the content font, in the method's colour.
+    fn method_column(&self, row_id: &ElementId, method: SharedString, cx: &App) -> AnyElement {
+        let color = method_color(&method, cx);
+        div()
+            .flex_none()
+            .w(px_to_rems(METHOD_COLUMN_PX))
+            .min_w_0()
+            .child(row_label(
+                method,
+                ElementId::from(format!("{row_id}-method")),
+                LabelFont::Buffer,
+                TextSize::XSmall,
+                color,
+                cx,
+            ))
+            .into_any_element()
     }
 
     /// The panel's root element: its identity, its key context and the five navigation
@@ -521,18 +682,71 @@ impl Render for CollectionsTree {
         // identity — so two panels can never collide in one frame (the shape
         // `command_palette::Picker` builds its ids with).
         let panel_element_id = ElementId::from(&self.focus_handle);
+        if !self.has_workspace() {
+            return self
+                .panel_root(panel_element_id, cx)
+                .size_full()
+                .font_ui(cx)
+                .child(side_empty(
+                    NO_WORKSPACE_ID,
+                    "Open a workspace to see its collections.",
+                    vec![
+                        dispatch_button(
+                            EMPTY_NEW_WORKSPACE_ID,
+                            "New workspace…",
+                            Some(IconName::Plus),
+                            &CreateWorkspace,
+                        )
+                        .into_any_element(),
+                        dispatch_button(
+                            EMPTY_OPEN_WORKSPACE_ID,
+                            "Open workspace…",
+                            Some(IconName::FolderOpen),
+                            &OpenWorkspace,
+                        )
+                        .into_any_element(),
+                    ],
+                    cx,
+                ))
+                .into_any_element();
+        }
+        if self.rows.is_empty() && self.filter_query.is_empty() {
+            return self
+                .panel_root(panel_element_id, cx)
+                .size_full()
+                .font_ui(cx)
+                .child(side_empty(
+                    NO_COLLECTIONS_ID,
+                    "No collections yet. A collection keeps related requests together.",
+                    vec![
+                        self.create_button(EMPTY_NEW_COLLECTION_ID, "New collection…")
+                            .into_any_element(),
+                        dispatch_button(
+                            EMPTY_IMPORT_ID,
+                            "Import…",
+                            Some(IconName::Download),
+                            &Import,
+                        )
+                        .into_any_element(),
+                    ],
+                    cx,
+                ))
+                .into_any_element();
+        }
+        let toolbar = self.toolbar(cx);
         if self.rows.is_empty() {
             return self
                 .panel_root(panel_element_id, cx)
                 .size_full()
                 .font_ui(cx)
+                .p(DynamicSpacing::Base08.rems(cx))
+                .gap(DynamicSpacing::Base04.rems(cx))
+                .child(toolbar)
                 .child(
-                    EmptyState::new(
-                        "collections-empty-state",
-                        IconName::Folder,
-                        "No collections yet",
-                    )
-                    .description("The collections of the open workspace appear here."),
+                    div().debug_selector(|| NO_MATCHES_ID.to_owned()).child(
+                        Label::new("No collection, folder or request matches the filter.")
+                            .color(Color::Muted),
+                    ),
                 )
                 .into_any_element();
         }
@@ -560,6 +774,8 @@ impl Render for CollectionsTree {
             .size_full()
             .font_ui(cx)
             .p(DynamicSpacing::Base08.rems(cx))
+            .gap(DynamicSpacing::Base04.rems(cx))
+            .child(toolbar)
             .child(
                 v_flex()
                     .flex_1()
@@ -602,6 +818,142 @@ impl Panel for CollectionsTree {
     fn position(&self, _cx: &App) -> DockPosition {
         DockPosition::Left
     }
+
+    fn create_action(&self, _cx: &App) -> Option<Box<dyn Action>> {
+        Some(Box::new(NewCollection))
+    }
+}
+
+impl CollectionsTree {
+    /// The row above the tree: "Find in collections" and "＋ New" (S48u3) — creating a
+    /// collection never depends on the right-click menu.
+    fn toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let focus_handle = self.focus_handle.clone();
+        h_flex()
+            .w_full()
+            .flex_none()
+            .gap(DynamicSpacing::Base03.rems(cx))
+            .children(self.filter.clone().map(|filter| {
+                div()
+                    .debug_selector(|| FILTER_ID.to_owned())
+                    // Nearer the focused field than the panel root, so Escape clears
+                    // the filter before the tree's own Escape sees it.
+                    .on_action(cx.listener(Self::clear_filter))
+                    .flex_1()
+                    .min_w_0()
+                    .child(filter)
+            }))
+            .when(self.filter.is_none(), |row| row.child(div().flex_1()))
+            .child(
+                div()
+                    .debug_selector(|| NEW_COLLECTION_BUTTON_ID.to_owned())
+                    .child(
+                        Button::new(NEW_COLLECTION_BUTTON_ID, "New")
+                            .size(ButtonSize::Medium)
+                            .style(ButtonStyle::Tinted(TintColor::Accent))
+                            .start_icon(Icon::new(IconName::Plus))
+                            .tooltip(Tooltip::text("New collection"))
+                            // Dispatched on the tree's own focus handle, so the tree's
+                            // handler answers wherever the keyboard was.
+                            .on_click(move |_, window, cx| {
+                                focus_handle.dispatch_action(&NewCollection, window, cx);
+                            }),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// The empty workspace's New collection… button, with its test selector.
+    fn create_button(&self, id: &'static str, label: &'static str) -> impl IntoElement {
+        let focus_handle = self.focus_handle.clone();
+        div().debug_selector(move || id.to_owned()).child(
+            Button::new(id, label)
+                .size(ButtonSize::Medium)
+                .style(ButtonStyle::Outlined)
+                .full_width()
+                .start_icon(Icon::new(IconName::Plus))
+                .on_click(move |_, window, cx| {
+                    focus_handle.dispatch_action(&NewCollection, window, cx);
+                }),
+        )
+    }
+}
+
+/// The selected row's accent bar colour: the theme's accent token, never a literal.
+pub(crate) fn accent_bar_color(cx: &App) -> gpui::Hsla {
+    cx.theme().colors().accent_background
+}
+
+/// A sidebar empty state (mockup `.side-empty`): one muted line saying what belongs here,
+/// and the buttons that add the first of it, full width under it.
+fn side_empty(
+    id: &'static str,
+    message: &'static str,
+    buttons: Vec<AnyElement>,
+    cx: &App,
+) -> impl IntoElement {
+    v_flex()
+        .debug_selector(move || id.to_owned())
+        .w_full()
+        .gap(DynamicSpacing::Base04.rems(cx))
+        .px(DynamicSpacing::Base08.rems(cx))
+        .py(DynamicSpacing::Base12.rems(cx))
+        .child(Label::new(message).color(Color::Muted))
+        .children(buttons)
+}
+
+/// A full-width button that dispatches an app-level `action` (the workspace and import
+/// flows answer it on any dispatch path).
+fn dispatch_button(
+    id: &'static str,
+    label: &'static str,
+    icon: Option<IconName>,
+    action: &dyn Action,
+) -> impl IntoElement {
+    let action = action.boxed_clone();
+    div().debug_selector(move || id.to_owned()).child(
+        Button::new(id, label)
+            .size(ButtonSize::Medium)
+            .style(ButtonStyle::Outlined)
+            .full_width()
+            .map(|button| match icon {
+                Some(icon) => button.start_icon(Icon::new(icon)),
+                None => button,
+            })
+            .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx)),
+    )
+}
+
+/// The rows a filter keeps: every row whose name contains `query` (already lower-cased),
+/// and every container above one, so a match is always shown where it lives. Problem
+/// rows always stay — an unreadable file is never filtered out of sight.
+pub(crate) fn filter_rows(rows: Vec<TreeRow>, query: &str) -> Vec<TreeRow> {
+    let mut keep = vec![false; rows.len()];
+    // The containers above the current row: (row index, depth).
+    let mut ancestors: Vec<(usize, usize)> = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        let depth = row.depth();
+        while ancestors.last().is_some_and(|(_, above)| *above >= depth) {
+            ancestors.pop();
+        }
+        let matches =
+            matches!(row, TreeRow::Problem { .. }) || row.name().to_lowercase().contains(query);
+        if matches {
+            if let Some(slot) = keep.get_mut(index) {
+                *slot = true;
+            }
+            for (ancestor, _) in &ancestors {
+                if let Some(slot) = keep.get_mut(*ancestor) {
+                    *slot = true;
+                }
+            }
+        }
+        ancestors.push((index, depth));
+    }
+    rows.into_iter()
+        .zip(keep)
+        .filter_map(|(row, kept)| kept.then_some(row))
+        .collect()
 }
 
 /// Which font a row's label draws in: the UI font for names, the content font (the

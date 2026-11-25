@@ -15,9 +15,11 @@
 //! reuses).
 
 pub mod env_editor;
+pub mod environments_panel;
 pub mod quick_look;
 pub mod selector;
 
+pub use environments_panel::EnvironmentsPanel;
 pub use selector::{EnvironmentSelector, SelectorInputs, install_inputs};
 
 use gpui::App;
