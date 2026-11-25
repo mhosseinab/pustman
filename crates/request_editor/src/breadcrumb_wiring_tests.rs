@@ -3,15 +3,19 @@
 //! change that renames the folder.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use api_model::{HttpRequest, ItemId, Request};
-use gpui::{Entity, TestAppContext, VisualTestContext};
+use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext};
 use tempfile::TempDir;
+use ui::components::toast::toast_message_selector;
+use ui::components::tooltip::TOOLTIP_SELECTOR;
 use ui::prelude::*;
-use ui::test_support::init_test;
+use ui::test_support::{draw_window, init_test};
 use workspace::{Workspace, WorkspaceOpen};
 use workspace_store::{Item as StoreItem, ItemBody, WorkspaceSnapshot};
 
+use super::{BREADCRUMB_CURL_SELECTOR, COPIED_AS_CURL_MESSAGE};
 use crate::RequestEditor;
 
 fn save(root: &Path, body: ItemBody, dir: &str) {
@@ -134,5 +138,41 @@ fn test_an_editor_in_a_workspace_shows_its_trail_and_follows_a_folder_rename(
             String::from("Purchases")
         ]),
         "the trail follows the renamed folder"
+    );
+}
+
+#[gpui::test]
+fn test_copy_as_curl_says_copied_and_crumbs_name_themselves_in_full(cx: &mut TestAppContext) {
+    let folder = TempDir::new().expect("a temp folder");
+    let mut request = crate::new_request::fresh_request();
+    request.name = String::from("List orders");
+    request.url = String::from("https://example.test/orders");
+    fixture(folder.path(), &request);
+    let (_editor, _opener, cx) = open(cx, folder.path().to_path_buf(), request);
+    draw_window(cx);
+
+    let crumb = cx
+        .debug_bounds("breadcrumb-crumb-Commerce API")
+        .expect("the collection crumb is drawn");
+    cx.simulate_mouse_move(crumb.center(), None, Modifiers::none());
+    draw_window(cx);
+    cx.executor().advance_clock(Duration::from_millis(600));
+    cx.run_until_parked();
+    draw_window(cx);
+    assert!(
+        cx.debug_bounds(TOOLTIP_SELECTOR).is_some(),
+        "a crumb that may truncate shows its full name on hover"
+    );
+
+    let button = cx
+        .debug_bounds(BREADCRUMB_CURL_SELECTOR)
+        .expect("Copy as cURL is drawn");
+    cx.simulate_click(button.center(), Modifiers::none());
+    cx.run_until_parked();
+    draw_window(cx);
+    let selector: &'static str = toast_message_selector(COPIED_AS_CURL_MESSAGE).leak();
+    assert!(
+        cx.debug_bounds(selector).is_some(),
+        "the copy confirms itself with a toast"
     );
 }

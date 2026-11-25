@@ -64,16 +64,25 @@ impl RequestEditor {
     pub(super) fn handle_copy_as_curl(
         &mut self,
         _: &request::CopyAsCurl,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.copy_as_curl(cx);
+        self.copy_as_curl(window, cx);
     }
 
     /// The draft as a cURL command on the clipboard — the one path behind
-    /// `request::CopyAsCurl`, the breadcrumb's button and the Send menu.
-    pub fn copy_as_curl(&self, cx: &mut App) {
+    /// `request::CopyAsCurl`, the breadcrumb's button and the Send menu — confirmed with
+    /// a toast where the window hosts the workspace shell (a bare window has no toasts).
+    pub fn copy_as_curl(&self, window: &mut Window, cx: &mut App) {
         cx.write_to_clipboard(ClipboardItem::new_string(to_curl(&self.draft)));
+        if window.root::<workspace::Workspace>().flatten().is_some() {
+            crate::save::show_toast(
+                window.window_handle(),
+                crate::breadcrumb::COPIED_AS_CURL_MESSAGE,
+                Severity::Success,
+                cx,
+            );
+        }
     }
 
     /// The undo banner under the URL bar, while a cURL import can be taken back: a

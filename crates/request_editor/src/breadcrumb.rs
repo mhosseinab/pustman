@@ -36,6 +36,9 @@ pub const BREADCRUMB_SAVE_SELECTOR: &str = "breadcrumb-save";
 /// Test hook: the breadcrumb's Copy as cURL button.
 pub const BREADCRUMB_CURL_SELECTOR: &str = "breadcrumb-copy-curl";
 
+/// The toast a Copy as cURL confirms itself with.
+pub const COPIED_AS_CURL_MESSAGE: &str = "Copied as cURL";
+
 /// What the breadcrumb says while the request has no file in the open workspace.
 pub const UNSAVED_LABEL: &str = "Unsaved request";
 
@@ -204,25 +207,17 @@ impl RequestEditor {
         match &self.location {
             Some(ancestors) => {
                 for name in ancestors {
-                    trail = trail
-                        .child(
-                            Label::new(SharedString::from(name.clone()))
-                                .size(LabelSize::Small)
-                                .color(Color::Muted)
-                                .truncate(),
-                        )
-                        .child(
-                            Label::new(SharedString::new_static("/"))
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
-                        );
+                    trail = trail.child(crumb(name, Color::Muted)).child(
+                        Label::new(SharedString::new_static("/"))
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    );
                 }
                 trail = trail.child(
-                    div().min_w_0().font_weight(FontWeight::SEMIBOLD).child(
-                        Label::new(SharedString::from(self.draft.name.clone()))
-                            .size(LabelSize::Small)
-                            .truncate(),
-                    ),
+                    div()
+                        .min_w_0()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(crumb(&self.draft.name, Color::Default)),
                 );
             }
             None => {
@@ -272,13 +267,33 @@ impl RequestEditor {
                                     &CopyAsCurl,
                                 ))
                                 .on_click(cx.listener(
-                                    |editor, _event, _window, cx| editor.copy_as_curl(cx),
+                                    |editor, _event, window, cx| editor.copy_as_curl(window, cx),
                                 )),
                             ),
                     ),
             )
             .into_any_element()
     }
+}
+
+/// One crumb of the trail: it truncates, so its full name is its tooltip.
+fn crumb(name: &str, color: Color) -> AnyElement {
+    let full = SharedString::from(name.to_string());
+    div()
+        .id(SharedString::from(format!("breadcrumb-crumb-{name}")))
+        .debug_selector({
+            let selector = format!("breadcrumb-crumb-{name}");
+            move || selector
+        })
+        .min_w_0()
+        .tooltip(Tooltip::text(full.clone()).builder())
+        .child(
+            Label::new(full)
+                .size(LabelSize::Small)
+                .color(color)
+                .truncate(),
+        )
+        .into_any_element()
 }
 
 #[cfg(test)]
