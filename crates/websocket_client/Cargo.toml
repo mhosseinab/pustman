@@ -1,0 +1,27 @@
+# `websocket_client` — raw WebSocket and Socket.IO sessions (PRD §5.4–5.5). A domain
+# crate: no GPUI views. TLS is rustls with the crypto provider reqwest uses
+# (`tls_provider::ensure_crypto_provider`).
+
+[package]
+name = "websocket_client"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/websocket_client.rs"
+
+[dependencies]
+log.workspace = true
+rustls.workspace = true
+tokio-tungstenite.workspace = true
+
+[dev-dependencies]
+futures.workspace = true
+rcgen.workspace = true
+reqwest.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
+tokio-rustls.workspace = true

@@ -66,6 +66,17 @@ tokio = { workspace = true, features = ["fs"] }
 url.workspace = true
 variables.workspace = true
 
+# M3 auth helpers: Digest (`http-auth`), AWS Signature v4, HMAC/SHA-256 signing, JWT
+# bearer tokens, and PFX client certificates converted to the PEM reqwest's rustls takes.
+# SOCKS proxies come from the root reqwest line's `socks` feature.
+aws-credential-types.workspace = true
+aws-sigv4.workspace = true
+hmac.workspace = true
+http-auth.workspace = true
+jsonwebtoken.workspace = true
+p12-keystore.workspace = true
+sha2.workspace = true
+
 # The loopback test server: tokio + hyper over `hyper-util`'s IO adapter, plus `rcgen`
 # for its self-signed TLS variant. Only compiled behind `test-support`.
 bytes = { workspace = true, optional = true }
