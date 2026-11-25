@@ -12,6 +12,7 @@
 //! own.
 
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui::{
@@ -527,19 +528,25 @@ impl TitleBar {
         let folders = recent_folders(cx).to_vec();
         let menu = cx.new(|cx| {
             let mut menu = ContextMenu::new(cx);
-            for folder in &folders {
-                let label = folder
+            let label_of = |folder: &PathBuf| {
+                folder
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| folder.to_string_lossy().into_owned());
+                    .unwrap_or_else(|| folder.to_string_lossy().into_owned())
+            };
+            let labels: Vec<String> = folders.iter().map(label_of).collect();
+            for (folder, label) in folders.iter().zip(&labels) {
+                // Two recent folders of the same name are told apart by where they live;
+                // a unique name needs no path beside it.
+                let ambiguous = labels.iter().filter(|other| *other == label).count() > 1;
                 let action = OpenRecentWorkspace {
                     path: folder.to_string_lossy().into_owned(),
                 };
                 let target = restore_focus.clone();
-                menu = menu.entry(label, move |_event, window, cx| {
+                menu = menu.entry(label.clone(), move |_event, window, cx| {
                     run_from(&target, Box::new(action.clone()), window, cx);
                 });
-                if let Some(parent) = folder.parent() {
+                if let Some(parent) = folder.parent().filter(|_| ambiguous) {
                     menu = menu.hint(SharedString::from(parent.to_string_lossy().into_owned()));
                 }
             }
@@ -793,30 +800,62 @@ impl TitleBar {
 
     /// The search box: opens quick open, the same as its key binding.
     fn render_search(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        // The hint is read from the whole keymap, like the menu entries' hints: the
+        // focus-scoped `KeyBinding` hint goes blank while a menu holds the keyboard.
         let keys = keymap_binding_text(&quick_open::Toggle, cx);
-        div()
+        let colors = cx.theme().colors();
+        h_flex()
+            .id(SEARCH_SELECTOR)
             .debug_selector(|| SEARCH_SELECTOR.to_owned())
-            .flex_none()
-            .child(
-                Button::new(SEARCH_SELECTOR, SharedString::new_static(SEARCH_LABEL))
-                    .size(ButtonSize::Medium)
-                    .style(ButtonStyle::Outlined)
-                    .label_color(Color::Muted)
-                    .width(px_to_rems(SEARCH_WIDTH_PX))
-                    .start_icon(
-                        Icon::new(IconName::Search)
-                            .size(IconSize::Small)
-                            .color(Color::Muted),
-                    )
-                    .tooltip(Tooltip::text(match &keys {
-                        Some(keys) => format!("Quick open ({keys})"),
-                        None => String::from("Quick open"),
-                    }))
-                    .key_binding(KeyBinding::for_action(&quick_open::Toggle))
-                    .on_click(|_event, window, cx| {
-                        window.dispatch_action(Box::new(quick_open::Toggle), cx);
-                    }),
+            .role(Role::Button)
+            .aria_label(SharedString::new_static(SEARCH_LABEL))
+            .focusable()
+            .tab_stop(true)
+            .w(px_to_rems(SEARCH_WIDTH_PX))
+            .flex_shrink_1()
+            .min_w_0()
+            .h(px_to_rems(ANCHOR_HEIGHT_PX))
+            .px(DynamicSpacing::Base08.rems(cx))
+            .gap(DynamicSpacing::Base04.rems(cx))
+            .rounded_sm()
+            .border_1()
+            .border_color(colors.border)
+            .bg(colors.background)
+            .cursor_pointer()
+            .hover(|style| style.bg(colors.ghost_element_hover))
+            .focus_visible(|style| style.border_color(colors.border_focused))
+            .tooltip(
+                Tooltip::text(match &keys {
+                    Some(keys) => format!("Quick open ({keys})"),
+                    None => String::from("Quick open"),
+                })
+                .builder(),
             )
+            .on_click(|_event, window, cx| {
+                window.dispatch_action(Box::new(quick_open::Toggle), cx);
+            })
+            .child(
+                Icon::new(IconName::Search)
+                    .size(IconSize::Small)
+                    .color(Color::Muted),
+            )
+            .child(
+                div().flex_1().min_w_0().child(
+                    Label::new(SEARCH_LABEL)
+                        .size(LabelSize::Small)
+                        .color(Color::Muted)
+                        .truncate(),
+                ),
+            )
+            .children(keys.map(|keys| {
+                div()
+                    .flex_none()
+                    .px(DynamicSpacing::Base02.rems(cx))
+                    .rounded_xs()
+                    .border_1()
+                    .border_color(colors.border_variant)
+                    .child(Label::new(keys).size(LabelSize::XSmall).color(Color::Muted))
+            }))
     }
 
     /// A stretch of empty bar: in a client-decorated window it moves the window
