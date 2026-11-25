@@ -7,7 +7,15 @@
 //! `Decision:` the location check (exists, is a folder, is writable, already holds a
 //! workspace) runs on a background task each time the name or location changes
 //! (AGENTS.md › no blocking IO on the foreground thread). Create stays disabled until the
-//! check for the current text has landed, so a stale answer can never enable it.
+//! check for the current text has landed, so a stale answer can never enable it. Create
+//! itself runs the check once more first (and so does the window regaining focus), so a
+//! folder made or filled meanwhile counts; [`WorkspaceOpen::create_named`] re-checks
+//! again on its own background task.
+//!
+//! `Decision:` the target folder may be missing or an existing EMPTY folder; one that
+//! exists with anything in it is refused inline ("already exists and isn't empty"),
+//! never adopted. The location must be absolute (a leading `~` means home): a relative
+//! path would resolve against wherever the app was launched from.
 //!
 //! `Decision:` "writable" is the folder's permission bits as `std::fs::Permissions`
 //! reports them — nothing is written before Create (the form's promise). A folder the
@@ -55,6 +63,7 @@ pub const BROWSE_BUTTON_SELECTOR: &str = "new-workspace-browse";
 pub const OPEN_INSTEAD_BUTTON_SELECTOR: &str = "new-workspace-open-instead";
 pub const TARGET_PATH_SELECTOR: &str = "new-workspace-target";
 pub const FAILURE_SELECTOR: &str = "new-workspace-failure";
+pub const TARGET_ERROR_SELECTOR: &str = "new-workspace-target-error";
 
 /// The messages the form shows inline.
 pub const NAME_REQUIRED: &str = "Enter a name.";
@@ -63,6 +72,8 @@ pub const LOCATION_MISSING: &str = "This folder does not exist. Choose another o
 pub const LOCATION_NOT_A_FOLDER: &str = "This is a file, not a folder. Choose a folder.";
 pub const LOCATION_READ_ONLY: &str = "This folder is read-only. Choose one you can write to.";
 pub const LOCATION_UNREADABLE: &str = "This folder could not be read.";
+pub const LOCATION_RELATIVE: &str = "Enter a full path, starting at / or ~.";
+pub const NO_OPENER_MESSAGE: &str = "This window cannot create a workspace.";
 const LOCATION_HINT: &str = "The parent folder. Pustman creates the workspace folder inside it.";
 
 /// The parent folder of the last workspace created this session (the module docs).
@@ -72,9 +83,12 @@ struct LastLocation(Option<PathBuf>);
 impl Global for LastLocation {}
 
 /// Open the New Workspace form over `workspace` (the `CreateWorkspace` answer). A
-/// window without its open-workspace state has nowhere to create into and is left as is.
+/// window without its open-workspace state has nowhere to create into, and says so.
 pub fn open(workspace: &Entity<Workspace>, window: &mut Window, cx: &mut App) {
     let Some(opener) = WorkspaceOpen::for_window(workspace.entity_id(), cx) else {
+        workspace.update(cx, |workspace, cx| {
+            workspace.show_toast(NO_OPENER_MESSAGE, Severity::Error, None, cx);
+        });
         return;
     };
     let opener = opener.downgrade();
@@ -112,6 +126,9 @@ struct Probe {
     check: LocationCheck,
     /// The target folder already holds a `pustman.json`.
     target_is_workspace: bool,
+    /// The target exists with something in it (and is not a workspace): creating there
+    /// would adopt someone's folder, so it is refused.
+    target_not_empty: bool,
 }
 
 /// The New Workspace dialog.
@@ -130,6 +147,10 @@ pub struct NewWorkspaceForm {
     probing: Option<Task<()>>,
     browsing: Option<Task<()>>,
     creating: bool,
+    /// Create was pressed: it runs once the fresh check it asked for lands.
+    pending_submit: bool,
+    /// The window Create was pressed in — where a failure is shown.
+    window: Option<gpui::AnyWindowHandle>,
     /// Why the last Create failed, shown inline until the next edit.
     failure: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
@@ -151,6 +172,13 @@ impl NewWorkspaceForm {
             location.update(cx, |location, cx| location.set_text(&text, cx));
         }
         let subscriptions = vec![
+            // Back from another app (a file manager, a terminal): the folders may have
+            // changed, so the check runs again.
+            cx.observe_window_activation(window, |form, window, cx| {
+                if window.is_window_active() {
+                    form.recheck(cx);
+                }
+            }),
             cx.subscribe_in(&name, window, |form, _input, event, window, cx| {
                 form.on_field_event(*event, true, window, cx);
             }),
@@ -171,6 +199,8 @@ impl NewWorkspaceForm {
             probing: None,
             browsing: None,
             creating: false,
+            pending_submit: false,
+            window: None,
             failure: None,
             _subscriptions: subscriptions,
         };
@@ -238,22 +268,35 @@ impl NewWorkspaceForm {
         Some(location.join(folder_name(&name)))
     }
 
-    /// Re-run the background location check for the current text. The previous check is
-    /// dropped (cancelled): only the answer for what is on screen may land.
+    /// Run the background location check for the current text, unless the check on
+    /// screen is already for it.
     fn check_location(&mut self, cx: &mut Context<Self>) {
-        let Some(location) = self.location_path(cx) else {
+        let target = self.target(cx);
+        let current = self.location_path(cx).is_some_and(|location| {
+            self.probe
+                .as_ref()
+                .is_some_and(|probe| probe.location == location && probe.target == target)
+        });
+        if !current {
+            self.recheck(cx);
+        }
+    }
+
+    /// Run the background location check again, whatever is on screen. The previous
+    /// check is dropped (cancelled): only the answer for the text now in the fields may
+    /// land. A relative or empty location is answered here, without touching the disk.
+    fn recheck(&mut self, cx: &mut Context<Self>) {
+        let location = self
+            .location_path(cx)
+            .filter(|location| location.is_absolute());
+        let Some(location) = location else {
             self.probe = None;
             self.probing = None;
+            self.pending_submit = false;
+            cx.notify();
             return;
         };
         let target = self.target(cx);
-        if self
-            .probe
-            .as_ref()
-            .is_some_and(|probe| probe.location == location && probe.target == target)
-        {
-            return;
-        }
         self.probe = None;
         self.probing = Some(cx.spawn(async move |form, cx| {
             let probe = cx
@@ -263,6 +306,9 @@ impl NewWorkspaceForm {
             form.update(cx, |form, cx| {
                 form.probe = Some(probe);
                 form.probing = None;
+                if std::mem::take(&mut form.pending_submit) && form.can_create(cx) {
+                    form.start_create(cx);
+                }
                 cx.notify();
             })
             .ok();
@@ -276,8 +322,11 @@ impl NewWorkspaceForm {
 
     /// The inline error under Location, if any.
     fn location_error(&self, cx: &App) -> Option<&'static str> {
-        if self.location_path(cx).is_none() {
+        let Some(location) = self.location_path(cx) else {
             return Some(LOCATION_REQUIRED);
+        };
+        if !location.is_absolute() {
+            return Some(LOCATION_RELATIVE);
         }
         match self.probe.as_ref()?.check {
             LocationCheck::Usable => None,
@@ -300,30 +349,53 @@ impl NewWorkspaceForm {
             .filter(|target| Some(target) == self.target(cx).as_ref())
     }
 
+    /// The target exists with something in it: refused inline, with the reason.
+    fn target_error(&self, cx: &App) -> Option<SharedString> {
+        let probe = self.probe.as_ref()?;
+        let target = self.target(cx)?;
+        (probe.target_not_empty && probe.target.as_ref() == Some(&target)).then(|| {
+            SharedString::from(
+                crate::workspace_open::CreateWorkspaceError::NotEmpty(target).to_string(),
+            )
+        })
+    }
+
     /// Every check passed for the text on screen, and no create is in flight.
     pub fn can_create(&self, cx: &App) -> bool {
         !self.creating
             && !self.name_text(cx).is_empty()
             && self.location_error(cx).is_none()
-            && self
-                .probe
-                .as_ref()
-                .is_some_and(|probe| probe.target == self.target(cx) && !probe.target_is_workspace)
+            && self.probe.as_ref().is_some_and(|probe| {
+                probe.target == self.target(cx)
+                    && !probe.target_is_workspace
+                    && !probe.target_not_empty
+            })
     }
 
-    /// Create, if valid (Enter and the Create button). An invalid form says why inline.
+    /// Create (Enter and the Create button). The folders are checked once more first —
+    /// one may have been created or filled since the last check — and Create runs when
+    /// that fresh check passes. An invalid form says why inline.
     pub fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.name_touched = true;
-        if !self.can_create(cx) {
-            cx.notify();
+        if self.creating {
             return;
         }
-        let (Some(target), Some(location)) = (self.target(cx), self.location_path(cx)) else {
+        self.window = Some(window.window_handle());
+        self.pending_submit = true;
+        self.recheck(cx);
+        cx.notify();
+    }
+
+    /// Hand the create to this window's [`WorkspaceOpen`]; the form closes when the
+    /// workspace is open, or shows why it could not be created.
+    fn start_create(&mut self, cx: &mut Context<Self>) {
+        let (Some(target), Some(location), Some(window_handle)) =
+            (self.target(cx), self.location_path(cx), self.window)
+        else {
             return;
         };
         let name = self.name_text(cx);
         let form = cx.weak_entity();
-        let window_handle = window.window_handle();
         let started = self.opener.update(cx, |opener, cx| {
             opener.create_named(
                 target,
@@ -446,6 +518,7 @@ impl Render for NewWorkspaceForm {
         let target = self.target(cx);
         let can_create = self.can_create(cx);
         let existing = self.existing_workspace(cx);
+        let target_error = self.target_error(cx);
         let name_error = self.name_error(cx);
         let location_error = self.location_error(cx);
         let footer_hint = if self.creating {
@@ -514,7 +587,16 @@ impl Render for NewWorkspaceForm {
                             .debug_selector(|| TARGET_PATH_SELECTOR.to_owned())
                             .min_w_0()
                             .child(Label::new(target_text).size(LabelSize::Small)),
-                    ),
+                    )
+                    .when_some(target_error, |target, error| {
+                        target.child(
+                            div()
+                                .debug_selector(|| TARGET_ERROR_SELECTOR.to_owned())
+                                .child(
+                                    Label::new(error).size(LabelSize::Small).color(Color::Error),
+                                ),
+                        )
+                    }),
             )
             .when_some(existing, |body, existing| {
                 body.child(
@@ -641,11 +723,16 @@ fn probe_location(location: PathBuf, target: Option<PathBuf>) -> Probe {
         Err(_) => LocationCheck::Unreadable,
     };
     let target_is_workspace = target.as_deref().is_some_and(holds_workspace);
+    let target_not_empty = !target_is_workspace
+        && target
+            .as_deref()
+            .is_some_and(crate::workspace_open::folder_has_entries);
     Probe {
         location,
         target,
         check,
         target_is_workspace,
+        target_not_empty,
     }
 }
 

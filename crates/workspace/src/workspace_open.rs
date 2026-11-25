@@ -268,7 +268,7 @@ impl WorkspaceOpen {
     /// here (REQ-WSP-05). Failures reach the user as a toast.
     pub fn create_folder(&mut self, root: PathBuf, cx: &mut Context<Self>) {
         let name = workspace_name(&root);
-        self.create_named(root, name, |_finished, _cx| false, cx);
+        self.create(root, name, false, |_finished, _cx| false, cx);
     }
 
     /// Create a workspace called `name` in the folder at `root` and open it here
@@ -277,10 +277,27 @@ impl WorkspaceOpen {
     /// could not be created. It returns whether it showed a failure to the user itself
     /// (the New Workspace form shows it inline); a failure nobody showed becomes a toast,
     /// so it always reaches the user.
+    ///
+    /// `root` is a NEW workspace folder: one that already exists with anything in it is
+    /// refused ([`CreateWorkspaceError::NotEmpty`]), checked again here on the background
+    /// task, so a folder that filled up after the form validated it is still not adopted.
     pub fn create_named(
         &mut self,
         root: PathBuf,
         name: String,
+        on_finish: impl FnOnce(Result<(), SharedString>, &mut App) -> bool + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        self.create(root, name, true, on_finish, cx);
+    }
+
+    /// The one create path behind [`Self::create_folder`] and [`Self::create_named`].
+    /// `require_empty` refuses a folder that exists with anything in it.
+    fn create(
+        &mut self,
+        root: PathBuf,
+        name: String,
+        require_empty: bool,
         on_finish: impl FnOnce(Result<(), SharedString>, &mut App) -> bool + 'static,
         cx: &mut Context<Self>,
     ) {
@@ -290,7 +307,10 @@ impl WorkspaceOpen {
                 .background_executor()
                 .spawn(async move {
                     let in_repository = inside_git_repository(&root);
-                    (create_off_foreground(root, name, store), in_repository)
+                    (
+                        create_off_foreground(root, name, require_empty, store),
+                        in_repository,
+                    )
                 })
                 .await;
             if let Outcome::Failed { message, level } = outcome {
@@ -559,6 +579,30 @@ pub fn create_workspace(root: &Path, name: &str) -> Result<OpenedWorkspace, Crea
     })
 }
 
+/// [`create_workspace`] for a folder the user named as new: it may be missing or empty,
+/// but a folder with anything in it is refused rather than adopted. A folder that already
+/// holds `pustman.json` is still [`CreateWorkspaceError::AlreadyAWorkspace`].
+pub fn create_workspace_in_new_folder(
+    root: &Path,
+    name: &str,
+) -> Result<OpenedWorkspace, CreateWorkspaceError> {
+    if !root.join(WORKSPACE_FILE).exists() && folder_has_entries(root) {
+        return Err(CreateWorkspaceError::NotEmpty(root.to_path_buf()));
+    }
+    create_workspace(root, name)
+}
+
+/// Whether `path` exists as anything other than an empty folder — a file there, or a
+/// folder with at least one entry. A path that cannot be inspected at all counts as not
+/// occupied: the create then fails on it and reports the real reason.
+pub(crate) fn folder_has_entries(path: &Path) -> bool {
+    match std::fs::metadata(path) {
+        Ok(metadata) if !metadata.is_dir() => true,
+        Ok(_) => std::fs::read_dir(path).is_ok_and(|mut entries| entries.next().is_some()),
+        Err(_) => false,
+    }
+}
+
 /// The PRD §6.1 folder layout and the deterministic `pustman.json` write — everything
 /// between claiming the workspace name and the folder being a workspace
 /// (see [`create_workspace`]).
@@ -621,6 +665,9 @@ pub enum CreateWorkspaceError {
     /// The folder already holds a `pustman.json`; creating would overwrite a workspace.
     #[error("{0} already holds a workspace — open it instead")]
     AlreadyAWorkspace(PathBuf),
+    /// The new workspace's folder already exists with something in it.
+    #[error("{0} already exists and isn't empty. Choose another name or location.")]
+    NotEmpty(PathBuf),
     /// The workspace file or its layout could not be written.
     #[error("{root} could not be created: {reason}")]
     Unwritable { root: PathBuf, reason: String },
@@ -649,9 +696,15 @@ fn open_off_foreground(root: PathBuf, store: Option<Arc<Mutex<LocalStore>>>) -> 
 fn create_off_foreground(
     root: PathBuf,
     name: String,
+    require_empty: bool,
     store: Option<Arc<Mutex<LocalStore>>>,
 ) -> Outcome {
-    match create_workspace(&root, &name) {
+    let created = if require_empty {
+        create_workspace_in_new_folder(&root, &name)
+    } else {
+        create_workspace(&root, &name)
+    };
+    match created {
         Ok(workspace) => Outcome::Landed {
             recorded: record_recent(&root, store.as_deref()),
             workspace,
