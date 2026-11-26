@@ -57,3 +57,7 @@ pub fn init(cx: &mut App) {
     })
     .detach();
 }
+
+#[cfg(test)]
+#[path = "session_redaction_tests.rs"]
+mod session_redaction_tests;

@@ -7,8 +7,10 @@
 //! Payloads are never copied — only counts and sizes — and everything that can carry a
 //! secret is redacted with `api_model`'s shared masking (D8, REQ-NFR-04) before it is kept.
 
+use std::collections::BTreeSet;
+
 use api_model::{
-    CloseReason, ConnectionDetails, SecretValues, SessionEvent, redact_text, redact_url,
+    CloseReason, ConnectionDetails, MASK, SecretValues, SessionEvent, redact_text, redact_url,
 };
 use gpui::App;
 
@@ -55,16 +57,21 @@ impl Tally {
 
 /// Builds the one [`ConsoleEntry`] a session leaves (REQ-WS-02).
 ///
-/// Everything kept is already redacted: the recorder holds the caller's secret values, never
-/// the raw handshake, error or close text.
+/// Everything kept for display is already redacted: the recorder holds the secret values,
+/// never the raw handshake, error or close text.
 pub struct SessionRecorder {
     entry: ConsoleEntry,
+    /// The caller's secret values plus every token the handshake carried, so later server
+    /// text that echoes a token is masked too.
     secrets: SecretValues,
     /// The redacted handshake, once the session connected.
     handshake: Option<ConnectionDetails>,
-    /// How many handshake values that look like tokens could not be masked (too short, or
-    /// holding the mask character); the entry says so, as the HTTP feed does.
-    unmaskable_handshake_values: usize,
+    /// How many of the caller's secret values could not be masked (too short, or holding
+    /// the mask character).
+    refused_caller_secrets: usize,
+    /// The distinct handshake tokens that could not be masked. Kept as a set so a token
+    /// offered, echoed and negotiated counts once; never rendered.
+    refused_handshake_tokens: BTreeSet<String>,
     sent: Tally,
     received: Tally,
     /// The first error, redacted and capped: later ones are usually its consequences.
@@ -93,14 +100,18 @@ impl SessionRecorder {
                 raw_request: String::new(),
                 raw_response: String::new(),
             },
+            refused_caller_secrets: secrets.refused_count(),
             secrets,
             handshake: None,
-            unmaskable_handshake_values: 0,
+            refused_handshake_tokens: BTreeSet::new(),
             sent: Tally::default(),
             received: Tally::default(),
             error: None,
             close: None,
         };
+        if recorder.refused_caller_secrets > 0 {
+            recorder.raise(ConsoleLevel::Warning);
+        }
         recorder.render();
         recorder
     }
@@ -142,11 +153,10 @@ impl SessionRecorder {
     }
 
     fn record_handshake(&mut self, details: &ConnectionDetails) {
-        // Token-carrying values join the secret set rather than being masked here, so the
-        // shared redaction masks them wherever they appear — in the offering header, in the
-        // server's echo and in the negotiated subprotocol.
-        let mut secrets = self.secrets.clone();
-        let mut unmaskable = 0;
+        // Token-carrying values join the recorder's secret set rather than being masked
+        // here, so the shared redaction masks them in this handshake — the offering header,
+        // the server's echo, the negotiated subprotocol — and in every error and close
+        // reason recorded after it.
         for (name, value) in details
             .request_headers
             .iter()
@@ -160,19 +170,40 @@ impl SessionRecorder {
                 .map(str::trim)
                 .filter(|token| !token.is_empty())
             {
-                if !secrets.insert(token) {
-                    unmaskable += 1;
+                if !self.secrets.insert(token) {
+                    self.refused_handshake_tokens.insert(token.to_string());
                 }
             }
         }
-        self.unmaskable_handshake_values = unmaskable;
+        if !self.refused_handshake_tokens.is_empty() {
+            self.raise(ConsoleLevel::Warning);
+        }
         self.entry.status = details.response_status;
         if let Some(status) = details.response_status
             && refused_upgrade(status)
         {
             self.raise(ConsoleLevel::Error);
         }
-        self.handshake = Some(details.redacted(&secrets));
+        // Binary metadata is a credential whole: a value too short to join the secret set
+        // is still masked here rather than only reported.
+        let mask_binary = |headers: &[(String, String)]| -> Vec<(String, String)> {
+            headers
+                .iter()
+                .map(|(name, value)| {
+                    if is_binary_metadata(name) {
+                        (name.clone(), MASK.to_string())
+                    } else {
+                        (name.clone(), value.clone())
+                    }
+                })
+                .collect()
+        };
+        let details = ConnectionDetails {
+            request_headers: mask_binary(&details.request_headers),
+            response_headers: mask_binary(&details.response_headers),
+            ..details.clone()
+        };
+        self.handshake = Some(details.redacted(&self.secrets));
     }
 
     fn raise(&mut self, level: ConsoleLevel) {
@@ -230,12 +261,15 @@ impl SessionRecorder {
             if let Some(size) = body_size {
                 response.push_str(&format!("Body: {size} bytes\r\n"));
             }
-            if self.unmaskable_handshake_values > 0 {
-                response.push_str(&format!(
-                    "{} handshake values cannot be masked and appear unmasked.\r\n",
-                    self.unmaskable_handshake_values
-                ));
-            }
+        }
+        // A refused value cannot be masked anywhere and appears as it is, so the refusal is
+        // not silent — worded as the HTTP feed words it.
+        match self.refused_caller_secrets + self.refused_handshake_tokens.len() {
+            0 => {}
+            1 => response.push_str("1 secret value cannot be masked and appears unmasked.\r\n"),
+            count => response.push_str(&format!(
+                "{count} secret values cannot be masked and appear unmasked.\r\n"
+            )),
         }
         response.push_str(&self.sent.line("Sent"));
         response.push_str(&self.received.line("Received"));
@@ -266,15 +300,23 @@ fn refused_upgrade(status: u16) -> bool {
 }
 
 /// Whether a header's value is a token by convention (see [`TOKEN_CARRYING_HEADERS`] and
-/// [`BINARY_METADATA_SUFFIX`]). Matched on visible ASCII, case-insensitively, as the shared
-/// credential-header list matches names.
+/// [`BINARY_METADATA_SUFFIX`]).
 fn carries_token(name: &str) -> bool {
-    let visible: String = name
-        .chars()
+    TOKEN_CARRYING_HEADERS.contains(&visible_name(name).as_str()) || is_binary_metadata(name)
+}
+
+/// Whether a header is gRPC binary metadata (see [`BINARY_METADATA_SUFFIX`]).
+fn is_binary_metadata(name: &str) -> bool {
+    visible_name(name).ends_with(BINARY_METADATA_SUFFIX)
+}
+
+/// A header name's visible ASCII, lowercased: matched as the shared credential-header list
+/// matches names, so padding cannot hide a header.
+fn visible_name(name: &str) -> String {
+    name.chars()
         .filter(char::is_ascii_graphic)
         .map(|character| character.to_ascii_lowercase())
-        .collect();
-    TOKEN_CARRYING_HEADERS.contains(&visible.as_str()) || visible.ends_with(BINARY_METADATA_SUFFIX)
+        .collect()
 }
 
 /// The body size a refused upgrade's response declared.
