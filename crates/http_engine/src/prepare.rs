@@ -24,6 +24,7 @@ use secrets::{SecretKey, SecretStore};
 use variables::{Binding, DynamicValues, ScopeKind, ScopeStack, resolve, spans};
 
 use crate::body;
+use crate::digest::DigestCredentials;
 use crate::error::TransportError;
 use crate::graphql;
 use crate::pipeline::{PipelineError, Warning, resolve_request};
@@ -50,6 +51,10 @@ pub struct Prepared {
     /// reports the send to the user warns when [`SecretValues::refused_count`] is not
     /// zero, because those values then appear unmasked.
     pub secrets_used: SecretValues,
+    /// The resolved Digest credentials, when Digest applied: nothing was added to the
+    /// request, and `HttpClient` answers the server's 401 challenge with these once.
+    /// Their `Debug` prints the algorithm only.
+    pub(crate) digest: Option<DigestCredentials>,
 }
 
 /// Prepare one send: fetch the secrets it references, resolve its `{{variables}}`, apply
@@ -206,6 +211,7 @@ fn prepare_with_body(
             .auto_headers
             .retain(|header| !settings.is_auto_header_disabled(&header.name));
     }
+    let mut digest = None;
     let mut secret_values: Vec<String> = secrets_fetched
         .into_iter()
         .map(|(_name, value)| value)
@@ -235,6 +241,19 @@ fn prepare_with_body(
                 secret_values.push(token);
             }
             EffectiveAuth::ApiKey { value, .. } => secret_values.push(resolved(value)),
+            EffectiveAuth::Digest {
+                username,
+                password,
+                algorithm,
+            } => {
+                let username = resolved(&Some(username.clone()));
+                let password = resolved(&Some(password.clone()));
+                // The computed `Authorization` value is registered once the challenge
+                // is answered (`client.rs`); the password itself is never sent, but a
+                // server or a typo can still echo it.
+                secret_values.push(password.clone());
+                digest = Some(DigestCredentials::new(username, password, *algorithm));
+            }
             EffectiveAuth::None | EffectiveAuth::Unsupported(_) => {}
         }
     }
@@ -244,6 +263,7 @@ fn prepare_with_body(
         warnings,
         auth,
         secrets_used,
+        digest,
     })
 }
 
@@ -326,6 +346,9 @@ fn auth_field_templates(effective: &EffectiveAuth) -> Vec<String> {
         EffectiveAuth::Basic { username, password } => vec![username.as_ref(), password.as_ref()],
         EffectiveAuth::Bearer { token } => vec![token.as_ref()],
         EffectiveAuth::ApiKey { key, value, .. } => vec![key.as_ref(), value.as_ref()],
+        EffectiveAuth::Digest {
+            username, password, ..
+        } => vec![Some(username), Some(password)],
     };
     fields.into_iter().flatten().cloned().collect()
 }

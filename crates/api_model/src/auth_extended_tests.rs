@@ -161,12 +161,20 @@ fn each_new_kind_round_trips_json() {
             );
         }
 
-        // No signing in this step: the engine sees the kind name and nothing else.
+        // Digest is answered by the engine (S55a); the others are not signed yet, so
+        // the engine sees only their kind name.
         let (effective, _) = effective_auth(&[&auth]);
-        assert_eq!(
-            effective,
-            EffectiveAuth::Unsupported(json!({ "type": kind }))
-        );
+        if kind == "digest" {
+            assert!(
+                matches!(effective, EffectiveAuth::Digest { .. }),
+                "{effective:?}"
+            );
+        } else {
+            assert_eq!(
+                effective,
+                EffectiveAuth::Unsupported(json!({ "type": kind }))
+            );
+        }
     }
 
     // `FIELDS` names every typed field, so no `extra` key can shadow one.

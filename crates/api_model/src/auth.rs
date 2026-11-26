@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use crate::auth_extended::ExtendedKind;
 use crate::postman::{ImportReport, import_auth};
 use crate::{
-    AwsSigV4Auth, DigestAuth, JwtBearerAuth, OAuth2Auth, extra_to_map, map_to_extra, object_tag,
-    serialize_tagged, take_field,
+    AwsSigV4Auth, DigestAlgorithm, DigestAuth, JwtBearerAuth, MASK, OAuth2Auth, extra_to_map,
+    map_to_extra, object_tag, serialize_tagged, take_field,
 };
 
 /// Where an API key is placed on the wire.
@@ -79,7 +79,7 @@ impl Auth {
 }
 
 /// The auth a send ends up using once inheritance resolved.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum EffectiveAuth {
     None,
     Basic {
@@ -94,7 +94,53 @@ pub enum EffectiveAuth {
         value: Option<String>,
         location: Option<ApiKeyLocation>,
     },
+    /// Digest (RFC 7616): nothing is sent until the server's challenge names the realm,
+    /// nonce and qop — the engine answers it with these credentials.
+    Digest {
+        username: String,
+        password: String,
+        algorithm: DigestAlgorithm,
+    },
     Unsupported(serde_json::Value),
+}
+
+impl std::fmt::Debug for EffectiveAuth {
+    /// The derived shape, except that a Digest password prints as the mask: it answers
+    /// a challenge the engine may log around, and must never be readable there.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EffectiveAuth::None => f.write_str("None"),
+            EffectiveAuth::Basic { username, password } => f
+                .debug_struct("Basic")
+                .field("username", username)
+                .field("password", password)
+                .finish(),
+            EffectiveAuth::Bearer { token } => {
+                f.debug_struct("Bearer").field("token", token).finish()
+            }
+            EffectiveAuth::ApiKey {
+                key,
+                value,
+                location,
+            } => f
+                .debug_struct("ApiKey")
+                .field("key", key)
+                .field("value", value)
+                .field("location", location)
+                .finish(),
+            EffectiveAuth::Digest {
+                username,
+                password,
+                algorithm,
+            } => f
+                .debug_struct("Digest")
+                .field("username", username)
+                .field("password", &if password.is_empty() { "" } else { MASK })
+                .field("algorithm", algorithm)
+                .finish(),
+            EffectiveAuth::Unsupported(raw) => f.debug_tuple("Unsupported").field(raw).finish(),
+        }
+    }
 }
 
 /// Which level of the collection tree decided the effective auth. The Auth tab shows this
@@ -160,10 +206,22 @@ pub fn effective_auth(chain: &[&Auth]) -> (EffectiveAuth, AuthSource) {
                     source,
                 );
             }
+            // The challenge supplies realm, nonce and qop (RFC 7616 §3.3): the values a
+            // collection stored for them are never sent in its place.
+            Auth::Digest(digest) => {
+                return (
+                    EffectiveAuth::Digest {
+                        username: digest.username.clone(),
+                        password: digest.password.clone(),
+                        algorithm: digest.algorithm,
+                    },
+                    source,
+                );
+            }
             // `Decision:` nothing signs these kinds yet, so the engine reports them exactly
             // as it reports a raw kind — by name only, which keeps every credential they
             // hold out of the effective auth.
-            Auth::Digest(_) | Auth::OAuth2(_) | Auth::AwsSigV4(_) | Auth::JwtBearer(_) => {
+            Auth::OAuth2(_) | Auth::AwsSigV4(_) | Auth::JwtBearer(_) => {
                 let kind = serde_json::json!({ "type": auth.kind() });
                 return (EffectiveAuth::Unsupported(kind), source);
             }
