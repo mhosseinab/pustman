@@ -16,6 +16,7 @@
 mod export;
 mod feed;
 mod panel;
+pub mod session_entry;
 mod store;
 
 pub use export::export_text;
@@ -56,3 +57,7 @@ pub fn init(cx: &mut App) {
     })
     .detach();
 }
+
+#[cfg(test)]
+#[path = "session_redaction_tests.rs"]
+mod session_redaction_tests;

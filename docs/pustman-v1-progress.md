@@ -140,7 +140,7 @@ Last tag: `release/pustman-v1-3` @ `84cd1c0` (local tag; this session's GitHub p
 | S48 | M2 SIGN-OFF (HUMAN) | done | 0 | | | M2 GO (human, 2026-11-25) at `839d378` |
 | S49 | Declare the M3–M5 dependencies | done | 1 | | | S49 merged |
 | S50 | Protocol request kinds, files, import, New menu, open from tree | in_progress | 0 | | | S50a–S50e; S50a–S50d merged |
-| S51 | Session events, Message log store/view/toolbar, Console entry | in_progress | 0 | | | S51a–S51e; S51a–S51d merged |
+| S51 | Session events, Message log store/view/toolbar, Console entry | done | 1 | | | S51a–S51e merged |
 | S52 | Auth kinds and network model (proxy, client certs, CA) | done | 1 | | | S52a, S52b merged |
 | S53 | GraphQL over the HTTP engine | done | 1 | | | S53 merged |
 | S54 | Server-sent events: parser, streaming, viewer mode | in_progress | 0 | | | S54a–S54c; S54a, S54b merged |
