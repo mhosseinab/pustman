@@ -17,7 +17,9 @@ use crate::request::{Header, ResolvedRequest};
 pub enum AppliedAuth {
     /// The effective auth is explicit no-auth: no credentials were added.
     None,
-    /// Basic, Bearer or API key credentials were added to the request.
+    /// Basic, Bearer or API key credentials were added to the request — or, for Digest,
+    /// the credentials are ready to answer the server's challenge: Digest adds nothing
+    /// before a 401 asks for it (RFC 7616 §3.3), and `HttpClient` answers that once.
     Applied,
     /// Nothing was applied: the auth kind is outside the M1 subset. `kind` is only the
     /// raw value's `"type"` string — the raw object can hold credentials, so it is
@@ -82,6 +84,18 @@ pub fn apply_auth(
                 format!("Basic {}", basic_credentials(&username, &password)),
             );
             AppliedAuth::Applied
+        }
+        // Nothing goes on the wire before the server's challenge: the credentials wait
+        // in `Prepared::digest` (built by `prepare`) for the 401 that asks for them.
+        EffectiveAuth::Digest {
+            username, password, ..
+        } => {
+            let username = resolve(&username);
+            let password = resolve(&password);
+            match incomplete_when_empty("digest", "username", &[&username, &password]) {
+                Some(incomplete) => incomplete,
+                None => AppliedAuth::Applied,
+            }
         }
         EffectiveAuth::Bearer { token } => {
             let token = resolved_field(&resolve, token);
@@ -151,7 +165,7 @@ fn incomplete_when_empty(
 /// Put `name: value` in the headers, replacing what the request carried under that name:
 /// one field per name, since a second `Authorization` is not valid HTTP. The position of
 /// the field the request already had is kept.
-fn set_header(resolved: &mut ResolvedRequest, name: &str, value: String) {
+pub(crate) fn set_header(resolved: &mut ResolvedRequest, name: &str, value: String) {
     let mut placed = false;
     resolved.headers.retain_mut(|header| {
         if !header.name.eq_ignore_ascii_case(name) {

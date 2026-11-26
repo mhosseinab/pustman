@@ -22,6 +22,7 @@ mod client;
 mod cookie_persistence;
 mod cookie_transport;
 mod cookies;
+mod digest;
 mod error;
 pub mod event_source;
 mod file_ref;

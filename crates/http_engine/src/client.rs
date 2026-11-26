@@ -13,6 +13,7 @@ use secrets::{SecretKey, SecretStore};
 use variables::{DynamicValues, ScopeKind, ScopeStack};
 
 use crate::body::resolve_body_files;
+use crate::digest::{self, DigestCredentials, DigestRefusal};
 use crate::error::TransportError;
 use crate::event_stream::OpenStream;
 use crate::graphql::{self, GraphQlError, GraphQlSendInput};
@@ -21,7 +22,7 @@ use crate::pipeline::{PipelineError, Warning};
 use crate::prepare::{Prepared, prepare, prepare_graphql};
 use crate::redacted_url;
 use crate::request::ResolvedRequest;
-use crate::request_auth::AppliedAuth;
+use crate::request_auth::{AppliedAuth, set_header};
 use crate::response::Response;
 use crate::transport::Transport;
 
@@ -334,8 +335,9 @@ impl HttpClient {
     /// the same way, in the same task (REQ-HTTP-05). Everything else — warnings, the auth
     /// outcome, the secret values for redaction — comes back in [`SendOutcome`].
     ///
-    /// Dropping the returned task does not cancel the send and nothing is retried, exactly
-    /// as for [`HttpClient::send`].
+    /// Dropping the returned task does not cancel the send, exactly as for
+    /// [`HttpClient::send`]. The one resend is a Digest auth's answer to the server's 401
+    /// challenge, sent at most once (`answer_digest_challenge`); nothing else is retried.
     pub fn send_request_as(
         &mut self,
         owner: SendOwner,
@@ -475,9 +477,10 @@ impl HttpClient {
                     Ok(prepared) => {
                         let Prepared {
                             mut resolved,
-                            warnings,
-                            auth,
-                            secrets_used,
+                            mut warnings,
+                            mut auth,
+                            mut secrets_used,
+                            digest,
                         } = prepared;
                         if let Some(root) = &workspace_root {
                             resolved.body = match resolve_body_files(resolved.body, root) {
@@ -496,8 +499,33 @@ impl HttpClient {
                         // The resolved request is kept for the outcome: the Console
                         // shows it as it went on the wire (REQ-CON-03).
                         let sent = resolved.clone();
-                        match transport.send(resolved).await {
+                        let exchange = match transport.send(resolved).await {
                             Ok(response) => {
+                                answer_digest_challenge(
+                                    &transport,
+                                    digest.as_ref(),
+                                    sent,
+                                    response,
+                                    &mut secrets_used,
+                                )
+                                .await
+                            }
+                            Err(error) => Err(error),
+                        };
+                        match exchange {
+                            Ok(DigestExchange {
+                                sent,
+                                response,
+                                refusal,
+                            }) => {
+                                // An unanswered challenge is told like any auth that
+                                // added no credential (REQ-HTTP-06): the 401 is shown
+                                // with the reason beside it.
+                                if let Some(refusal) = refusal {
+                                    let kind = refusal.kind();
+                                    warnings.push(Warning::AuthUnsupported { kind: kind.clone() });
+                                    auth = AppliedAuth::Unsupported { kind };
+                                }
                                 stream.hold(&response.body);
                                 if let Some(draft) = &recorded {
                                     draft.record_response(&request, &response, &secrets_used);
@@ -627,9 +655,83 @@ impl HttpClient {
     }
 }
 
+/// What a send left once a Digest challenge was handled: the request that went on the
+/// wire last, its response, and — when a 401 went back unanswered — why.
+struct DigestExchange {
+    sent: ResolvedRequest,
+    response: Response,
+    refusal: Option<DigestRefusal>,
+}
+
+/// Answer a Digest 401 (RFC 7616) exactly once: `sent` drew `response`, and with
+/// `credentials` (a Digest auth) and a 401 the challenge is answered by resending `sent`
+/// with the computed `Authorization`. Whatever that resend draws — a second 401
+/// included — is the send's response; nothing is retried again.
+///
+/// The challenge is not answered — the 401 comes back with the reason — when the 401
+/// followed a redirect (another URL's, perhaps another origin's challenge), when the body
+/// cannot be replayed byte for byte, or when no challenge matches the user's algorithm
+/// with `qop=auth` (`digest::answer`). The computed value and its hash join
+/// `secrets_used` before the resend, so History and the Console mask them.
+async fn answer_digest_challenge(
+    transport: &Arc<dyn Transport>,
+    credentials: Option<&DigestCredentials>,
+    sent: ResolvedRequest,
+    response: Response,
+    secrets_used: &mut SecretValues,
+) -> Result<DigestExchange, TransportError> {
+    let unanswered = |sent, response, refusal| {
+        Ok(DigestExchange {
+            sent,
+            response,
+            refusal,
+        })
+    };
+    let Some(credentials) = credentials else {
+        return unanswered(sent, response, None);
+    };
+    if response.status != 401 {
+        return unanswered(sent, response, None);
+    }
+    let answer = match digest::answer(
+        &response.headers,
+        credentials,
+        &sent.method,
+        digest::request_uri(&sent.url),
+    ) {
+        Ok(answer) => answer,
+        Err(refusal) => return unanswered(sent, response, Some(refusal)),
+    };
+    if !response.redirects.is_empty() {
+        return unanswered(sent, response, Some(DigestRefusal::Redirected));
+    }
+    if !digest::body_is_replayable(&sent.body) {
+        return unanswered(sent, response, Some(DigestRefusal::BodyNotReplayable));
+    }
+    for secret in [answer.authorization.clone(), answer.response] {
+        if !secrets_used.insert(secret) {
+            // Counted in `refused_count`, which the caller reporting the send warns about.
+        }
+    }
+    let mut retry = sent;
+    set_header(&mut retry, "Authorization", answer.authorization);
+    // The first 401 is spent: only the answer's response reaches the user.
+    drop(response);
+    let response = transport.send(retry.clone()).await?;
+    Ok(DigestExchange {
+        sent: retry,
+        response,
+        refusal: None,
+    })
+}
+
 #[cfg(test)]
 #[path = "client_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "digest_retry_tests.rs"]
+mod digest_retry_tests;
 
 #[cfg(test)]
 #[path = "cancel_order_tests.rs"]
